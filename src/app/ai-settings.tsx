@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 import * as WebBrowser from 'expo-web-browser';
 import { useRouter } from 'expo-router';
@@ -14,6 +14,7 @@ import {
   Text,
   TextInput,
   View,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -549,7 +550,7 @@ const styles = StyleSheet.create({
   keyInput: {
     flex: 1,
     fontSize: 14,
-    fontFamily: 'monospace',
+    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
     color: colors.text,
     padding: 0,
   },
@@ -643,7 +644,7 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   footerInfoMono: {
-    fontFamily: 'monospace',
+    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
     color: colors.textSecondary,
   },
   aiStudioLink: {
@@ -712,7 +713,7 @@ const styles = StyleSheet.create({
   },
   modelId: {
     fontSize: 11,
-    fontFamily: 'monospace',
+    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
     color: colors.textMuted,
     marginTop: 2,
   },
@@ -752,7 +753,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.cardHover,
     borderRadius: 8,
     fontSize: 13,
-    fontFamily: 'monospace',
+    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
     color: colors.text,
     borderWidth: 1,
     borderColor: colors.cardBorder,

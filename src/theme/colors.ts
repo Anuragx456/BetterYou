@@ -45,7 +45,7 @@ export const colors = {
   // Typography & Content - Clean, Crisp
   text: '#F9FAFB',
   textSecondary: '#9CA3AF',
-  textMuted: '#6B7280',     // Subtle supporting text
+  textMuted: '#94A3B8',     // Subtle supporting text
   textInverse: '#0A0C10',
 
   // Interactive & Surfaces

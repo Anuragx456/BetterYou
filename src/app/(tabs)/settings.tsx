@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import React, { useCallback } from 'react';
 import {
@@ -8,15 +8,11 @@ import {
   StyleSheet,
   Text,
   View,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFitnessStore } from '../../store/useFitnessStore';
-import {
-  getActiveModelDisplayName,
-  getEffectiveApiKey,
-  isUsingCustomKey,
-  useSettingsStore,
-} from '../../store/useSettingsStore';
+import { useSettingsStore } from '../../store/useSettingsStore';
 import { colors } from '../../theme/colors';
 
 export default function SettingsScreen() {
@@ -26,10 +22,15 @@ export default function SettingsScreen() {
   const resetSettings = useSettingsStore((state) => state.resetSettings);
   const dailyGoals = useFitnessStore((state) => state.dailyGoals);
 
-  const effectiveKey = getEffectiveApiKey();
-  const activeModelTitle = getActiveModelDisplayName();
-  const hasCustom = isUsingCustomKey();
+  const customApiKey = useSettingsStore((state) => state.customApiKey);
+  const selectedModel = useSettingsStore((state) => state.selectedModel);
+  const isCustomModel = useSettingsStore((state) => state.isCustomModel);
+  const customModelName = useSettingsStore((state) => state.customModelName);
+
+  const effectiveKey = customApiKey?.trim() || process.env.EXPO_PUBLIC_GEMINI_API_KEY?.trim() || '';
+  const hasCustom = Boolean(customApiKey?.trim());
   const hasAnyKey = Boolean(effectiveKey);
+  const activeModelTitle = isCustomModel && customModelName ? customModelName : selectedModel;
 
   // Reset all settings
   const handleResetSettings = useCallback(() => {
@@ -176,7 +177,7 @@ export default function SettingsScreen() {
         {/* Footer */}
         <View style={styles.footerContainer}>
           <Text style={styles.footerVersion}>BetterYou v1.0.0 • Obsidian Theme</Text>
-          <Text style={styles.footerSub}>Powered by Google Gemini 3.6 Flash</Text>
+          <Text style={styles.footerSub}>Powered by {activeModelTitle}</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -319,7 +320,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: colors.textSecondary,
-    fontFamily: 'monospace',
+    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
   },
   resetBtn: {
     flexDirection: 'row',

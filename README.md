@@ -1,56 +1,42 @@
-# Welcome to your Expo app 👋
+# BetterYou 🥗🏋️‍♂️🔬
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+BetterYou is an intelligent fitness, nutrition computer vision, and toxicological barcode/ingredient inspection application built with Expo SDK 58, React Native 0.88, and React 19.
 
-## Get started
+## Key Features
 
-1. Install dependencies
+- **Plate AI Vision**: Instant macro estimation (calories, protein, carbs, fats) from meal photos using Google Gemini Vision.
+- **Ingredient Lab**: Forensic toxicological screening for packaged foods, personal care, and Indian market formulations.
+- **Strength & Workout Tracking**: Active session volume tracking, auto-rest timer, and exercise logging.
+- **Obsidian Dark Theme**: High-contrast, accessibility-tuned design system.
+
+## Getting Started
+
+1. Install dependencies using Bun:
 
    ```bash
-   npm install
+   bun install
    ```
 
-2. Start the app
+2. Start the development server:
 
    ```bash
-   npx expo start
+   bunx expo start
    ```
 
-In the output, you'll find options to open the app in a
+3. Quality assurance:
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+   ```bash
+   bunx tsc --noEmit        # Typecheck
+   bunx expo lint           # ESLint
+   bunx expo-doctor         # Configuration & dependency check
+   ```
 
-You can start developing by editing the files inside the **src/app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## Environment Configuration
 
-## Get a fresh project
+Configure your Google Gemini API key in `.env`:
 
-When you're ready, run:
-
-```bash
-npm run reset-project
+```env
+EXPO_PUBLIC_GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
-This command will move the starter code to the **example** directory and create a blank **src/app** directory where you can start developing.
-
-### Other setup steps
-
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Users can also provide their own custom Gemini API keys directly inside the in-app **AI Settings** screen.

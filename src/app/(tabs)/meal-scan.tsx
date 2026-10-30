@@ -1,10 +1,10 @@
 import { AI_NUTRITION_DISCLAIMER, AI_PRIVACY_NOTICE } from '../../constants/disclaimers';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
-import React, { useRef, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -19,6 +19,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ManualMealModal } from '../../components/ManualMealModal';
 import { analyzeMealImage } from '../../services/aiVisionService';
+import { optimizeImageForAiVision } from '../../utils/imageOptimizer';
 import { useFitnessStore } from '../../store/useFitnessStore';
 import { colors } from '../../theme/colors';
 import { MealAnalysisResult } from '../../types';
@@ -32,7 +33,17 @@ const PORTION_PRESETS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
 export default function MealScanScreen() {
   const router = useRouter();
+  const [isFocused, setIsFocused] = useState<boolean>(true);
   const addMeal = useFitnessStore((state) => state.addMeal);
+
+  useFocusEffect(
+    useCallback(() => {
+      setIsFocused(true);
+      return () => {
+        setIsFocused(false);
+      };
+    }, [])
+  );
 
   // Camera permissions
   const [permission, requestPermission] = useCameraPermissions();
@@ -50,14 +61,19 @@ export default function MealScanScreen() {
 
   // Trigger AI analysis on a chosen image
   const processImageForAnalysis = async (uri: string, base64: string | undefined) => {
-    const persistentUri = base64 ? (base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`) : uri;
-    setCapturedImageUri(persistentUri);
+    // Store only the lightweight local file URI to prevent SQLite CursorWindow bloat in AsyncStorage
+    setCapturedImageUri(uri);
     setStage('analyzing');
     setPortionMultiplier(1.0);
 
     try {
-      // Analyze with Gemini Vision or mock fallback
-      const result = await analyzeMealImage(base64 || uri);
+      let finalBase64 = base64;
+      if (!finalBase64 && uri) {
+        const opt = await optimizeImageForAiVision(uri, 1024);
+        finalBase64 = opt.base64;
+      }
+      // Analyze with Gemini Vision using optimized ephemeral base64 or mock fallback
+      const result = await analyzeMealImage(finalBase64 || '');
       setAiResult(result);
       setStage('verifying');
     } catch (err: unknown) {
@@ -74,19 +90,28 @@ export default function MealScanScreen() {
   // Capture from CameraView
   const handleCapturePhoto = async () => {
     if (!cameraRef.current) {
-      // If camera ref is not mounted (e.g. simulator/web fallback), offer sample
-      handleSimulateSampleMeal();
+      Alert.alert(
+        'Camera Unavailable',
+        'Camera is not ready or unavailable on this device. Please select a photo from your gallery or log meal manually.',
+        [
+          { text: 'Gallery', onPress: handlePickFromGallery },
+          { text: 'Manual Entry', onPress: () => setIsTypeModalVisible(true) },
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      );
       return;
     }
 
     try {
       const photo = await cameraRef.current.takePictureAsync({
-        base64: true,
-        quality: 0.75,
+        quality: 0.8,
       });
 
       if (photo?.uri) {
-        await processImageForAnalysis(photo.uri, photo.base64);
+        setCapturedImageUri(photo.uri);
+        setStage('analyzing');
+        const optimized = await optimizeImageForAiVision(photo.uri, 1024);
+        await processImageForAnalysis(optimized.uri || photo.uri, optimized.base64);
       }
     } catch (err: unknown) {
       console.warn('Camera capture error, offering demo sample:', err);
@@ -101,13 +126,15 @@ export default function MealScanScreen() {
         mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [4, 3],
-        quality: 0.75,
-        base64: true,
+        quality: 0.8,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
-        await processImageForAnalysis(asset.uri, asset.base64 ?? undefined);
+        setCapturedImageUri(asset.uri);
+        setStage('analyzing');
+        const optimized = await optimizeImageForAiVision(asset.uri, 1024);
+        await processImageForAnalysis(optimized.uri || asset.uri, optimized.base64);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -121,8 +148,8 @@ export default function MealScanScreen() {
     setStage('analyzing');
     setPortionMultiplier(1.0);
 
-    // Call AI vision service with mock trigger
-    const result = await analyzeMealImage('');
+    // Call AI vision service with explicit demo flag
+    const result = await analyzeMealImage('demo_sample', { isExplicitDemo: true });
     setAiResult(result);
     setStage('verifying');
   };
@@ -473,12 +500,14 @@ export default function MealScanScreen() {
   // -------------------------------------------------------------
   return (
     <View style={styles.cameraContainer}>
-      <CameraView
-        ref={cameraRef}
-        style={StyleSheet.absoluteFill}
-        facing={facing}
-        enableTorch={enableTorch}
-      />
+      {isFocused && (
+        <CameraView
+          ref={cameraRef}
+          style={StyleSheet.absoluteFill}
+          facing={facing}
+          enableTorch={enableTorch}
+        />
+      )}
 
       {/* Reticle Overlay */}
       <SafeAreaView style={styles.overlayContainer}>

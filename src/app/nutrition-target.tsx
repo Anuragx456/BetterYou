@@ -1,6 +1,6 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Keyboard,
@@ -10,6 +10,7 @@ import {
   Text,
   TextInput,
   View,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFitnessStore } from '../store/useFitnessStore';
@@ -65,6 +66,15 @@ export default function NutritionTargetScreen() {
     dailyGoals?.fatTargetGrams ? String(dailyGoals.fatTargetGrams) : '65'
   );
   const [feedback, setFeedback] = useState<string | null>(null);
+  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (feedbackTimerRef.current) {
+        clearTimeout(feedbackTimerRef.current);
+      }
+    };
+  }, []);
 
   // Smart Calculator Inputs
   const [weightInput, setWeightInput] = useState<string>('72');
@@ -131,7 +141,8 @@ export default function NutritionTargetScreen() {
     });
 
     setFeedback(`Applied smart targets: ${calories.toLocaleString()} kcal & tailored macros!`);
-    setTimeout(() => setFeedback(null), 3000);
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    feedbackTimerRef.current = setTimeout(() => setFeedback(null), 3000);
   }, [suggestedNutrition, updateDailyGoals]);
 
   const handleSaveGoals = useCallback(
@@ -162,7 +173,8 @@ export default function NutritionTargetScreen() {
       setCarbsInput(String(carbs));
       setFatInput(String(fat));
       setFeedback(`Target updated to ${cals.toLocaleString()} kcal/day`);
-      setTimeout(() => setFeedback(null), 2500);
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    feedbackTimerRef.current = setTimeout(() => setFeedback(null), 2500);
     },
     [calorieInput, proteinInput, carbsInput, fatInput, dailyGoals, updateDailyGoals]
   );
@@ -593,7 +605,7 @@ const styles = StyleSheet.create({
     fontSize: 26,
     fontWeight: '700',
     color: colors.text,
-    fontFamily: 'monospace',
+    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
     marginTop: 2,
   },
   heroUnit: {
@@ -664,7 +676,7 @@ const styles = StyleSheet.create({
   },
   numberInput: {
     fontSize: 18,
-    fontFamily: 'monospace',
+    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
     fontWeight: '700',
     color: colors.text,
     minWidth: 54,
@@ -810,7 +822,7 @@ const styles = StyleSheet.create({
   recCals: {
     fontSize: 20,
     fontWeight: '700',
-    fontFamily: 'monospace',
+    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
     color: colors.calories,
   },
   recUnit: {
@@ -834,7 +846,7 @@ const styles = StyleSheet.create({
   macroPillVal: {
     fontSize: 14,
     fontWeight: '700',
-    fontFamily: 'monospace',
+    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
   },
   macroPillTag: {
     fontSize: 9,
@@ -891,7 +903,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: colors.textSecondary,
-    fontFamily: 'monospace',
+    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
   },
   presetChipTextActive: {
     color: colors.calories,
@@ -918,7 +930,7 @@ const styles = StyleSheet.create({
     borderColor: colors.cardBorder,
     color: colors.text,
     fontSize: 14,
-    fontFamily: 'monospace',
+    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
     fontWeight: '600',
     paddingVertical: 10,
     textAlign: 'center',

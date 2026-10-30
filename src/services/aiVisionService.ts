@@ -10,7 +10,7 @@ import {
   ToxicityReport,
 } from '../types';
 import { getEffectiveApiKey, getEffectiveModel } from '../store/useSettingsStore';
-import { recalculateToxicityReport } from './barcodeService';
+import { recalculateToxicityReport, recomputeReportScoreAndRisk } from './barcodeService';
 
 // In-memory Scan Cache (Fingerprint -> { report, timestamp })
 const toxicityScanCache = new Map<string, { report: ToxicityReport; timestamp: number }>();
@@ -36,6 +36,9 @@ function parseBase64Image(input: string): { mimeType: string; base64Data: string
       base64Data: match[2],
     };
   }
+  if (input.startsWith('file://') || input.startsWith('http://') || input.startsWith('https://')) {
+    throw new Error('Image data was provided as a raw file URI instead of base64 data.');
+  }
   return {
     mimeType: 'image/jpeg',
     base64Data: input,
@@ -43,7 +46,7 @@ function parseBase64Image(input: string): { mimeType: string; base64Data: string
 }
 
 /**
- * Strips markdown code blocks (```json ... ```) from LLM output
+ * Strips markdown code blocks (```json ... ```) and extracts valid JSON objects
  */
 function extractJsonString(rawText: string): string {
   const trimmed = rawText.trim();
@@ -51,6 +54,12 @@ function extractJsonString(rawText: string): string {
   const match = trimmed.match(codeBlockRegex);
   if (match && match[1]) {
     return match[1].trim();
+  }
+  // Fallback: extract outermost JSON boundaries { ... }
+  const start = trimmed.indexOf('{');
+  const end = trimmed.lastIndexOf('}');
+  if (start !== -1 && end > start) {
+    return trimmed.slice(start, end + 1).trim();
   }
   return trimmed;
 }
@@ -83,6 +92,7 @@ async function callGeminiVision(prompt: string, base64Image: string): Promise<{ 
     generationConfig: {
       responseMimeType: 'application/json',
       temperature: 0.0,
+      maxOutputTokens: 1024,
     },
   };
 
@@ -90,6 +100,9 @@ async function callGeminiVision(prompt: string, base64Image: string): Promise<{ 
   const fallbackCandidates = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
   const modelsToTry = [chosenModel, ...fallbackCandidates.filter((m) => m !== chosenModel)];
   let lastError: Error | null = null;
+
+  // Serialize payload once to avoid repetitive heap allocation on model fallback retries
+  const serializedBody = JSON.stringify(requestBody);
 
   for (const model of modelsToTry) {
     const controller = new AbortController();
@@ -104,12 +117,15 @@ async function callGeminiVision(prompt: string, base64Image: string): Promise<{ 
           'Content-Type': 'application/json',
           'x-goog-api-key': apiKey,
         },
-        body: JSON.stringify(requestBody),
+        body: serializedBody,
         signal: controller.signal,
       });
 
       if (!response.ok) {
         const errorText = await response.text();
+        if (response.status === 400 || response.status === 401 || response.status === 403) {
+          throw new Error(`Gemini API Auth/Request Error (${response.status}): ${errorText}`);
+        }
         throw new Error(`Gemini ${model} HTTP ${response.status}: ${errorText}`);
       }
 
@@ -124,7 +140,8 @@ async function callGeminiVision(prompt: string, base64Image: string): Promise<{ 
       }
 
       const result = (await response.json()) as GeminiResponse;
-      const candidateText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+      const parts = result.candidates?.[0]?.content?.parts || [];
+      const candidateText = parts.map((p) => p.text || '').join('').trim();
 
       if (!candidateText) {
         throw new Error(`Gemini ${model} returned empty text.`);
@@ -133,7 +150,10 @@ async function callGeminiVision(prompt: string, base64Image: string): Promise<{ 
       return { text: extractJsonString(candidateText), usedModel: model };
     } catch (err: unknown) {
       lastError = err instanceof Error ? err : new Error(String(err));
-      console.warn(`[aiVisionService] Model ${model} failed, trying next: ${lastError.message}`);
+      console.warn(`[aiVisionService] Model ${model} failed: ${lastError.message}`);
+      if (lastError.message.includes('Auth/Request Error')) {
+        break;
+      }
     } finally {
       clearTimeout(timeoutId);
     }
@@ -422,12 +442,18 @@ interface RawToxicityAiOutput {
 /**
  * Analyzes a meal photo using Gemini Vision to extract calorie & macro breakdown
  */
-export async function analyzeMealImage(base64Image: string): Promise<MealAnalysisResult> {
-  // If base64Image is empty or a mock trigger, return mock result immediately
-  if (!base64Image || (base64Image.length < 50 && !base64Image.startsWith('data:') && !base64Image.startsWith('/9j/'))) {
-    const mock = getMockMealAnalysis();
-    mock.generatedBy = 'offline-demo-mock';
-    return mock;
+export async function analyzeMealImage(
+  base64Image: string,
+  options?: { isExplicitDemo?: boolean }
+): Promise<MealAnalysisResult> {
+  const isDemo = options?.isExplicitDemo || base64Image === 'demo_sample';
+  if (!base64Image || isDemo) {
+    if (isDemo) {
+      const mock = getMockMealAnalysis();
+      mock.generatedBy = 'offline-demo-mock';
+      return mock;
+    }
+    throw new Error('No image data was provided for meal analysis. Please take a photo or choose from gallery.');
   }
 
   const prompt = `You are an elite sports nutritionist and computer vision AI.
@@ -476,7 +502,9 @@ Return ONLY a valid JSON object matching this exact schema:
     console.warn(`[aiVisionService] analyzeMealImage error: ${message}`);
     const effectiveKey = getEffectiveApiKey();
     if (!effectiveKey) {
-      return getMockMealAnalysis();
+      const mock = getMockMealAnalysis();
+      mock.generatedBy = 'offline-demo-mock';
+      return mock;
     }
     throw new Error(`Meal Vision Analysis Failed (${message}). Please try taking another photo.`);
   }
@@ -485,17 +513,18 @@ Return ONLY a valid JSON object matching this exact schema:
 /**
  * Analyzes any product package or ingredient label photo from an Indian Supermarket via OCR + deterministic toxicological evaluation
  */
-export async function analyzeIngredientsImage(base64Image: string): Promise<ToxicityReport> {
-  // If base64Image is empty or a short demo preset keyword, return instant mock
-  if (
-    !base64Image ||
-    (base64Image.length < 50 &&
-      !base64Image.startsWith('data:') &&
-      !base64Image.startsWith('/9j/'))
-  ) {
-    const demoReport = getMockToxicityReport(base64Image);
-    demoReport.generatedBy = 'offline-demo-mock';
-    return demoReport;
+export async function analyzeIngredientsImage(
+  base64Image: string,
+  options?: { isExplicitDemo?: boolean }
+): Promise<ToxicityReport> {
+  const isDemo = options?.isExplicitDemo || (base64Image.length > 0 && base64Image.length < 50 && !base64Image.startsWith('data:') && !base64Image.startsWith('/9j/'));
+  if (!base64Image || isDemo) {
+    if (isDemo) {
+      const demoReport = getMockToxicityReport(base64Image);
+      demoReport.generatedBy = 'offline-demo-mock';
+      return demoReport;
+    }
+    throw new Error('No image data was provided for ingredient analysis. Please take a photo or choose from gallery.');
   }
 
   const prompt = `You are an elite forensic toxicologist, biochemist, and Indian supermarket consumer safety expert.
@@ -560,7 +589,7 @@ Return ONLY a valid JSON object matching this exact schema:
     // 2. Deterministic Scoring Grounding
     // Instead of letting LLMs invent fluctuating random scores on each scan,
     // we pass the OCR ingredients into our verified toxicological engine
-    const baseReport = recalculateToxicityReport(
+    let baseReport = recalculateToxicityReport(
       detectedName,
       detectedIngredients,
       {
@@ -578,20 +607,29 @@ Return ONLY a valid JSON object matching this exact schema:
 
     // Merge any additional Gemini-flagged additives that have specific clinical descriptions
     if (Array.isArray(parsed.harmfulIngredients)) {
-      const existingNames = new Set(baseReport.harmfulIngredients.map((a) => a.name.toLowerCase()));
+      const normalizeAdditiveName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const existingNames = new Set(baseReport.harmfulIngredients.map((a) => normalizeAdditiveName(a.name)));
       for (const item of parsed.harmfulIngredients) {
-        if (item.name && !existingNames.has(item.name.toLowerCase())) {
-          baseReport.harmfulIngredients.push({
-            name: item.name,
-            category: item.category || 'Consumer Chemical',
-            healthImpact: item.healthImpact || 'Potential adverse health effects with chronic exposure.',
-            severity:
-              item.severity === 'high' || item.severity === 'moderate' || item.severity === 'low'
-                ? item.severity
-                : 'moderate',
-          });
+        if (item.name) {
+          const norm = normalizeAdditiveName(item.name);
+          const alreadyExists = Array.from(existingNames).some(
+            (ex) => ex.includes(norm) || norm.includes(ex)
+          );
+          if (!alreadyExists) {
+            existingNames.add(norm);
+            baseReport.harmfulIngredients.push({
+              name: item.name,
+              category: item.category || 'Consumer Chemical',
+              healthImpact: item.healthImpact || 'Potential adverse health effects with chronic exposure.',
+              severity:
+                item.severity === 'high' || item.severity === 'moderate' || item.severity === 'low'
+                  ? item.severity
+                  : 'moderate',
+            });
+          }
         }
       }
+      baseReport = recomputeReportScoreAndRisk(baseReport);
     }
 
     // Prefer LLM contextual alert if provided, otherwise keep rule-based alert
@@ -646,6 +684,7 @@ async function callGeminiText(prompt: string): Promise<{ text: string; usedModel
     generationConfig: {
       responseMimeType: 'application/json',
       temperature: 0.1,
+      maxOutputTokens: 1024,
     },
   };
 
@@ -653,6 +692,8 @@ async function callGeminiText(prompt: string): Promise<{ text: string; usedModel
   const fallbackCandidates = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
   const modelsToTry = [chosenModel, ...fallbackCandidates.filter((m) => m !== chosenModel)];
   let lastError: Error | null = null;
+
+  const serializedBody = JSON.stringify(requestBody);
 
   for (const model of modelsToTry) {
     const controller = new AbortController();
@@ -666,12 +707,15 @@ async function callGeminiText(prompt: string): Promise<{ text: string; usedModel
           'Content-Type': 'application/json',
           'x-goog-api-key': apiKey,
         },
-        body: JSON.stringify(requestBody),
+        body: serializedBody,
         signal: controller.signal,
       });
 
       if (!response.ok) {
         const errorText = await response.text();
+        if (response.status === 400 || response.status === 401 || response.status === 403) {
+          throw new Error(`Gemini API Auth/Request Error (${response.status}): ${errorText}`);
+        }
         throw new Error(`Gemini ${model} HTTP ${response.status}: ${errorText}`);
       }
 
@@ -686,7 +730,8 @@ async function callGeminiText(prompt: string): Promise<{ text: string; usedModel
       }
 
       const result = (await response.json()) as GeminiResponse;
-      const candidateText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+      const parts = result.candidates?.[0]?.content?.parts || [];
+      const candidateText = parts.map((p) => p.text || '').join('').trim();
 
       if (!candidateText) {
         throw new Error(`Gemini ${model} returned empty text.`);
@@ -823,7 +868,7 @@ export async function analyzeProductText(
 
   // If user supplied both name and ingredients, calculate via deterministic engine first
   if (rawIngredients.length > 0) {
-    const baseReport = recalculateToxicityReport(cleanName, rawIngredients);
+    let baseReport = recalculateToxicityReport(cleanName, rawIngredients);
     baseReport.generatedBy = 'manual-input-recalculation';
 
     // If Gemini key is available, enhance with forensic prompt
@@ -921,7 +966,7 @@ Return ONLY a valid JSON object matching this exact schema:
         ? parsed.allIngredients.map((s) => s.trim()).filter(Boolean)
         : (parsed.harmfulIngredients || []).map((h) => h.name?.trim() || '').filter(Boolean);
 
-    const baseReport = recalculateToxicityReport(
+    let baseReport = recalculateToxicityReport(
       detectedName,
       detectedIngredients,
       {
@@ -938,20 +983,29 @@ Return ONLY a valid JSON object matching this exact schema:
     );
 
     if (Array.isArray(parsed.harmfulIngredients)) {
-      const existingNames = new Set(baseReport.harmfulIngredients.map((a) => a.name.toLowerCase()));
+      const normalizeAdditiveName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const existingNames = new Set(baseReport.harmfulIngredients.map((a) => normalizeAdditiveName(a.name)));
       for (const item of parsed.harmfulIngredients) {
-        if (item.name && !existingNames.has(item.name.toLowerCase())) {
-          baseReport.harmfulIngredients.push({
-            name: item.name,
-            category: item.category || 'Consumer Chemical',
-            healthImpact: item.healthImpact || 'Potential adverse health effects with chronic exposure.',
-            severity:
-              item.severity === 'high' || item.severity === 'moderate' || item.severity === 'low'
-                ? item.severity
-                : 'moderate',
-          });
+        if (item.name) {
+          const norm = normalizeAdditiveName(item.name);
+          const alreadyExists = Array.from(existingNames).some(
+            (ex) => ex.includes(norm) || norm.includes(ex)
+          );
+          if (!alreadyExists) {
+            existingNames.add(norm);
+            baseReport.harmfulIngredients.push({
+              name: item.name,
+              category: item.category || 'Consumer Chemical',
+              healthImpact: item.healthImpact || 'Potential adverse health effects with chronic exposure.',
+              severity:
+                item.severity === 'high' || item.severity === 'moderate' || item.severity === 'low'
+                  ? item.severity
+                  : 'moderate',
+            });
+          }
         }
       }
+      baseReport = recomputeReportScoreAndRisk(baseReport);
     }
 
     if (parsed.indianMarketAlert) baseReport.indianMarketAlert = parsed.indianMarketAlert;

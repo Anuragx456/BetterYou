@@ -1,4 +1,5 @@
 import { safeAsyncStorage } from '../utils/storage';
+import { getLocalDateString, getLocalDayDifference } from '../utils/date';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import {
@@ -80,6 +81,8 @@ export function calculateWorkoutVolume(exercises: ExerciseItem[]): number {
  * Safe AsyncStorage adapter that prevents crashes in headless CLI or SSR environments
  */
 
+const ACTIVE_WORKOUT_STORAGE_KEY = 'betteryou-active-workout';
+
 export const useFitnessStore = create<FitnessState>()(
   persist(
     (set, get) => ({
@@ -98,7 +101,7 @@ export const useFitnessStore = create<FitnessState>()(
           timestamp: new Date().toISOString(),
         };
         set((state) => ({
-          meals: [newMeal, ...state.meals],
+          meals: [newMeal, ...state.meals].slice(0, 300),
         }));
       },
 
@@ -359,7 +362,7 @@ export const useFitnessStore = create<FitnessState>()(
           totalVolumeKg: calculateWorkoutVolume(current.exercises),
         };
 
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = getLocalDateString();
         const lastActive = get().lastActiveWorkoutDate;
         let newStreak = get().streakDays || 0;
 
@@ -368,9 +371,7 @@ export const useFitnessStore = create<FitnessState>()(
         } else if (lastActive === todayStr) {
           // Already worked out today: streak remains steady
         } else {
-          const lastDate = new Date(lastActive + 'T00:00:00Z');
-          const currDate = new Date(todayStr + 'T00:00:00Z');
-          const diffDays = Math.round((currDate.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
+          const diffDays = getLocalDayDifference(lastActive, todayStr);
           if (diffDays === 1) {
             newStreak += 1;
           } else {
@@ -381,7 +382,7 @@ export const useFitnessStore = create<FitnessState>()(
 
         set((state) => ({
           activeWorkout: null,
-          workouts: [completedWorkout, ...state.workouts],
+          workouts: [completedWorkout, ...state.workouts].slice(0, 150),
           streakDays: newStreak,
           lastActiveWorkoutDate: todayStr,
         }));
@@ -395,7 +396,7 @@ export const useFitnessStore = create<FitnessState>()(
 
       addWorkout: (workout) => {
         set((state) => ({
-          workouts: [workout, ...state.workouts],
+          workouts: [workout, ...state.workouts].slice(0, 150),
         }));
       },
 
@@ -412,7 +413,7 @@ export const useFitnessStore = create<FitnessState>()(
           scannedAt: new Date().toISOString(),
         };
         set((state) => ({
-          scannedProducts: [newScanned, ...state.scannedProducts],
+          scannedProducts: [newScanned, ...state.scannedProducts].slice(0, 100),
         }));
       },
 
@@ -431,32 +432,84 @@ export const useFitnessStore = create<FitnessState>()(
       },
 
       clearAllData: () => {
+        safeAsyncStorage.removeItem(ACTIVE_WORKOUT_STORAGE_KEY);
         set({
           meals: [],
           workouts: [],
           scannedProducts: [],
           activeWorkout: null,
           dailyGoals: DEFAULT_GOALS,
+          streakDays: 0,
+          lastActiveWorkoutDate: undefined,
         });
       },
     }),
     {
       name: 'betteryou-fitness-storage',
       storage: createJSONStorage(() => safeAsyncStorage),
+      partialize: (state) => ({
+        meals: state.meals,
+        workouts: state.workouts,
+        scannedProducts: state.scannedProducts,
+        dailyGoals: state.dailyGoals,
+        streakDays: state.streakDays,
+        lastActiveWorkoutDate: state.lastActiveWorkoutDate,
+      }),
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        // Restore active workout from dedicated lightweight partition
+        Promise.resolve(safeAsyncStorage.getItem(ACTIVE_WORKOUT_STORAGE_KEY)).then((stored) => {
+          if (stored) {
+            try {
+              const parsed = JSON.parse(stored) as WorkoutSession;
+              if (parsed && parsed.id) {
+                useFitnessStore.setState({ activeWorkout: parsed });
+                return;
+              }
+            } catch {
+              // Ignore invalid storage cache
+            }
+          }
+          // Migration from legacy unified storage if active workout was present
+          if (state.activeWorkout) {
+            safeAsyncStorage.setItem(
+              ACTIVE_WORKOUT_STORAGE_KEY,
+              JSON.stringify(state.activeWorkout)
+            );
+          }
+        });
+      },
     }
   )
 );
+
+// Synchronize active workout mutations to the dedicated lightweight partition
+// so high-frequency set/rep changes never re-serialize historical logs
+let prevActiveWorkout = useFitnessStore.getState().activeWorkout;
+useFitnessStore.subscribe((state) => {
+  if (state.activeWorkout !== prevActiveWorkout) {
+    prevActiveWorkout = state.activeWorkout;
+    if (state.activeWorkout) {
+      safeAsyncStorage.setItem(
+        ACTIVE_WORKOUT_STORAGE_KEY,
+        JSON.stringify(state.activeWorkout)
+      );
+    } else {
+      safeAsyncStorage.removeItem(ACTIVE_WORKOUT_STORAGE_KEY);
+    }
+  }
+});
 
 /**
  * Helper selector to compute total daily macros from meals logged today
  */
 export function getTodayMacroTotals(meals: MealLog[]): MacroBreakdown {
-  const todayDate = new Date().toDateString();
+  const todayStr = getLocalDateString();
 
   return meals
     .filter((meal) => {
       try {
-        return new Date(meal.timestamp).toDateString() === todayDate;
+        return getLocalDateString(meal.timestamp) === todayStr;
       } catch {
         return false;
       }

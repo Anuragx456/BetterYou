@@ -544,7 +544,7 @@ export function detectSupermarketCategory(productName: string, ingredientsText: 
   }
 
   if (
-    /detergent|floor[\s-]cleaner|dishwash|toilet[\s-]cleaner|harpic|lizol|vim\b|surf[\s-]excel|ariel|tide|bleach|hypochlorite|colin|pril|wheel/i.test(
+    /detergent|floor[\s-]cleaner|disinfectant|surface[\s-]cleaner|dishwash|toilet[\s-]cleaner|harpic|lizol|vim\b|surf[\s-]excel|ariel|tide|bleach|hypochlorite|colin|pril|wheel/i.test(
       combined
     )
   ) {
@@ -658,13 +658,18 @@ function getCategoryRegulatoryDetails(category: SupermarketCategory): {
 function computeSafeForTags(
   category: SupermarketCategory,
   score: number,
-  harmfulAdditives: HarmfulAdditive[]
+  harmfulAdditives: HarmfulAdditive[],
+  hasInsufficientData: boolean = false
 ): string[] {
+  if (hasInsufficientData) {
+    return ['Unverified Ingredients'];
+  }
+
   const tags: string[] = [];
   const harmfulNames = harmfulAdditives.map((a) => a.name.toLowerCase()).join(' ');
 
   if (!harmfulNames.includes('paraben')) {
-    tags.push('Paraben-Free');
+    tags.push('No Flagged Parabens');
   }
   if (!harmfulNames.includes('sulfate') && !harmfulNames.includes('sls')) {
     tags.push('Sulfate-Free');
@@ -672,7 +677,8 @@ function computeSafeForTags(
   if (!harmfulNames.includes('mineral oil') && !harmfulNames.includes('paraffin')) {
     tags.push('Zero Mineral Oil');
   }
-  if (!harmfulNames.includes('palm')) {
+  // Only claim Palm Oil-Free on Food & Beverage items where palm oil is an industrial shortcut
+  if (category === 'Food & Beverages' && !harmfulNames.includes('palm')) {
     tags.push('Palm Oil-Free');
   }
   if (category === 'Household & Cleaning' && !harmfulNames.includes('benzalkonium')) {
@@ -681,8 +687,9 @@ function computeSafeForTags(
   if (category === 'Baby Care' && !harmfulNames.includes('talc')) {
     tags.push('Talc-Free');
   }
+  // Factual claim instead of unearned third-party "Certified"
   if (score >= 71) {
-    tags.push('Clean Label Certified');
+    tags.unshift('No Flagged Additives');
   }
 
   return tags.slice(0, 4);
@@ -727,51 +734,71 @@ export function analyzeIngredientsAndAdditives(
   const category = detectSupermarketCategory(productName, ingredientsText);
   const { regulatoryStandard, targetExposure } = getCategoryRegulatoryDetails(category);
 
-  // 3. Compute Safety Score (0-100)
+  // 3. Check for empty or insufficient ingredient data
+  const trimmedIngredients = ingredientsText ? ingredientsText.trim() : '';
+  const hasInsufficientData = trimmedIngredients.length < 5 && additivesTags.length === 0;
+
+  // 4. Compute Safety Score (0-100)
   let score = 100;
 
-  // Food specific deductions
-  if (category === 'Food & Beverages') {
-    if (novaGroup === 4) score -= 30;
-    else if (novaGroup === 3) score -= 15;
-    else if (novaGroup === 2) score -= 5;
-
-    if (nutriscoreGrade === 'e') score -= 20;
-    else if (nutriscoreGrade === 'd') score -= 12;
-    else if (nutriscoreGrade === 'c') score -= 6;
+  if (hasInsufficientData) {
+    // Crucial safety guard: If database or OCR has 0 ingredients, NEVER mark as 100/100 Safe!
+    score = 50;
   } else {
-    // Non-food category base penalty if industrial synthetic base
-    if (category === 'Pest Control') score -= 35;
-    if (category === 'Household & Cleaning') score -= 20;
+    // Food specific deductions
+    if (category === 'Food & Beverages') {
+      if (novaGroup === 4) score -= 30;
+      else if (novaGroup === 3) score -= 15;
+      else if (novaGroup === 2) score -= 5;
+
+      if (nutriscoreGrade === 'e') score -= 20;
+      else if (nutriscoreGrade === 'd') score -= 12;
+      else if (nutriscoreGrade === 'c') score -= 6;
+    } else {
+      // Non-food category base penalty if industrial synthetic base
+      if (category === 'Pest Control') score -= 35;
+      if (category === 'Household & Cleaning') score -= 20;
+    }
+
+    // Additives penalty
+    for (const additive of harmfulIngredients) {
+      if (additive.severity === 'high') score -= 18;
+      else if (additive.severity === 'moderate') score -= 9;
+      else score -= 4;
+    }
   }
 
-  // Additives penalty
-  for (const additive of harmfulIngredients) {
-    if (additive.severity === 'high') score -= 18;
-    else if (additive.severity === 'moderate') score -= 9;
-    else score -= 4;
-  }
-
-  const clampedScore = Math.max(5, Math.min(100, score));
+  const clampedScore = hasInsufficientData ? 50 : Math.max(5, Math.min(100, score));
 
   // Determine risk level
   let riskLevel: RiskLevel = 'Safe';
-  if (clampedScore < 40) {
+  if (hasInsufficientData) {
+    riskLevel = 'Moderate';
+  } else if (clampedScore < 40) {
     riskLevel = 'High Risk';
   } else if (clampedScore < 71) {
     riskLevel = 'Moderate';
   }
 
   // Hazard Rating for non-food items
-  const hazardRating =
-    clampedScore >= 71 ? 'Low Hazard' : clampedScore >= 40 ? 'Moderate Hazard' : 'High Hazard';
+  const hazardRating = hasInsufficientData
+    ? 'Moderate Hazard'
+    : clampedScore >= 71
+    ? 'Low Hazard'
+    : clampedScore >= 40
+    ? 'Moderate Hazard'
+    : 'High Hazard';
 
   // Indian Market Alert
-  const indianMarketAlert = getIndianMarketAlert(category, harmfulIngredients, ingredientsText);
+  const indianMarketAlert = hasInsufficientData
+    ? 'Data Notice: Ingredient text was not found in registry. Please photograph or type ingredients to verify packaging.'
+    : getIndianMarketAlert(category, harmfulIngredients, ingredientsText);
 
   // Clean Summary
   let cleanSummary = '';
-  if (riskLevel === 'Safe') {
+  if (hasInsufficientData) {
+    cleanSummary = `${productName || 'This product'} has insufficient ingredient data recorded. Safety cannot be verified until ingredients are inspected.`;
+  } else if (riskLevel === 'Safe') {
     cleanSummary = `${productName || 'This product'} shows a clean toxicological profile with minimal processing and no high-risk chemicals detected.`;
   } else if (riskLevel === 'Moderate') {
     cleanSummary = `${productName || 'This product'} contains ${harmfulIngredients.length} flagged chemicals or industrial additives. Exercise caution with daily exposure.`;
@@ -779,7 +806,7 @@ export function analyzeIngredientsAndAdditives(
     cleanSummary = `${productName || 'This product'} contains ${harmfulIngredients.length} high-concern chemicals, endocrine disruptors, or industrial toxins. Prolonged or chronic exposure is not recommended.`;
   }
 
-  const safeFor = computeSafeForTags(category, clampedScore, harmfulIngredients);
+  const safeFor = computeSafeForTags(category, clampedScore, harmfulIngredients, hasInsufficientData);
 
   return {
     overallSafetyScore: clampedScore,
@@ -796,6 +823,56 @@ export function analyzeIngredientsAndAdditives(
     novaGroup: category === 'Food & Beverages' ? novaGroup : null,
     nutriscoreGrade: category === 'Food & Beverages' ? nutriscoreGrade : null,
     allIngredients: ingredientsText ? ingredientsText.split(/[,;]\s*/).map((s) => s.trim()) : [],
+  };
+}
+
+/**
+ * Recomputes safety score, risk level, and safe-for tags when harmful additives
+ * are added or modified (e.g. after Gemini multimodal vision merges new additives).
+ */
+export function recomputeReportScoreAndRisk(report: ToxicityReport): ToxicityReport {
+  const category = report.category || 'Food & Beverages';
+  let score = 100;
+
+  if (category === 'Food & Beverages') {
+    if (report.novaGroup === 4) score -= 30;
+    else if (report.novaGroup === 3) score -= 15;
+    else if (report.novaGroup === 2) score -= 5;
+
+    if (report.nutriscoreGrade === 'e') score -= 20;
+    else if (report.nutriscoreGrade === 'd') score -= 12;
+    else if (report.nutriscoreGrade === 'c') score -= 6;
+  } else {
+    if (category === 'Pest Control') score -= 35;
+    if (category === 'Household & Cleaning') score -= 20;
+  }
+
+  for (const additive of report.harmfulIngredients) {
+    if (additive.severity === 'high') score -= 18;
+    else if (additive.severity === 'moderate') score -= 9;
+    else score -= 4;
+  }
+
+  const clampedScore = Math.max(5, Math.min(100, score));
+
+  let riskLevel: RiskLevel = 'Safe';
+  if (clampedScore < 40) {
+    riskLevel = 'High Risk';
+  } else if (clampedScore < 71) {
+    riskLevel = 'Moderate';
+  }
+
+  const hazardRating =
+    clampedScore >= 71 ? 'Low Hazard' : clampedScore >= 40 ? 'Moderate Hazard' : 'High Hazard';
+
+  const safeFor = computeSafeForTags(category, clampedScore, report.harmfulIngredients);
+
+  return {
+    ...report,
+    overallSafetyScore: clampedScore,
+    riskLevel,
+    hazardRating,
+    safeFor,
   };
 }
 
@@ -1130,7 +1207,7 @@ const INDIAN_SUPERMARKET_PRESETS: Record<string, ToxicityReport> = {
     novaGroup: 2,
     nutriscoreGrade: 'a',
     indianMarketAlert: null,
-    safeFor: ['Paraben-Free', 'Palm Oil-Free', 'Zero Mineral Oil', 'Clean Label Certified'],
+    safeFor: ['Paraben-Free', 'Palm Oil-Free', 'Zero Mineral Oil', 'No Flagged Additives'],
     cleanSummary: 'Single-ingredient, unrefined cold-pressed mustard oil rich in monounsaturated fats and natural antioxidants. Completely unadulterated.',
     harmfulIngredients: [],
     allIngredients: ['100% Pure Cold-Pressed Mustard Oil'],
@@ -1138,23 +1215,53 @@ const INDIAN_SUPERMARKET_PRESETS: Record<string, ToxicityReport> = {
 };
 
 /**
+ * In-memory Barcode Cache & In-Flight Request Deduplication Map
+ * Guarantees <1ms response and 0 network requests for repeated scans
+ */
+const barcodeMemoryCache = new Map<string, ToxicityReport>();
+const inFlightLookups = new Map<string, Promise<ToxicityReport>>();
+const negativeBarcodeCache = new Map<string, number>();
+const NEGATIVE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
  * Fetches product metadata and ingredients from OpenFoodFacts and OpenBeautyFacts APIs
  */
 export async function fetchProductByBarcode(barcode: string): Promise<ToxicityReport> {
   const cleanBarcode = barcode.trim();
 
-  // 1. Live Multi-database lookup FIRST (OpenFoodFacts & OpenBeautyFacts)
-  // Ensures real barcodes are never shadowed or misattributed by local static presets
+  // 1. Instant check against verified offline presets (<1ms response time)
+  if (INDIAN_SUPERMARKET_PRESETS[cleanBarcode]) {
+    return { ...INDIAN_SUPERMARKET_PRESETS[cleanBarcode] };
+  }
+
+  // 2. Instant check against in-memory barcode cache (<1ms response time)
+  if (barcodeMemoryCache.has(cleanBarcode)) {
+    return barcodeMemoryCache.get(cleanBarcode)!;
+  }
+
+  // Check negative cache to prevent rapid polling of unregistered barcodes
+  const negativeTimestamp = negativeBarcodeCache.get(cleanBarcode);
+  if (negativeTimestamp && Date.now() - negativeTimestamp < NEGATIVE_CACHE_TTL_MS) {
+    throw new ProductNotFoundError(cleanBarcode);
+  }
+
+  // 3. Deduplicate concurrent in-flight requests for the same barcode
+  if (inFlightLookups.has(cleanBarcode)) {
+    return inFlightLookups.get(cleanBarcode)!;
+  }
+
+  // 4. Parallel multi-database lookup with field filtering (~2KB instead of ~80KB per query)
+  const queryFields = 'product_name,product_name_en,product_name_hi,ingredients_text,ingredients_text_en,additives_tags,nova_group,nutriscore_grade';
   const endpoints = [
-    `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(cleanBarcode)}.json`,
-    `https://world.openbeautyfacts.org/api/v2/product/${encodeURIComponent(cleanBarcode)}.json`,
+    `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(cleanBarcode)}.json?fields=${queryFields}`,
+    `https://world.openbeautyfacts.org/api/v2/product/${encodeURIComponent(cleanBarcode)}.json?fields=${queryFields}`,
   ];
 
-  for (const url of endpoints) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 7000);
+  const fetchEndpoint = async (url: string): Promise<ToxicityReport> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
+    try {
       const response = await fetch(url, {
         method: 'GET',
         headers: {
@@ -1164,54 +1271,65 @@ export async function fetchProductByBarcode(barcode: string): Promise<ToxicityRe
         signal: controller.signal,
       });
 
-      clearTimeout(timeoutId);
-
-      if (response.ok) {
-        const data = (await response.json()) as OpenFactsProductResponse;
-        if (data.status === 1 && data.product) {
-          const prod = data.product;
-          const productName =
-            prod.product_name ||
-            prod.product_name_en ||
-            prod.product_name_hi ||
-            `Product (${cleanBarcode})`;
-          const ingredientsText = prod.ingredients_text || prod.ingredients_text_en || '';
-          const additivesTags = Array.isArray(prod.additives_tags) ? prod.additives_tags : [];
-
-          const rawNova = prod.nova_group;
-          const novaGroup: NovaGroup | null =
-            rawNova === 1 || rawNova === 2 || rawNova === 3 || rawNova === 4 ? rawNova : null;
-
-          const rawNutri = prod.nutriscore_grade?.toLowerCase();
-          const nutriscoreGrade: NutriscoreGrade | null =
-            rawNutri === 'a' || rawNutri === 'b' || rawNutri === 'c' || rawNutri === 'd' || rawNutri === 'e'
-              ? rawNutri
-              : null;
-
-          const report = analyzeIngredientsAndAdditives(
-            productName,
-            ingredientsText,
-            additivesTags,
-            novaGroup,
-            nutriscoreGrade
-          );
-
-          report.barcode = cleanBarcode;
-          return report;
-        }
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
       }
-    } catch {
-      // Continue to next endpoint or fallback
+
+      const data = (await response.json()) as OpenFactsProductResponse;
+      if (data.status === 1 && data.product) {
+        const prod = data.product;
+        const productName =
+          prod.product_name ||
+          prod.product_name_en ||
+          prod.product_name_hi ||
+          `Product (${cleanBarcode})`;
+        const ingredientsText = prod.ingredients_text || prod.ingredients_text_en || '';
+        const additivesTags = Array.isArray(prod.additives_tags) ? prod.additives_tags : [];
+
+        const rawNova = prod.nova_group;
+        const novaGroup: NovaGroup | null =
+          rawNova === 1 || rawNova === 2 || rawNova === 3 || rawNova === 4 ? rawNova : null;
+
+        const rawNutri = prod.nutriscore_grade?.toLowerCase();
+        const nutriscoreGrade: NutriscoreGrade | null =
+          rawNutri === 'a' || rawNutri === 'b' || rawNutri === 'c' || rawNutri === 'd' || rawNutri === 'e'
+            ? rawNutri
+            : null;
+
+        const report = analyzeIngredientsAndAdditives(
+          productName,
+          ingredientsText,
+          additivesTags,
+          novaGroup,
+          nutriscoreGrade
+        );
+
+        report.barcode = cleanBarcode;
+        return report;
+      }
+      throw new Error('Product not found in this database');
+    } finally {
+      clearTimeout(timeoutId);
     }
-  }
+  };
 
-  // 2. Fall back to verified offline preset if available
-  if (INDIAN_SUPERMARKET_PRESETS[cleanBarcode]) {
-    return INDIAN_SUPERMARKET_PRESETS[cleanBarcode];
-  }
+  const lookupPromise = (async () => {
+    try {
+      const report = await Promise.any(endpoints.map((ep) => fetchEndpoint(ep)));
+      barcodeMemoryCache.set(cleanBarcode, report);
+      return report;
+    } catch {
+      // Negative cache to protect against continuous network request loops
+      negativeBarcodeCache.set(cleanBarcode, Date.now());
+      // Fallback: If not found in any database, throw ProductNotFoundError so user can snap photo via OCR
+      throw new ProductNotFoundError(cleanBarcode);
+    } finally {
+      inFlightLookups.delete(cleanBarcode);
+    }
+  })();
 
-  // 3. Fallback: If not found in any database, throw ProductNotFoundError so user can snap photo via OCR
-  throw new ProductNotFoundError(cleanBarcode);
+  inFlightLookups.set(cleanBarcode, lookupPromise);
+  return lookupPromise;
 }
 
 /**

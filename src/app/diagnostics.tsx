@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import {
@@ -9,14 +9,12 @@ import {
   StyleSheet,
   Text,
   View,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-  getActiveModelDisplayName,
-  getEffectiveApiKey,
-  getEffectiveModel,
-  isUsingCustomKey,
   testGeminiModelConnectivity,
+  useSettingsStore,
 } from '../store/useSettingsStore';
 import { colors } from '../theme/colors';
 
@@ -31,10 +29,15 @@ export default function DiagnosticsScreen() {
     testedAt?: string;
   }>({ success: null, message: '' });
 
-  const effectiveKey = getEffectiveApiKey();
-  const effectiveModel = getEffectiveModel();
-  const activeModelTitle = getActiveModelDisplayName();
-  const hasCustom = isUsingCustomKey();
+  const customApiKey = useSettingsStore((state) => state.customApiKey);
+  const selectedModel = useSettingsStore((state) => state.selectedModel);
+  const isCustomModel = useSettingsStore((state) => state.isCustomModel);
+  const customModelName = useSettingsStore((state) => state.customModelName);
+
+  const effectiveKey = customApiKey?.trim() || process.env.EXPO_PUBLIC_GEMINI_API_KEY?.trim() || '';
+  const effectiveModel = isCustomModel && customModelName ? customModelName : selectedModel;
+  const activeModelTitle = effectiveModel;
+  const hasCustom = Boolean(customApiKey?.trim());
   const hasAnyKey = Boolean(effectiveKey);
 
   const handleRunPingTest = useCallback(async () => {
@@ -343,7 +346,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   monoValue: {
-    fontFamily: 'monospace',
+    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
     fontSize: 11,
   },
   pingCardBody: {

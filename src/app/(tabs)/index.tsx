@@ -1,9 +1,10 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
+  FlatList,
   Modal,
   Pressable,
   ScrollView,
@@ -13,15 +14,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ToxicityReportModal } from '../../components/ToxicityReportModal';
+import { getLocalDateString } from '../../utils/date';
 import {
-  getTodayMacroTotals,
   useFitnessStore,
 } from '../../store/useFitnessStore';
-import {
-  getEffectiveApiKey,
-} from '../../store/useSettingsStore';
+import { useSettingsStore } from '../../store/useSettingsStore';
 import { colors } from '../../theme/colors';
-import { MealLog, ScannedProduct } from '../../types';
+import { MacroBreakdown, MealLog, ScannedProduct } from '../../types';
 
 export default function DashboardScreen() {
   const router = useRouter();
@@ -44,31 +43,39 @@ export default function DashboardScreen() {
     ? scannedProducts.find((p) => p.id === selectedProduct.id) || selectedProduct
     : null;
 
-  // Today's date string
-  const todayDateString = new Date().toDateString();
+  // Today's local date string (YYYY-MM-DD)
+  const todayDateString = getLocalDateString();
 
   // Filter today's meals
   const todayMeals = useMemo(() => {
     return meals.filter((meal) => {
       try {
-        return new Date(meal.timestamp).toDateString() === todayDateString;
+        return getLocalDateString(meal.timestamp) === todayDateString;
       } catch {
         return false;
       }
     });
   }, [meals, todayDateString]);
 
-  // Compute today's macro totals
+  // Compute today's macro totals directly from todayMeals in a single pass
   const todayTotals = useMemo(() => {
-    return getTodayMacroTotals(meals);
-  }, [meals]);
+    return todayMeals.reduce<MacroBreakdown>(
+      (acc, meal) => ({
+        calories: acc.calories + meal.calories,
+        protein: acc.protein + meal.protein,
+        carbs: acc.carbs + meal.carbs,
+        fat: acc.fat + meal.fat,
+      }),
+      { calories: 0, protein: 0, carbs: 0, fat: 0 }
+    );
+  }, [todayMeals]);
 
   // Filter today's completed workouts
   const todayWorkouts = useMemo(() => {
     return workouts.filter((w) => {
       try {
         const date = w.completedAt || w.startedAt;
-        return new Date(date).toDateString() === todayDateString;
+        return getLocalDateString(date) === todayDateString;
       } catch {
         return false;
       }
@@ -81,7 +88,7 @@ export default function DashboardScreen() {
   }, [todayWorkouts]);
 
   const todayCaloriesBurned = useMemo(() => {
-    // Estimate ~0.08 kcal burned per kg volume + 5 kcal/min
+    // Estimate ~0.05 kcal burned per kg volume + 5 kcal/min
     return todayWorkouts.reduce((sum, w) => {
       const durationMin = Math.round(w.durationSeconds / 60);
       const volumeKcal = Math.round((w.totalVolumeKg || 0) * 0.05);
@@ -89,24 +96,28 @@ export default function DashboardScreen() {
     }, 0);
   }, [todayWorkouts]);
 
-  // Calorie calculations
-  const calorieTarget = dailyGoals.calorieTarget;
+  // Calorie calculations with positive non-zero fallbacks to avoid NaN
+  const calorieTarget = Math.max(1, dailyGoals?.calorieTarget || 2200);
+  const proteinTarget = Math.max(1, dailyGoals?.proteinTargetGrams || 160);
+  const carbsTarget = Math.max(1, dailyGoals?.carbsTargetGrams || 220);
+  const fatTarget = Math.max(1, dailyGoals?.fatTargetGrams || 65);
+
   const consumedCalories = todayTotals.calories;
   const remainingCalories = Math.max(0, calorieTarget - consumedCalories + todayCaloriesBurned);
-  const calorieProgressPct = Math.min(100, Math.round((consumedCalories / calorieTarget) * 100));
+  const calorieProgressPct = Math.min(100, Math.max(0, Math.round((consumedCalories / calorieTarget) * 100)));
 
-  // Macro progress percentages
+  // Macro progress percentages guarded against NaN
   const proteinPct = Math.min(
     100,
-    Math.round((todayTotals.protein / dailyGoals.proteinTargetGrams) * 100)
+    Math.max(0, Math.round((todayTotals.protein / proteinTarget) * 100))
   );
   const carbsPct = Math.min(
     100,
-    Math.round((todayTotals.carbs / dailyGoals.carbsTargetGrams) * 100)
+    Math.max(0, Math.round((todayTotals.carbs / carbsTarget) * 100))
   );
   const fatPct = Math.min(
     100,
-    Math.round((todayTotals.fat / dailyGoals.fatTargetGrams) * 100)
+    Math.max(0, Math.round((todayTotals.fat / fatTarget) * 100))
   );
 
   const formattedDate = useMemo(() => {
@@ -119,27 +130,43 @@ export default function DashboardScreen() {
 
 
 
-  const effectiveKey = getEffectiveApiKey();
+  const customApiKey = useSettingsStore((state) => state.customApiKey);
+  const effectiveKey = customApiKey?.trim() || process.env.EXPO_PUBLIC_GEMINI_API_KEY?.trim() || '';
   const hasGeminiKey = Boolean(effectiveKey);
 
-  const handleShowAiKeyInfo = () => {
+  const handleShowAiKeyInfo = useCallback(() => {
     router.push('/(tabs)/settings');
-  };
+  }, [router]);
 
-  const handleConfirmDeleteMeal = (meal: MealLog) => {
-    Alert.alert(
-      'Remove Meal',
-      `Delete "${meal.dishName}" from today's log?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => removeMeal(meal.id),
-        },
-      ]
-    );
-  };
+  const handleConfirmDeleteMeal = useCallback(
+    (meal: MealLog) => {
+      Alert.alert(
+        'Remove Meal',
+        `Delete "${meal.dishName}" from today's log?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: () => removeMeal(meal.id),
+          },
+        ]
+      );
+    },
+    [removeMeal]
+  );
+
+  const handleSelectScannedProduct = useCallback((item: ScannedProduct) => {
+    setIsAllScansModalVisible(false);
+    setSelectedProduct(item);
+  }, []);
+
+  const renderScannedItem = useCallback(
+    ({ item }: { item: ScannedProduct }) => (
+      <SavedScanItem item={item} onSelect={handleSelectScannedProduct} />
+    ),
+    [handleSelectScannedProduct]
+  );
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -417,52 +444,14 @@ export default function DashboardScreen() {
             </View>
           ) : (
             <View style={styles.mealsCleanList}>
-              {todayMeals.map((meal, idx) => {
-                const isLast = idx === todayMeals.length - 1;
-                return (
-                  <View
-                    key={meal.id}
-                    style={[styles.mealCleanItem, !isLast && styles.mealCleanItemBorder]}
-                  >
-                    <View style={styles.mealCleanLeft}>
-                      {meal.imageUri ? (
-                        <Image
-                          source={{ uri: meal.imageUri }}
-                          style={styles.mealCleanThumb}
-                          contentFit="cover"
-                        />
-                      ) : null}
-                      <View style={styles.mealCleanDetails}>
-                        <View style={styles.mealCleanNameRow}>
-                          <Text style={styles.mealCleanName} numberOfLines={1}>
-                            {meal.dishName}
-                          </Text>
-                        </View>
-                        <Text style={styles.mealCleanMacros}>
-                          <Text style={styles.mealCleanKcal}>{meal.calories} kcal</Text>
-                          {'  ·  '}
-                          <Text style={{ color: colors.protein }}>{meal.protein}g P</Text>
-                          {'  '}
-                          <Text style={{ color: colors.carbs }}>{meal.carbs}g C</Text>
-                          {'  '}
-                          <Text style={{ color: colors.fat }}>{meal.fat}g F</Text>
-                          {meal.portionMultiplier !== 1 && (
-                            <Text style={styles.mealCleanPortion}>  ·  {meal.portionMultiplier}x</Text>
-                          )}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <Pressable
-                      style={({ pressed }) => [styles.mealDeleteBtn, pressed && styles.pressed]}
-                      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                      onPress={() => handleConfirmDeleteMeal(meal)}
-                    >
-                      <Ionicons name="trash-outline" size={15} color={colors.textMuted} />
-                    </Pressable>
-                  </View>
-                );
-              })}
+              {todayMeals.map((meal, idx) => (
+                <MealListItem
+                  key={meal.id}
+                  meal={meal}
+                  isLast={idx === todayMeals.length - 1}
+                  onDelete={handleConfirmDeleteMeal}
+                />
+              ))}
             </View>
           )}
         </View>
@@ -581,54 +570,16 @@ export default function DashboardScreen() {
             <View style={{ width: 40 }} />
           </View>
 
-          <ScrollView contentContainerStyle={styles.allScansList} showsVerticalScrollIndicator={false}>
-            {scannedProducts.map((item) => {
-              const score = item.report.overallSafetyScore;
-              const badgeColor =
-                score >= 71
-                  ? colors.safetyClean
-                  : score >= 40
-                  ? colors.safetyModerate
-                  : colors.safetyHighRisk;
-
-              return (
-                <Pressable
-                  key={item.id}
-                  style={({ pressed }) => [styles.scannedCard, pressed && styles.pressed]}
-                  onPress={() => {
-                    setIsAllScansModalVisible(false);
-                    setSelectedProduct(item);
-                  }}
-                >
-                  <View style={styles.scannedCardHeader}>
-                    <View style={styles.scannedProductTitleCol}>
-                      <Text style={styles.scannedProductName} numberOfLines={1}>
-                        {item.productName}
-                      </Text>
-                      <View style={styles.scannedMetaRow}>
-                        {item.report.category && (
-                          <View style={styles.scannedCategoryBadge}>
-                            <Text style={styles.scannedCategoryText}>{item.report.category}</Text>
-                          </View>
-                        )}
-                      </View>
-                    </View>
-                    <View
-                      style={[
-                        styles.safetyScoreBadge,
-                        { backgroundColor: `${badgeColor}20`, borderColor: badgeColor },
-                      ]}
-                    >
-                      <Text style={[styles.safetyScoreNumber, { color: badgeColor }]}>{score}</Text>
-                      <Text style={[styles.safetyScoreLabel, { color: badgeColor }]}>
-                        {item.report.riskLevel}
-                      </Text>
-                    </View>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+          <FlatList
+            data={scannedProducts}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.allScansList}
+            showsVerticalScrollIndicator={false}
+            initialNumToRender={10}
+            maxToRenderPerBatch={10}
+            windowSize={5}
+            renderItem={renderScannedItem}
+          />
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
@@ -1200,5 +1151,113 @@ const styles = StyleSheet.create({
     opacity: 0.8,
     transform: [{ scale: 0.98 }],
   },
+});
+
+/* -------------------------------------------------------------
+ * MEMOIZED LIST ITEM SUBCOMPONENTS
+ * ------------------------------------------------------------- */
+
+interface MealListItemProps {
+  meal: MealLog;
+  isLast: boolean;
+  onDelete: (meal: MealLog) => void;
+}
+
+const MealListItem = React.memo(function MealListItem({
+  meal,
+  isLast,
+  onDelete,
+}: MealListItemProps) {
+  return (
+    <View style={[styles.mealCleanItem, !isLast && styles.mealCleanItemBorder]}>
+      <View style={styles.mealCleanLeft}>
+        {meal.imageUri ? (
+          <Image
+            source={{ uri: meal.imageUri }}
+            style={styles.mealCleanThumb}
+            contentFit="cover"
+          />
+        ) : null}
+        <View style={styles.mealCleanDetails}>
+          <View style={styles.mealCleanNameRow}>
+            <Text style={styles.mealCleanName} numberOfLines={1}>
+              {meal.dishName}
+            </Text>
+          </View>
+          <Text style={styles.mealCleanMacros}>
+            <Text style={styles.mealCleanKcal}>{meal.calories} kcal</Text>
+            {'  ·  '}
+            <Text style={{ color: colors.protein }}>{meal.protein}g P</Text>
+            {'  '}
+            <Text style={{ color: colors.carbs }}>{meal.carbs}g C</Text>
+            {'  '}
+            <Text style={{ color: colors.fat }}>{meal.fat}g F</Text>
+            {meal.portionMultiplier !== 1 && (
+              <Text style={styles.mealCleanPortion}>  ·  {meal.portionMultiplier}x</Text>
+            )}
+          </Text>
+        </View>
+      </View>
+
+      <Pressable
+        style={({ pressed }) => [styles.mealDeleteBtn, pressed && styles.pressed]}
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        onPress={() => onDelete(meal)}
+      >
+        <Ionicons name="trash-outline" size={15} color={colors.textMuted} />
+      </Pressable>
+    </View>
+  );
+});
+
+interface SavedScanItemProps {
+  item: ScannedProduct;
+  onSelect: (item: ScannedProduct) => void;
+}
+
+const SavedScanItem = React.memo(function SavedScanItem({
+  item,
+  onSelect,
+}: SavedScanItemProps) {
+  const score = item.report.overallSafetyScore;
+  const badgeColor =
+    score >= 71
+      ? colors.safetyClean
+      : score >= 40
+      ? colors.safetyModerate
+      : colors.safetyHighRisk;
+
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.scannedCard, pressed && styles.pressed]}
+      onPress={() => onSelect(item)}
+    >
+      <View style={styles.scannedCardHeader}>
+        <View style={styles.scannedProductTitleCol}>
+          <Text style={styles.scannedProductName} numberOfLines={1}>
+            {item.productName}
+          </Text>
+          <View style={styles.scannedMetaRow}>
+            {item.report.category && (
+              <View style={styles.scannedCategoryBadge}>
+                <Text style={styles.scannedCategoryText}>{item.report.category}</Text>
+              </View>
+            )}
+          </View>
+        </View>
+        <View
+          style={[
+            styles.safetyScoreBadge,
+            { backgroundColor: `${badgeColor}20`, borderColor: badgeColor },
+          ]}
+        >
+          <Text style={[styles.safetyScoreNumber, { color: badgeColor }]}>{score}</Text>
+          <Text style={[styles.safetyScoreLabel, { color: badgeColor }]}>
+            {item.report.riskLevel}
+          </Text>
+        </View>
+      </View>
+    </Pressable>
+  );
 });
 

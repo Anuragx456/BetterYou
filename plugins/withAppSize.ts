@@ -1,27 +1,35 @@
 import { ConfigPlugin, withGradleProperties, withAppBuildGradle } from "@expo/config-plugins";
 
+interface GradlePropertyEntry {
+  type: string;
+  key?: string;
+  value?: string;
+}
+
 const withAppSize: ConfigPlugin = (config) => {
-  config = withGradleProperties(config, (config) => {
-    const props = config.modResults as any[];
+  config = withGradleProperties(config, (cfg) => {
+    const props = cfg.modResults as GradlePropertyEntry[];
     const upsert = (key: string, value: string) => {
-      const idx = props.findIndex((p: any) => p.type === "property" && p.key === key);
-      if (idx >= 0) props[idx].value = value;
-      else props.push({ type: "property", key, value } as any);
+      const idx = props.findIndex((p) => p.type === "property" && p.key === key);
+      if (idx >= 0) {
+        props[idx].value = value;
+      } else {
+        props.push({ type: "property", key, value });
+      }
     };
     // Include 32-bit ARM for broad Indian budget device compatibility alongside 64-bit
     upsert("reactNativeArchitectures", "arm64-v8a,armeabi-v7a");
     upsert("android.enableMinifyInReleaseBuilds", "true");
     upsert("android.enableShrinkResourcesInReleaseBuilds", "true");
     upsert("android.enablePngCrunchInReleaseBuilds", "true");
-    upsert("android.enableBundleCompression", "true");
     upsert("hermesEnabled", "true");
     upsert("expo.gif.enabled", "false");
-    upsert("expo.webp.enabled", "false");
-    return config;
+    upsert("expo.webp.enabled", "true");
+    return cfg;
   });
 
-  config = withAppBuildGradle(config, (config) => {
-    let contents = config.modResults.contents;
+  config = withAppBuildGradle(config, (cfg) => {
+    let contents = cfg.modResults.contents;
     // Safely inject resConfigs into defaultConfig without brittle versionName assumptions
     if (!contents.includes('resConfigs "en", "hi"')) {
       contents = contents.replace(
@@ -29,8 +37,8 @@ const withAppSize: ConfigPlugin = (config) => {
         'defaultConfig {\n        resConfigs "en", "hi"'
       );
     }
-    config.modResults.contents = contents;
-    return config;
+    cfg.modResults.contents = contents;
+    return cfg;
   });
 
   return config;

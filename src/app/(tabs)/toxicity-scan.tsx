@@ -1,10 +1,10 @@
 import { AI_TOXICITY_DISCLAIMER, AI_PRIVACY_NOTICE } from '../../constants/disclaimers';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
-import React, { useRef, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -20,6 +20,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { EditProductModal } from '../../components/EditProductModal';
 import { ManualProductModal } from '../../components/ManualProductModal';
 import { analyzeIngredientsImage } from '../../services/aiVisionService';
+import { optimizeImageForAiVision } from '../../utils/imageOptimizer';
 import { fetchProductByBarcode, recalculateToxicityReport } from '../../services/barcodeService';
 import { useFitnessStore } from '../../store/useFitnessStore';
 import { colors } from '../../theme/colors';
@@ -112,7 +113,17 @@ const DEMO_LABEL_SAMPLES: DemoLabelSample[] = [
 
 export default function ToxicityScanScreen() {
   const router = useRouter();
+  const [isFocused, setIsFocused] = useState<boolean>(true);
   const addScannedProduct = useFitnessStore((state) => state.addScannedProduct);
+
+  useFocusEffect(
+    useCallback(() => {
+      setIsFocused(true);
+      return () => {
+        setIsFocused(false);
+      };
+    }, [])
+  );
 
   // Camera Permissions
   const [permission, requestPermission] = useCameraPermissions();
@@ -126,6 +137,7 @@ export default function ToxicityScanScreen() {
   const [isSaved, setIsSaved] = useState<boolean>(false);
   const [isEditModalVisible, setIsEditModalVisible] = useState<boolean>(false);
   const [isProcessingBarcode, setIsProcessingBarcode] = useState<boolean>(false);
+  const [barcodeSearchPill, setBarcodeSearchPill] = useState<string | null>(null);
   const [isTypeProductModalVisible, setIsTypeProductModalVisible] = useState<boolean>(false);
 
   // Handle Edit Save
@@ -142,6 +154,7 @@ export default function ToxicityScanScreen() {
     setCapturedImageUri(null);
     setIsSaved(false);
     setIsProcessingBarcode(false);
+    setBarcodeSearchPill(null);
     setScreenState('scanning');
   };
 
@@ -151,17 +164,19 @@ export default function ToxicityScanScreen() {
   const handleBarcodeScanned = async ({ data }: { data: string }) => {
     if (screenState !== 'scanning' || isProcessingBarcode || !data) return;
     setIsProcessingBarcode(true);
+    setBarcodeSearchPill(`Checking barcode: ${data}...`);
 
     try {
-      setScreenState('loading');
       const toxReport = await fetchProductByBarcode(data);
       setReport(toxReport);
+      setBarcodeSearchPill(null);
       setScreenState('report');
     } catch {
-      // If barcode not found in local/global database, silently resume scanning to allow OCR photo capture
-      setScreenState('scanning');
+      // If barcode not found in local/global database, keep scanning live without jarring screen switch
+      setBarcodeSearchPill('Barcode not found in registry. Snap photo to OCR printed label.');
+      setTimeout(() => setBarcodeSearchPill(null), 3500);
     } finally {
-      setTimeout(() => setIsProcessingBarcode(false), 2500);
+      setTimeout(() => setIsProcessingBarcode(false), 3000);
     }
   };
 
@@ -170,21 +185,28 @@ export default function ToxicityScanScreen() {
   // -------------------------------------------------------------
   const handleCaptureLabelPhoto = async () => {
     if (!cameraRef.current) {
-      handleSimulateDemoOCR('hair_oil');
+      Alert.alert(
+        'Camera Unavailable',
+        'Camera is not ready or unavailable on this device. Please select a packaging photo from your gallery or type ingredients manually.',
+        [
+          { text: 'Gallery', onPress: handlePickLabelFromGallery },
+          { text: 'Type Manually', onPress: () => setIsTypeProductModalVisible(true) },
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      );
       return;
     }
 
     try {
       const photo = await cameraRef.current.takePictureAsync({
-        base64: true,
-        quality: 0.75,
+        quality: 0.8,
       });
 
       if (photo?.uri) {
-        const persistentUri = photo.base64 ? `data:image/jpeg;base64,${photo.base64}` : photo.uri;
-        setCapturedImageUri(persistentUri);
+        setCapturedImageUri(photo.uri);
         setScreenState('loading');
-        const toxReport = await analyzeIngredientsImage(photo.base64 || photo.uri);
+        const optimized = await optimizeImageForAiVision(photo.uri, 1024);
+        const toxReport = await analyzeIngredientsImage(optimized.base64 || '');
         setReport(toxReport);
         setScreenState('report');
       }
@@ -209,15 +231,15 @@ export default function ToxicityScanScreen() {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         allowsEditing: true,
-        quality: 0.75,
-        base64: true,
+        quality: 0.8,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
         setCapturedImageUri(asset.uri);
         setScreenState('loading');
-        const toxReport = await analyzeIngredientsImage(asset.base64 || asset.uri);
+        const optimized = await optimizeImageForAiVision(asset.uri, 1024);
+        const toxReport = await analyzeIngredientsImage(optimized.base64 || '');
         setReport(toxReport);
         setScreenState('report');
       }
@@ -232,7 +254,7 @@ export default function ToxicityScanScreen() {
   const handleSimulateDemoOCR = async (categoryHint?: string) => {
     setCapturedImageUri(null);
     setScreenState('loading');
-    const toxReport = await analyzeIngredientsImage(categoryHint || 'hair_oil');
+    const toxReport = await analyzeIngredientsImage(categoryHint || 'hair_oil', { isExplicitDemo: true });
     setReport(toxReport);
     setScreenState('report');
   };
@@ -371,6 +393,26 @@ export default function ToxicityScanScreen() {
           {capturedImageUri && (
             <View style={styles.labelPreviewContainer}>
               <Image source={{ uri: capturedImageUri }} style={styles.labelPreviewImage} contentFit="cover" />
+            </View>
+          )}
+
+          {/* Provenance & Verification Badge */}
+          {report.generatedBy === 'offline-demo-mock' ? (
+            <View style={styles.provenanceDemoBadge}>
+              <Ionicons name="flask-outline" size={13} color={colors.warning} />
+              <Text style={styles.provenanceDemoText}>Simulated Offline Sample (No API Key)</Text>
+            </View>
+          ) : report.barcode ? (
+            <View style={styles.provenanceVerifiedBadge}>
+              <Ionicons name="barcode-outline" size={13} color={colors.primary} />
+              <Text style={styles.provenanceVerifiedText}>Verified Barcode Registry</Text>
+            </View>
+          ) : (
+            <View style={styles.provenanceVerifiedBadge}>
+              <Ionicons name="sparkles" size={13} color={colors.primary} />
+              <Text style={styles.provenanceVerifiedText}>
+                AI Vision Analyzed ({report.generatedBy || 'Multimodal'})
+              </Text>
             </View>
           )}
 
@@ -612,20 +654,22 @@ export default function ToxicityScanScreen() {
   // -------------------------------------------------------------
   return (
     <View style={styles.cameraContainer}>
-      <CameraView
-        ref={cameraRef}
-        style={StyleSheet.absoluteFill}
-        facing="back"
-        enableTorch={enableTorch}
-        barcodeScannerSettings={{
-          barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'qr', 'code128', 'code39'],
-        }}
-        onBarcodeScanned={
-          screenState === 'scanning' && !isProcessingBarcode
-            ? handleBarcodeScanned
-            : undefined
-        }
-      />
+      {isFocused && screenState === 'scanning' && (
+        <CameraView
+          ref={cameraRef}
+          style={StyleSheet.absoluteFill}
+          facing="back"
+          enableTorch={enableTorch}
+          barcodeScannerSettings={{
+            barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'qr', 'code128', 'code39'],
+          }}
+          onBarcodeScanned={
+            !isProcessingBarcode
+              ? handleBarcodeScanned
+              : undefined
+          }
+        />
+      )}
 
       {/* Viewfinder Overlay */}
       <SafeAreaView style={styles.overlayContainer}>
@@ -670,6 +714,16 @@ export default function ToxicityScanScreen() {
               Forensic Label OCR • Groceries, Cosmetics, Hair Oils, Cleaners & Pest Control
             </Text>
           </View>
+
+          {/* Real-time Barcode Feedback Pill */}
+          {barcodeSearchPill && (
+            <View style={styles.barcodeStatusPill}>
+              <Ionicons name="barcode-outline" size={14} color={colors.primary} />
+              <Text style={styles.barcodeStatusText} numberOfLines={2}>
+                {barcodeSearchPill}
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Framing Overlay for Ingredient Label */}
@@ -846,6 +900,26 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.calories,
     letterSpacing: 0.2,
+  },
+  barcodeStatusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    backgroundColor: 'rgba(10, 12, 16, 0.92)',
+    borderRadius: 14,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.35)',
+    maxWidth: SCREEN_WIDTH * 0.9,
+    marginTop: 6,
+  },
+  barcodeStatusText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.text,
+    flexShrink: 1,
   },
 
   // Reticles
@@ -1082,6 +1156,44 @@ const styles = StyleSheet.create({
   },
 
   // Gauge Hero Card
+  provenanceDemoBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.3)',
+    marginBottom: 12,
+  },
+  provenanceDemoText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.warning,
+    letterSpacing: 0.2,
+  },
+  provenanceVerifiedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+    marginBottom: 12,
+  },
+  provenanceVerifiedText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.primary,
+    letterSpacing: 0.2,
+  },
   gaugeHeroCard: {
     backgroundColor: colors.card,
     borderRadius: 22,

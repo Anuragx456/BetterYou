@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import React, { useState } from 'react';
 import {
@@ -176,6 +176,26 @@ export function ToxicityReportModal({
           {product.imageUrl && (
             <View style={styles.imagePreviewBox}>
               <Image source={{ uri: product.imageUrl }} style={styles.imagePreview} contentFit="cover" />
+            </View>
+          )}
+
+          {/* Provenance & Verification Badge */}
+          {report.generatedBy === 'offline-demo-mock' ? (
+            <View style={styles.provenanceDemoBadge}>
+              <Ionicons name="flask-outline" size={13} color={colors.warning} />
+              <Text style={styles.provenanceDemoText}>Simulated Offline Sample (No API Key)</Text>
+            </View>
+          ) : report.barcode ? (
+            <View style={styles.provenanceVerifiedBadge}>
+              <Ionicons name="barcode-outline" size={13} color={colors.primary} />
+              <Text style={styles.provenanceVerifiedText}>Verified Barcode Registry</Text>
+            </View>
+          ) : (
+            <View style={styles.provenanceVerifiedBadge}>
+              <Ionicons name="sparkles" size={13} color={colors.primary} />
+              <Text style={styles.provenanceVerifiedText}>
+                AI Vision Analyzed ({report.generatedBy || 'Multimodal'})
+              </Text>
             </View>
           )}
 
@@ -418,6 +438,44 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   // Gauge Hero Card
+  provenanceDemoBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.3)',
+    marginBottom: 12,
+  },
+  provenanceDemoText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.warning,
+    letterSpacing: 0.2,
+  },
+  provenanceVerifiedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+    marginBottom: 12,
+  },
+  provenanceVerifiedText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.primary,
+    letterSpacing: 0.2,
+  },
   gaugeHeroCard: {
     backgroundColor: colors.card,
     borderRadius: 22,
