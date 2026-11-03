@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { recalculateToxicityReport } from '../services/barcodeService';
+import { getFullImageUri } from '../utils/imageManager';
 import { useFitnessStore } from '../store/useFitnessStore';
 import { colors } from '../theme/colors';
 import {
@@ -173,11 +174,15 @@ export function ToxicityReportModal({
 
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           {/* Captured Label Image Preview if available */}
-          {product.imageUrl && (
+          {product.imageUrl ? (
             <View style={styles.imagePreviewBox}>
-              <Image source={{ uri: product.imageUrl }} style={styles.imagePreview} contentFit="cover" />
+              <Image
+                source={{ uri: getFullImageUri(product.imageUrl) ?? product.imageUrl }}
+                style={styles.imagePreview}
+                contentFit="cover"
+              />
             </View>
-          )}
+          ) : null}
 
           {/* Provenance & Verification Badge */}
           {report.generatedBy === 'offline-demo-mock' ? (

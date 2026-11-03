@@ -1,5 +1,27 @@
 import { safeAsyncStorage } from '../utils/storage';
 import { getLocalDateString, getLocalDayDifference } from '../utils/date';
+import {
+  dbDeleteMeal,
+  dbDeleteScannedProduct,
+  dbDeleteWorkout,
+  dbGetAllMealImagePaths,
+  dbGetAllMeals,
+  dbGetAllProductImagePaths,
+  dbGetAllScannedProducts,
+  dbGetAllWorkouts,
+  dbGetDailyGoals,
+  dbInsertMeal,
+  dbInsertScannedProduct,
+  dbInsertWorkout,
+  dbSetDailyGoals,
+  getDatabase,
+} from '../db/client';
+import { runAsyncStorageToSqliteMigration } from '../db/migration';
+import {
+  cleanupOrphanImages,
+  deletePersistedImage,
+  saveImageToDocuments,
+} from '../utils/imageManager';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import {
@@ -13,21 +35,27 @@ import {
 } from '../types';
 
 export interface FitnessState {
-  // State
+  // In-Memory Cached State (Populated from SQLite)
   meals: MealLog[];
   workouts: WorkoutSession[];
   scannedProducts: ScannedProduct[];
   dailyGoals: DailyGoals;
+  isInitialized: boolean;
+
+  // Active Session / UI State
   activeWorkout: WorkoutSession | null;
   streakDays: number;
   lastActiveWorkoutDate?: string;
 
+  // Lifecycle
+  loadDataFromDb: () => Promise<void>;
+
   // Meal Actions
-  addMeal: (meal: Omit<MealLog, 'id' | 'timestamp'>) => void;
-  removeMeal: (id: string) => void;
+  addMeal: (meal: Omit<MealLog, 'id' | 'timestamp'>) => Promise<MealLog>;
+  removeMeal: (id: string) => Promise<void>;
 
   // Goals Actions
-  updateDailyGoals: (goals: Partial<DailyGoals>) => void;
+  updateDailyGoals: (goals: Partial<DailyGoals>) => Promise<void>;
 
   // Workout Actions
   startWorkout: (templateTitle?: string) => void;
@@ -41,18 +69,18 @@ export interface FitnessState {
     updates: Partial<ExerciseSet>
   ) => void;
   removeSetFromActiveExercise: (exerciseId: string, setId: string) => void;
-  finishActiveWorkout: () => WorkoutSession | null;
+  finishActiveWorkout: () => Promise<WorkoutSession | null>;
   cancelActiveWorkout: () => void;
-  addWorkout: (workout: WorkoutSession) => void;
-  removeWorkout: (id: string) => void;
+  addWorkout: (workout: WorkoutSession) => Promise<void>;
+  removeWorkout: (id: string) => Promise<void>;
 
   // Scanned Products Actions
-  addScannedProduct: (product: Omit<ScannedProduct, 'id' | 'scannedAt'>) => void;
-  updateScannedProduct: (id: string, updates: Partial<Omit<ScannedProduct, 'id'>>) => void;
-  removeScannedProduct: (id: string) => void;
+  addScannedProduct: (product: Omit<ScannedProduct, 'id' | 'scannedAt'>) => Promise<void>;
+  updateScannedProduct: (id: string, updates: Partial<Omit<ScannedProduct, 'id'>>) => Promise<void>;
+  removeScannedProduct: (id: string) => Promise<void>;
 
   // Reset
-  clearAllData: () => void;
+  clearAllData: () => Promise<void>;
 }
 
 const DEFAULT_GOALS: DailyGoals = {
@@ -77,12 +105,6 @@ export function calculateWorkoutVolume(exercises: ExerciseItem[]): number {
   }, 0);
 }
 
-/**
- * Safe AsyncStorage adapter that prevents crashes in headless CLI or SSR environments
- */
-
-const ACTIVE_WORKOUT_STORAGE_KEY = 'betteryou-active-workout';
-
 export const useFitnessStore = create<FitnessState>()(
   persist(
     (set, get) => ({
@@ -90,34 +112,79 @@ export const useFitnessStore = create<FitnessState>()(
       workouts: [],
       scannedProducts: [],
       dailyGoals: DEFAULT_GOALS,
+      isInitialized: false,
       activeWorkout: null,
       streakDays: 0,
       lastActiveWorkoutDate: undefined,
 
-      addMeal: (mealData) => {
-        const newMeal: MealLog = {
+      loadDataFromDb: async () => {
+        try {
+          await getDatabase();
+          // Run one-time idempotent migration if legacy AsyncStorage data exists
+          await runAsyncStorageToSqliteMigration();
+
+          const [dbMeals, dbWorkouts, dbProducts, dbGoals] = await Promise.all([
+            dbGetAllMeals(),
+            dbGetAllWorkouts(),
+            dbGetAllScannedProducts(),
+            dbGetDailyGoals(),
+          ]);
+
+          set({
+            meals: dbMeals,
+            workouts: dbWorkouts,
+            scannedProducts: dbProducts,
+            dailyGoals: dbGoals,
+            isInitialized: true,
+          });
+
+          // Run background orphan image cleanup job
+          Promise.all([dbGetAllMealImagePaths(), dbGetAllProductImagePaths()])
+            .then(([mealPaths, prodPaths]) => {
+              cleanupOrphanImages([...mealPaths, ...prodPaths]).catch(() => {});
+            })
+            .catch(() => {});
+        } catch (err: unknown) {
+          console.warn('[fitnessStore] loadDataFromDb warning:', err);
+        }
+      },
+
+      addMeal: async (mealData) => {
+        let finalImageUri = mealData.imageUri;
+        if (finalImageUri) {
+          try {
+            finalImageUri = await saveImageToDocuments(finalImageUri, 'meals');
+          } catch {
+            // Keep original URI if copy fails
+          }
+        }
+
+        const newMeal = await dbInsertMeal({
           ...mealData,
-          id: `meal_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-          timestamp: new Date().toISOString(),
-        };
+          imageUri: finalImageUri,
+        });
+
         set((state) => ({
           meals: [newMeal, ...state.meals].slice(0, 300),
         }));
+
+        return newMeal;
       },
 
-      removeMeal: (id) => {
+      removeMeal: async (id) => {
+        const target = get().meals.find((m) => m.id === id);
+        if (target?.imageUri) {
+          deletePersistedImage(target.imageUri).catch(() => {});
+        }
+        await dbDeleteMeal(id);
         set((state) => ({
           meals: state.meals.filter((m) => m.id !== id),
         }));
       },
 
-      updateDailyGoals: (goalsUpdate) => {
-        set((state) => ({
-          dailyGoals: {
-            ...state.dailyGoals,
-            ...goalsUpdate,
-          },
-        }));
+      updateDailyGoals: async (goalsUpdate) => {
+        const updated = await dbSetDailyGoals(goalsUpdate);
+        set({ dailyGoals: updated });
       },
 
       startWorkout: (templateTitle = 'Custom Workout') => {
@@ -236,11 +303,11 @@ export const useFitnessStore = create<FitnessState>()(
         if (!current) return;
 
         const newExercise: ExerciseItem = {
-          id: `ex_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          name: exerciseName.trim(),
+          id: `ex_${Date.now()}`,
+          name: exerciseName.trim() || 'Exercise',
           sets: [
             {
-              id: `set_${Date.now()}_1`,
+              id: `s_${Date.now()}_1`,
               setNumber: 1,
               weightKg: 20,
               reps: 10,
@@ -279,15 +346,20 @@ export const useFitnessStore = create<FitnessState>()(
 
         const updatedExercises = current.exercises.map((ex) => {
           if (ex.id !== exerciseId) return ex;
-          const nextSetNumber = ex.sets.length + 1;
+
           const lastSet = ex.sets[ex.sets.length - 1];
+          const newSetNumber = ex.sets.length + 1;
+          const defaultWeight = lastSet ? lastSet.weightKg : 20;
+          const defaultReps = lastSet ? lastSet.reps : 10;
+
           const newSet: ExerciseSet = {
-            id: `set_${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${nextSetNumber}`,
-            setNumber: nextSetNumber,
-            weightKg: lastSet ? lastSet.weightKg : 20,
-            reps: lastSet ? lastSet.reps : 10,
+            id: `s_${Date.now()}_${newSetNumber}`,
+            setNumber: newSetNumber,
+            weightKg: defaultWeight,
+            reps: defaultReps,
             completed: false,
           };
+
           return {
             ...ex,
             sets: [...ex.sets, newSet],
@@ -309,7 +381,15 @@ export const useFitnessStore = create<FitnessState>()(
 
         const updatedExercises = current.exercises.map((ex) => {
           if (ex.id !== exerciseId) return ex;
-          const updatedSets = ex.sets.map((s) => (s.id === setId ? { ...s, ...updates } : s));
+
+          const updatedSets = ex.sets.map((s) => {
+            if (s.id !== setId) return s;
+            return {
+              ...s,
+              ...updates,
+            };
+          });
+
           return {
             ...ex,
             sets: updatedSets,
@@ -331,15 +411,14 @@ export const useFitnessStore = create<FitnessState>()(
 
         const updatedExercises = current.exercises.map((ex) => {
           if (ex.id !== exerciseId) return ex;
-          const filteredSets = ex.sets.filter((s) => s.id !== setId);
-          // Renumber sets
-          const renumbered = filteredSets.map((s, idx) => ({
-            ...s,
-            setNumber: idx + 1,
-          }));
+
+          const remainingSets = ex.sets
+            .filter((s) => s.id !== setId)
+            .map((s, idx) => ({ ...s, setNumber: idx + 1 }));
+
           return {
             ...ex,
-            sets: renumbered,
+            sets: remainingSets,
           };
         });
 
@@ -352,7 +431,7 @@ export const useFitnessStore = create<FitnessState>()(
         });
       },
 
-      finishActiveWorkout: () => {
+      finishActiveWorkout: async () => {
         const current = get().activeWorkout;
         if (!current) return null;
 
@@ -369,16 +448,18 @@ export const useFitnessStore = create<FitnessState>()(
         if (!lastActive) {
           newStreak = 1;
         } else if (lastActive === todayStr) {
-          // Already worked out today: streak remains steady
+          // Already worked out today: streak steady
         } else {
           const diffDays = getLocalDayDifference(lastActive, todayStr);
           if (diffDays === 1) {
             newStreak += 1;
           } else {
-            // Inactivity reset
             newStreak = 1;
           }
         }
+
+        // Save to SQLite
+        await dbInsertWorkout(completedWorkout);
 
         set((state) => ({
           activeWorkout: null,
@@ -394,45 +475,80 @@ export const useFitnessStore = create<FitnessState>()(
         set({ activeWorkout: null });
       },
 
-      addWorkout: (workout) => {
+      addWorkout: async (workout) => {
+        await dbInsertWorkout(workout);
         set((state) => ({
           workouts: [workout, ...state.workouts].slice(0, 150),
         }));
       },
 
-      removeWorkout: (id) => {
+      removeWorkout: async (id) => {
+        await dbDeleteWorkout(id);
         set((state) => ({
           workouts: state.workouts.filter((w) => w.id !== id),
         }));
       },
 
-      addScannedProduct: (productData) => {
+      addScannedProduct: async (productData) => {
+        let finalImageUri = productData.imageUrl || productData.imageUri;
+        if (finalImageUri) {
+          try {
+            finalImageUri = await saveImageToDocuments(finalImageUri, 'products');
+          } catch {
+            // Keep original
+          }
+        }
+
         const newScanned: ScannedProduct = {
           ...productData,
+          imageUrl: finalImageUri,
+          imageUri: finalImageUri,
           id: `scan_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
           scannedAt: new Date().toISOString(),
         };
+
+        await dbInsertScannedProduct(newScanned);
+
         set((state) => ({
           scannedProducts: [newScanned, ...state.scannedProducts].slice(0, 100),
         }));
       },
 
-      updateScannedProduct: (id, updates) => {
+      updateScannedProduct: async (id, updates) => {
+        const current = get().scannedProducts.find((p) => p.id === id);
+        if (!current) return;
+        const updated: ScannedProduct = {
+          ...current,
+          ...updates,
+        };
+        await dbInsertScannedProduct(updated);
         set((state) => ({
-          scannedProducts: state.scannedProducts.map((p) =>
-            p.id === id ? { ...p, ...updates } : p
-          ),
+          scannedProducts: state.scannedProducts.map((p) => (p.id === id ? updated : p)),
         }));
       },
 
-      removeScannedProduct: (id) => {
+      removeScannedProduct: async (id) => {
+        const target = get().scannedProducts.find((p) => p.id === id);
+        const img = target?.imageUrl || target?.imageUri;
+        if (img) {
+          deletePersistedImage(img).catch(() => {});
+        }
+        await dbDeleteScannedProduct(id);
         set((state) => ({
           scannedProducts: state.scannedProducts.filter((p) => p.id !== id),
         }));
       },
 
-      clearAllData: () => {
-        safeAsyncStorage.removeItem(ACTIVE_WORKOUT_STORAGE_KEY);
+      clearAllData: async () => {
+        const db = await getDatabase();
+        await db.execAsync(`
+          DELETE FROM meals;
+          DELETE FROM workout_sessions;
+          DELETE FROM exercises;
+          DELETE FROM sets;
+          DELETE FROM scanned_products;
+        `);
+
         set({
           meals: [],
           workouts: [],
@@ -445,60 +561,23 @@ export const useFitnessStore = create<FitnessState>()(
       },
     }),
     {
-      name: 'betteryou-fitness-storage',
+      name: 'betteryou-active-workout-draft',
       storage: createJSONStorage(() => safeAsyncStorage),
       partialize: (state) => ({
-        meals: state.meals,
-        workouts: state.workouts,
-        scannedProducts: state.scannedProducts,
-        dailyGoals: state.dailyGoals,
+        // ONLY persist lightweight UI session state: active draft workout and streak
+        activeWorkout: state.activeWorkout,
         streakDays: state.streakDays,
         lastActiveWorkoutDate: state.lastActiveWorkoutDate,
       }),
       onRehydrateStorage: () => (state) => {
-        if (!state) return;
-        // Restore active workout from dedicated lightweight partition
-        Promise.resolve(safeAsyncStorage.getItem(ACTIVE_WORKOUT_STORAGE_KEY)).then((stored) => {
-          if (stored) {
-            try {
-              const parsed = JSON.parse(stored) as WorkoutSession;
-              if (parsed && parsed.id) {
-                useFitnessStore.setState({ activeWorkout: parsed });
-                return;
-              }
-            } catch {
-              // Ignore invalid storage cache
-            }
-          }
-          // Migration from legacy unified storage if active workout was present
-          if (state.activeWorkout) {
-            safeAsyncStorage.setItem(
-              ACTIVE_WORKOUT_STORAGE_KEY,
-              JSON.stringify(state.activeWorkout)
-            );
-          }
-        });
+        // Automatically load normalized SQLite data upon app startup
+        if (state) {
+          state.loadDataFromDb().catch(() => {});
+        }
       },
     }
   )
 );
-
-// Synchronize active workout mutations to the dedicated lightweight partition
-// so high-frequency set/rep changes never re-serialize historical logs
-let prevActiveWorkout = useFitnessStore.getState().activeWorkout;
-useFitnessStore.subscribe((state) => {
-  if (state.activeWorkout !== prevActiveWorkout) {
-    prevActiveWorkout = state.activeWorkout;
-    if (state.activeWorkout) {
-      safeAsyncStorage.setItem(
-        ACTIVE_WORKOUT_STORAGE_KEY,
-        JSON.stringify(state.activeWorkout)
-      );
-    } else {
-      safeAsyncStorage.removeItem(ACTIVE_WORKOUT_STORAGE_KEY);
-    }
-  }
-});
 
 /**
  * Helper selector to compute total daily macros from meals logged today

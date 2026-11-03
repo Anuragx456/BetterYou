@@ -21,6 +21,7 @@ import {
   getRecentDaysList,
 } from '../../utils/date';
 import { safeHaptics } from '../../utils/haptics';
+import { getFullImageUri } from '../../utils/imageManager';
 import {
   useFitnessStore,
 } from '../../store/useFitnessStore';
@@ -1428,14 +1429,18 @@ const MealListItem = React.memo(function MealListItem({
   isLast,
   onDelete,
 }: MealListItemProps) {
+  const [imageError, setImageError] = React.useState(false);
+  const resolvedUri = React.useMemo(() => getFullImageUri(meal.imageUri), [meal.imageUri]);
+
   return (
     <View style={[styles.mealCleanItem, !isLast && styles.mealCleanItemBorder]}>
       <View style={styles.mealCleanLeft}>
-        {meal.imageUri ? (
+        {resolvedUri && !imageError ? (
           <Image
-            source={{ uri: meal.imageUri }}
+            source={{ uri: resolvedUri }}
             style={styles.mealCleanThumb}
             contentFit="cover"
+            onError={() => setImageError(true)}
           />
         ) : null}
         <View style={styles.mealCleanDetails}>
