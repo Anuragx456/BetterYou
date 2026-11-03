@@ -21,7 +21,6 @@ import {
   AVAILABLE_GEMINI_MODELS,
   GeminiModelOption,
   getActiveModelDisplayName,
-  getEffectiveApiKey,
   isUsingCustomKey,
   useSettingsStore,
   validateGeminiApiKey,
@@ -53,16 +52,14 @@ export default function AiSettingsScreen() {
 
   const [customModelInput, setCustomModelInput] = useState<string>(customModelName);
 
-  const effectiveKey = getEffectiveApiKey();
   const activeModelTitle = getActiveModelDisplayName();
   const hasCustom = isUsingCustomKey();
-  const hasAnyKey = Boolean(effectiveKey);
 
   const maskedKeyPreview = useMemo(() => {
-    if (!effectiveKey) return 'None configured';
-    if (effectiveKey.length <= 8) return '••••••••';
-    return `${effectiveKey.slice(0, 6)}••••••••${effectiveKey.slice(-4)}`;
-  }, [effectiveKey]);
+    if (!customApiKey) return 'Using Managed Proxy (No custom key configured)';
+    if (customApiKey.length <= 8) return '•••••••• (Encrypted in Keystore)';
+    return `${customApiKey.slice(0, 6)}••••••••${customApiKey.slice(-4)} (Encrypted in Keystore)`;
+  }, [customApiKey]);
 
   const handleOpenAiStudio = useCallback(async () => {
     try {
@@ -190,25 +187,17 @@ export default function AiSettingsScreen() {
           <View
             style={[
               styles.statusPill,
-              hasCustom
-                ? styles.statusPillLive
-                : hasAnyKey
-                ? styles.statusPillEnv
-                : styles.statusPillDemo,
+              hasCustom ? styles.statusPillLive : styles.statusPillEnv,
             ]}
           >
             <View
               style={[
                 styles.statusDot,
-                hasCustom
-                  ? styles.statusDotLive
-                  : hasAnyKey
-                  ? styles.statusDotEnv
-                  : styles.statusDotDemo,
+                hasCustom ? styles.statusDotLive : styles.statusDotEnv,
               ]}
             />
             <Text style={styles.statusPillText}>
-              {hasCustom ? 'Custom' : hasAnyKey ? 'Default' : 'Demo'}
+              {hasCustom ? 'BYOK Mode' : 'Proxy Mode'}
             </Text>
           </View>
         </View>

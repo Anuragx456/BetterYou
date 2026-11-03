@@ -1,4 +1,10 @@
 import { safeAsyncStorage } from '../utils/storage';
+import {
+  deleteSecureItem,
+  getSecureItem,
+  SECURE_KEYS,
+  setSecureItem,
+} from '../utils/secureStorage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
@@ -123,11 +129,18 @@ export const useSettingsStore = create<SettingsState>()(
       customModelName: '',
 
       setCustomApiKey: (key: string) => {
-        set({ customApiKey: key.trim() });
+        const trimmed = key.trim();
+        set({ customApiKey: trimmed });
+        if (trimmed) {
+          setSecureItem(SECURE_KEYS.GEMINI_API_KEY, trimmed);
+        } else {
+          deleteSecureItem(SECURE_KEYS.GEMINI_API_KEY);
+        }
       },
 
       clearCustomApiKey: () => {
         set({ customApiKey: '' });
+        deleteSecureItem(SECURE_KEYS.GEMINI_API_KEY);
       },
 
       setSelectedModel: (modelId: string) => {
@@ -143,6 +156,7 @@ export const useSettingsStore = create<SettingsState>()(
       },
 
       resetSettings: () => {
+        deleteSecureItem(SECURE_KEYS.GEMINI_API_KEY);
         set({
           customApiKey: '',
           selectedModel: DEFAULT_MODEL_ID,
@@ -154,20 +168,64 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'betteryou-settings-storage',
       storage: createJSONStorage(() => safeAsyncStorage),
+      partialize: (state) => ({
+        // Strictly exclude customApiKey from unencrypted AsyncStorage
+        selectedModel: state.selectedModel,
+        isCustomModel: state.isCustomModel,
+        customModelName: state.customModelName,
+      }),
+      onRehydrateStorage: () => () => {
+        // Hydrate custom API key from secure hardware-backed storage
+        getSecureItem(SECURE_KEYS.GEMINI_API_KEY).then((secureKey) => {
+          if (secureKey) {
+            useSettingsStore.setState({ customApiKey: secureKey });
+          }
+        });
+
+        // Migration: check for legacy plaintext key in AsyncStorage, migrate to SecureStore, and purge
+        Promise.resolve(safeAsyncStorage.getItem('betteryou-settings-storage')).then((raw) => {
+          if (raw) {
+            try {
+              const parsed = JSON.parse(raw);
+              if (parsed?.state?.customApiKey) {
+                const legacy = parsed.state.customApiKey;
+                setSecureItem(SECURE_KEYS.GEMINI_API_KEY, legacy).then(() => {
+                  useSettingsStore.setState({ customApiKey: legacy });
+                  delete parsed.state.customApiKey;
+                  safeAsyncStorage.setItem('betteryou-settings-storage', JSON.stringify(parsed));
+                });
+              }
+            } catch {
+              // Ignore
+            }
+          }
+        });
+      },
     }
   )
 );
 
 /**
  * Resolves the active Gemini API key:
- * Priority: 1. User's custom API key -> 2. Environment variable fallback
+ * Returns the user's custom API key from SecureStore if configured, or empty string.
+ * (Never returns or inlines client-side build environment variables)
  */
 export function getEffectiveApiKey(): string {
-  const customKey = useSettingsStore.getState().customApiKey?.trim();
-  if (customKey) {
-    return customKey;
-  }
-  return process.env.EXPO_PUBLIC_GEMINI_API_KEY?.trim() || '';
+  return useSettingsStore.getState().customApiKey?.trim() || '';
+}
+
+/**
+ * Returns proxy URL for server-backed requests
+ */
+export function getEffectiveProxyUrl(): string {
+  return process.env.EXPO_PUBLIC_PROXY_URL?.trim() || 'http://localhost:8787';
+}
+
+/**
+ * Returns true if the client is routing through the proxy (default)
+ */
+export function isUsingProxy(): boolean {
+  return !isUsingCustomKey();
 }
 
 /**
@@ -363,7 +421,8 @@ export async function validateGeminiApiKey(apiKeyToTest: string): Promise<{
 }
 
 /**
- * Tests live multimodal connectivity with a specific model and API key
+ * Tests live multimodal connectivity with a specific model and API key,
+ * or tests proxy server health if no custom key is provided.
  */
 export async function testGeminiModelConnectivity(
   apiKey: string,
@@ -374,17 +433,47 @@ export async function testGeminiModelConnectivity(
   latencyMs?: number;
 }> {
   const key = apiKey.trim();
-  if (!key) {
-    return {
-      success: false,
-      message: 'No API key provided.',
-    };
-  }
-
   const startTime = Date.now();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 12000);
 
+  // If no custom key, test proxy server health
+  if (!key) {
+    try {
+      const proxyUrl = getEffectiveProxyUrl();
+      const response = await fetch(`${proxyUrl}/health`, {
+        method: 'GET',
+        signal: controller.signal,
+      });
+      const latencyMs = Date.now() - startTime;
+      if (response.ok) {
+        return {
+          success: true,
+          message: `Connected to BetterYou AI Proxy (${proxyUrl})! Latency: ${latencyMs}ms. Ready for scans.`,
+          latencyMs,
+        };
+      }
+      return {
+        success: false,
+        message: `Proxy server returned HTTP ${response.status}`,
+        latencyMs,
+      };
+    } catch (err: unknown) {
+      const latencyMs = Date.now() - startTime;
+      const isTimeout = err instanceof Error && err.name === 'AbortError';
+      return {
+        success: false,
+        message: isTimeout
+          ? 'Proxy health check timed out.'
+          : `Cannot reach proxy server: ${err instanceof Error ? err.message : String(err)}. Ensure 'bun run server:start' is running.`,
+        latencyMs,
+      };
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  // BYOK mode: Direct ping to Google AI Studio
   try {
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent`;
     const response = await fetch(endpoint, {
@@ -428,7 +517,7 @@ export async function testGeminiModelConnectivity(
 
     return {
       success: true,
-      message: `Successfully connected to ${modelId}! Response time: ${latencyMs}ms`,
+      message: `Direct BYOK connection to ${modelId} successful! Response time: ${latencyMs}ms`,
       latencyMs,
     };
   } catch (err: unknown) {

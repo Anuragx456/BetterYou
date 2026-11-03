@@ -27,9 +27,7 @@ export default function SettingsScreen() {
   const isCustomModel = useSettingsStore((state) => state.isCustomModel);
   const customModelName = useSettingsStore((state) => state.customModelName);
 
-  const effectiveKey = customApiKey?.trim() || process.env.EXPO_PUBLIC_GEMINI_API_KEY?.trim() || '';
   const hasCustom = Boolean(customApiKey?.trim());
-  const hasAnyKey = Boolean(effectiveKey);
   const activeModelTitle = isCustomModel && customModelName ? customModelName : selectedModel;
 
   // Reset all settings
@@ -66,25 +64,17 @@ export default function SettingsScreen() {
           <View
             style={[
               styles.statusPill,
-              hasCustom
-                ? styles.statusPillLive
-                : hasAnyKey
-                ? styles.statusPillEnv
-                : styles.statusPillDemo,
+              hasCustom ? styles.statusPillLive : styles.statusPillEnv,
             ]}
           >
             <View
               style={[
                 styles.statusDot,
-                hasCustom
-                  ? styles.statusDotLive
-                  : hasAnyKey
-                  ? styles.statusDotEnv
-                  : styles.statusDotDemo,
+                hasCustom ? styles.statusDotLive : styles.statusDotEnv,
               ]}
             />
             <Text style={styles.statusPillText}>
-              {hasCustom ? 'Custom Key' : hasAnyKey ? 'Default Key' : 'Demo Mode'}
+              {hasCustom ? 'BYOK Mode' : 'Proxy Mode'}
             </Text>
           </View>
         </View>

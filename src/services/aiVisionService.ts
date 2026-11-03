@@ -9,7 +9,12 @@ import {
   TargetExposure,
   ToxicityReport,
 } from '../types';
-import { getEffectiveApiKey, getEffectiveModel } from '../store/useSettingsStore';
+import {
+  getEffectiveApiKey,
+  getEffectiveModel,
+  getEffectiveProxyUrl,
+} from '../store/useSettingsStore';
+import { getSignedDeviceHeaders } from '../utils/secureStorage';
 import { recalculateToxicityReport, recomputeReportScoreAndRisk } from './barcodeService';
 
 // In-memory Scan Cache (Fingerprint -> { report, timestamp })
@@ -65,101 +70,155 @@ function extractJsonString(rawText: string): string {
 }
 
 /**
- * Generic caller for Gemini Multimodal REST API
+ * Caller for Gemini Multimodal Vision:
+ * Routes through secure BetterYou Proxy by default, or directly to Google AI Studio if user provides BYOK key.
+ * Never logs API keys, raw auth headers, or secret credentials.
  */
 async function callGeminiVision(prompt: string, base64Image: string): Promise<{ text: string; usedModel: string }> {
-  const apiKey = getEffectiveApiKey();
-  if (!apiKey) {
-    throw new Error('MISSING_API_KEY');
-  }
-
+  const customKey = getEffectiveApiKey();
   const { mimeType, base64Data } = parseBase64Image(base64Image);
-
-  const requestBody = {
-    contents: [
-      {
-        parts: [
-          { text: prompt },
-          {
-            inlineData: {
-              mimeType,
-              data: base64Data,
-            },
-          },
-        ],
-      },
-    ],
-    generationConfig: {
-      responseMimeType: 'application/json',
-      temperature: 0.0,
-      maxOutputTokens: 1024,
-    },
-  };
-
   const chosenModel = getEffectiveModel();
-  const fallbackCandidates = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
-  const modelsToTry = [chosenModel, ...fallbackCandidates.filter((m) => m !== chosenModel)];
-  let lastError: Error | null = null;
 
-  // Serialize payload once to avoid repetitive heap allocation on model fallback retries
-  const serializedBody = JSON.stringify(requestBody);
-
-  for (const model of modelsToTry) {
-    const controller = new AbortController();
-    // Vision calls on 3.x models routinely take 10–15s+ upstream; 45s avoids cancelling valid attempts
-    const timeoutId = setTimeout(() => controller.abort(), 45000);
-
-    try {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey,
+  // 1. Direct BYOK Route (User-supplied key stored in hardware-backed SecureStore)
+  if (customKey) {
+    const requestBody = {
+      contents: [
+        {
+          parts: [
+            { text: prompt },
+            {
+              inlineData: {
+                mimeType,
+                data: base64Data,
+              },
+            },
+          ],
         },
-        body: serializedBody,
-        signal: controller.signal,
-      });
+      ],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        temperature: 0.0,
+        maxOutputTokens: 1024,
+      },
+    };
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        if (response.status === 400 || response.status === 401 || response.status === 403) {
-          throw new Error(`Gemini API Auth/Request Error (${response.status}): ${errorText}`);
+    const fallbackCandidates = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
+    const modelsToTry = [chosenModel, ...fallbackCandidates.filter((m) => m !== chosenModel)];
+    let lastError: Error | null = null;
+    const serializedBody = JSON.stringify(requestBody);
+
+    for (const model of modelsToTry) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 45000);
+
+      try {
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': customKey,
+          },
+          body: serializedBody,
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          if (response.status === 400 || response.status === 401 || response.status === 403) {
+            throw new Error(`Gemini API Authentication Error (${response.status}). Please check your custom API key.`);
+          }
+          throw new Error(`Gemini ${model} returned HTTP ${response.status}`);
         }
-        throw new Error(`Gemini ${model} HTTP ${response.status}: ${errorText}`);
-      }
 
-      interface GeminiResponse {
-        candidates?: {
-          content?: {
-            parts?: {
-              text?: string;
-            }[];
-          };
-        }[];
-      }
+        interface GeminiResponse {
+          candidates?: {
+            content?: {
+              parts?: { text?: string }[];
+            };
+          }[];
+        }
 
-      const result = (await response.json()) as GeminiResponse;
-      const parts = result.candidates?.[0]?.content?.parts || [];
-      const candidateText = parts.map((p) => p.text || '').join('').trim();
+        const result = (await response.json()) as GeminiResponse;
+        const parts = result.candidates?.[0]?.content?.parts || [];
+        const candidateText = parts.map((p) => p.text || '').join('').trim();
 
-      if (!candidateText) {
-        throw new Error(`Gemini ${model} returned empty text.`);
-      }
+        if (!candidateText) {
+          throw new Error(`Gemini ${model} returned empty text.`);
+        }
 
-      return { text: extractJsonString(candidateText), usedModel: model };
-    } catch (err: unknown) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      console.warn(`[aiVisionService] Model ${model} failed: ${lastError.message}`);
-      if (lastError.message.includes('Auth/Request Error')) {
-        break;
+        return { text: extractJsonString(candidateText), usedModel: model };
+      } catch (err: unknown) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        // Sanitize: Do not log raw error messages which might contain sensitive credentials
+        console.warn(`[aiVisionService] BYOK Model ${model} failed`);
+        if (lastError.message.includes('Authentication Error')) {
+          break;
+        }
+      } finally {
+        clearTimeout(timeoutId);
       }
-    } finally {
-      clearTimeout(timeoutId);
     }
+
+    throw lastError ?? new Error('All BYOK Gemini models failed.');
   }
 
-  throw lastError ?? new Error('All Gemini models failed.');
+  // 2. Managed Proxy Route (Zero shipped API keys; rate-limited & device-authenticated)
+  const proxyUrl = getEffectiveProxyUrl();
+  const proxyEndpoint = `${proxyUrl}/v1/vision/analyze`;
+  const proxyPayload = JSON.stringify({
+    prompt,
+    imageBase64: base64Data,
+    mimeType,
+    model: chosenModel,
+  });
+
+  const authHeaders = await getSignedDeviceHeaders('POST', '/v1/vision/analyze', proxyPayload);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 50000);
+
+  try {
+    const response = await fetch(proxyEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
+      body: proxyPayload,
+      signal: controller.signal,
+    });
+
+    if (response.status === 429) {
+      throw new Error('Device rate limit reached (15 scans/min or daily quota). Please try again shortly.');
+    }
+    if (response.status === 413) {
+      throw new Error('Image file is too large for processing. Please select a smaller photo.');
+    }
+    if (response.status === 401) {
+      throw new Error('Device authentication failed with proxy server.');
+    }
+    if (!response.ok) {
+      const errJson = await response.json().catch(() => null);
+      throw new Error(errJson?.error || `Proxy error (HTTP ${response.status}).`);
+    }
+
+    interface ProxyVisionResponse {
+      text?: string;
+      usedModel?: string;
+      error?: string;
+    }
+
+    const data = (await response.json()) as ProxyVisionResponse;
+    if (!data.text) {
+      throw new Error(data.error || 'Proxy returned empty response.');
+    }
+
+    return { text: extractJsonString(data.text), usedModel: data.usedModel || chosenModel };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Vision Service: ${msg}`);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 // -------------------------------------------------------------
@@ -500,12 +559,6 @@ Return ONLY a valid JSON object matching this exact schema:
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[aiVisionService] analyzeMealImage error: ${message}`);
-    const effectiveKey = getEffectiveApiKey();
-    if (!effectiveKey) {
-      const mock = getMockMealAnalysis();
-      mock.generatedBy = 'offline-demo-mock';
-      return mock;
-    }
     throw new Error(`Meal Vision Analysis Failed (${message}). Please try taking another photo.`);
   }
 }
@@ -650,16 +703,6 @@ Return ONLY a valid JSON object matching this exact schema:
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[aiVisionService] analyzeIngredientsImage error: ${message}`);
-
-    const effectiveKey = getEffectiveApiKey();
-    if (!effectiveKey) {
-      // In demo mode without API key, return a predictable demo mock report
-      const demoReport = getMockToxicityReport();
-      demoReport.generatedBy = 'offline-demo-mock';
-      return demoReport;
-    }
-
-    // With active key, throw so the user is informed to retry rather than silently receiving a wrong product
     throw new Error(
       `AI OCR Scan Unsuccessful (${message}). Please ensure packaging is well-lit and ingredients are clearly visible.`
     );
@@ -667,86 +710,137 @@ Return ONLY a valid JSON object matching this exact schema:
 }
 
 /**
- * Generic caller for Gemini Text-only REST API
+ * Caller for Gemini Text-only Generation:
+ * Routes through secure BetterYou Proxy by default, or directly to Google AI Studio if user provides BYOK key.
+ * Never logs API keys or raw auth credentials.
  */
 async function callGeminiText(prompt: string): Promise<{ text: string; usedModel: string }> {
-  const apiKey = getEffectiveApiKey();
-  if (!apiKey) {
-    throw new Error('MISSING_API_KEY');
-  }
-
-  const requestBody = {
-    contents: [
-      {
-        parts: [{ text: prompt }],
-      },
-    ],
-    generationConfig: {
-      responseMimeType: 'application/json',
-      temperature: 0.1,
-      maxOutputTokens: 1024,
-    },
-  };
-
+  const customKey = getEffectiveApiKey();
   const chosenModel = getEffectiveModel();
-  const fallbackCandidates = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
-  const modelsToTry = [chosenModel, ...fallbackCandidates.filter((m) => m !== chosenModel)];
-  let lastError: Error | null = null;
 
-  const serializedBody = JSON.stringify(requestBody);
-
-  for (const model of modelsToTry) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
-
-    try {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey,
+  // 1. Direct BYOK Route
+  if (customKey) {
+    const requestBody = {
+      contents: [
+        {
+          parts: [{ text: prompt }],
         },
-        body: serializedBody,
-        signal: controller.signal,
-      });
+      ],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        temperature: 0.1,
+        maxOutputTokens: 1024,
+      },
+    };
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        if (response.status === 400 || response.status === 401 || response.status === 403) {
-          throw new Error(`Gemini API Auth/Request Error (${response.status}): ${errorText}`);
+    const fallbackCandidates = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
+    const modelsToTry = [chosenModel, ...fallbackCandidates.filter((m) => m !== chosenModel)];
+    let lastError: Error | null = null;
+    const serializedBody = JSON.stringify(requestBody);
+
+    for (const model of modelsToTry) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+      try {
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': customKey,
+          },
+          body: serializedBody,
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          if (response.status === 400 || response.status === 401 || response.status === 403) {
+            throw new Error(`Gemini API Authentication Error (${response.status}). Please check your custom API key.`);
+          }
+          throw new Error(`Gemini ${model} HTTP ${response.status}`);
         }
-        throw new Error(`Gemini ${model} HTTP ${response.status}: ${errorText}`);
+
+        interface GeminiResponse {
+          candidates?: {
+            content?: {
+              parts?: { text?: string }[];
+            };
+          }[];
+        }
+
+        const result = (await response.json()) as GeminiResponse;
+        const parts = result.candidates?.[0]?.content?.parts || [];
+        const candidateText = parts.map((p) => p.text || '').join('').trim();
+
+        if (!candidateText) {
+          throw new Error(`Gemini ${model} returned empty text.`);
+        }
+
+        return { text: extractJsonString(candidateText), usedModel: model };
+      } catch (err: unknown) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        console.warn(`[aiVisionService] BYOK Text Model ${model} failed`);
+        if (lastError.message.includes('Authentication Error')) {
+          break;
+        }
+      } finally {
+        clearTimeout(timeoutId);
       }
-
-      interface GeminiResponse {
-        candidates?: {
-          content?: {
-            parts?: {
-              text?: string;
-            }[];
-          };
-        }[];
-      }
-
-      const result = (await response.json()) as GeminiResponse;
-      const parts = result.candidates?.[0]?.content?.parts || [];
-      const candidateText = parts.map((p) => p.text || '').join('').trim();
-
-      if (!candidateText) {
-        throw new Error(`Gemini ${model} returned empty text.`);
-      }
-
-      return { text: extractJsonString(candidateText), usedModel: model };
-    } catch (err: unknown) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      console.warn(`[aiVisionService] Text Model ${model} failed, trying next: ${lastError.message}`);
-    } finally {
-      clearTimeout(timeoutId);
     }
+
+    throw lastError ?? new Error('All BYOK Gemini text models failed.');
   }
 
-  throw lastError ?? new Error('All Gemini text models failed.');
+  // 2. Managed Proxy Route
+  const proxyUrl = getEffectiveProxyUrl();
+  const proxyEndpoint = `${proxyUrl}/v1/chat/analyze`;
+  const proxyPayload = JSON.stringify({
+    prompt,
+    model: chosenModel,
+  });
+
+  const authHeaders = await getSignedDeviceHeaders('POST', '/v1/chat/analyze', proxyPayload);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 35000);
+
+  try {
+    const response = await fetch(proxyEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
+      body: proxyPayload,
+      signal: controller.signal,
+    });
+
+    if (response.status === 429) {
+      throw new Error('Device rate limit reached. Please wait a moment before trying again.');
+    }
+    if (!response.ok) {
+      const errJson = await response.json().catch(() => null);
+      throw new Error(errJson?.error || `Proxy error (HTTP ${response.status}).`);
+    }
+
+    interface ProxyTextResponse {
+      text?: string;
+      usedModel?: string;
+      error?: string;
+    }
+
+    const data = (await response.json()) as ProxyTextResponse;
+    if (!data.text) {
+      throw new Error(data.error || 'Proxy returned empty text.');
+    }
+
+    return { text: extractJsonString(data.text), usedModel: data.usedModel || chosenModel };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Text Service: ${msg}`);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 /**
@@ -871,11 +965,9 @@ export async function analyzeProductText(
     let baseReport = recalculateToxicityReport(cleanName, rawIngredients);
     baseReport.generatedBy = 'manual-input-recalculation';
 
-    // If Gemini key is available, enhance with forensic prompt
-    const effectiveKey = getEffectiveApiKey();
-    if (effectiveKey) {
-      try {
-        const prompt = `You are an elite forensic toxicologist and Indian supermarket consumer safety expert.
+    // Enhance with forensic prompt via proxy or BYOK
+    try {
+      const prompt = `You are an elite forensic toxicologist and Indian supermarket consumer safety expert.
 Product Name: "${cleanName}"
 Ingredients: "${rawIngredients.join(', ')}"
 
@@ -900,28 +992,20 @@ Return ONLY a valid JSON object matching this exact schema:
   "indianMarketAlert": string | null,
   "cleanSummary": string
 }`;
-        const { text: rawJson, usedModel } = await callGeminiText(prompt);
-        const parsed = JSON.parse(rawJson) as RawToxicityAiOutput;
+      const { text: rawJson, usedModel } = await callGeminiText(prompt);
+      const parsed = JSON.parse(rawJson) as RawToxicityAiOutput;
 
-        if (parsed.indianMarketAlert) baseReport.indianMarketAlert = parsed.indianMarketAlert;
-        if (parsed.cleanSummary) baseReport.cleanSummary = parsed.cleanSummary;
-        if (parsed.category) baseReport.category = parsed.category;
-        baseReport.generatedBy = usedModel;
-      } catch {
-        // Fallback to deterministic report
-      }
+      if (parsed.indianMarketAlert) baseReport.indianMarketAlert = parsed.indianMarketAlert;
+      if (parsed.cleanSummary) baseReport.cleanSummary = parsed.cleanSummary;
+      if (parsed.category) baseReport.category = parsed.category;
+      baseReport.generatedBy = usedModel;
+    } catch {
+      // Fallback to deterministic report
     }
     return baseReport;
   }
 
   // If ONLY product name was provided (no ingredients typed):
-  const effectiveKey = getEffectiveApiKey();
-  if (!effectiveKey) {
-    const mock = getMockToxicityReport(cleanName);
-    mock.productName = cleanName;
-    mock.generatedBy = 'offline-demo-mock';
-    return mock;
-  }
 
   const prompt = `You are an elite forensic toxicologist and Indian supermarket consumer safety expert.
 The user wants to analyze this product found in Indian markets: "${cleanName}".

@@ -3,7 +3,6 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -34,18 +33,12 @@ export default function DiagnosticsScreen() {
   const isCustomModel = useSettingsStore((state) => state.isCustomModel);
   const customModelName = useSettingsStore((state) => state.customModelName);
 
-  const effectiveKey = customApiKey?.trim() || process.env.EXPO_PUBLIC_GEMINI_API_KEY?.trim() || '';
+  const effectiveKey = customApiKey?.trim() || '';
   const effectiveModel = isCustomModel && customModelName ? customModelName : selectedModel;
   const activeModelTitle = effectiveModel;
   const hasCustom = Boolean(customApiKey?.trim());
-  const hasAnyKey = Boolean(effectiveKey);
 
   const handleRunPingTest = useCallback(async () => {
-    if (!effectiveKey) {
-      Alert.alert('No API Key', 'Please configure an API key in AI Settings before running diagnostics.');
-      return;
-    }
-
     setIsPinging(true);
     setPingResult({ success: null, message: '' });
 
@@ -99,18 +92,18 @@ export default function DiagnosticsScreen() {
                 <View
                   style={[
                     styles.statusDot,
-                    hasAnyKey ? styles.statusDotLive : styles.statusDotWarning,
+                    styles.statusDotLive,
                   ]}
                 />
-                <Text style={styles.statusRowTitle}>Gemini API State</Text>
+                <Text style={styles.statusRowTitle}>AI Connection Mode</Text>
               </View>
               <Text
                 style={[
                   styles.statusRowValue,
-                  hasAnyKey ? { color: colors.success } : { color: colors.warning },
+                  { color: colors.success },
                 ]}
               >
-                {hasCustom ? 'Custom Key' : hasAnyKey ? 'Default Key' : 'Demo Mode'}
+                {hasCustom ? 'BYOK (Direct AI Studio)' : 'Managed Secure Proxy'}
               </Text>
             </View>
 
@@ -129,10 +122,10 @@ export default function DiagnosticsScreen() {
             <View style={styles.statusRow}>
               <View style={styles.statusRowLeft}>
                 <Ionicons name="globe-outline" size={16} color={colors.textMuted} />
-                <Text style={styles.statusRowTitle}>API Endpoint</Text>
+                <Text style={styles.statusRowTitle}>Endpoint</Text>
               </View>
               <Text style={[styles.statusRowValue, styles.monoValue]}>
-                generativelanguage.googleapis.com
+                {hasCustom ? 'generativelanguage.googleapis.com' : 'BetterYou AI Proxy (/v1)'}
               </Text>
             </View>
           </View>

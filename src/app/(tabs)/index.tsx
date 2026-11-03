@@ -24,7 +24,6 @@ import { safeHaptics } from '../../utils/haptics';
 import {
   useFitnessStore,
 } from '../../store/useFitnessStore';
-import { useSettingsStore } from '../../store/useSettingsStore';
 import { colors } from '../../theme/colors';
 import { MacroBreakdown, MealLog, ScannedProduct } from '../../types';
 
@@ -185,9 +184,7 @@ export default function DashboardScreen() {
     [meals, workouts]
   );
 
-  const customApiKey = useSettingsStore((state) => state.customApiKey);
-  const effectiveKey = customApiKey?.trim() || process.env.EXPO_PUBLIC_GEMINI_API_KEY?.trim() || '';
-  const hasGeminiKey = Boolean(effectiveKey);
+  const hasGeminiKey = true; // Powered by secure proxy or custom BYOK key
 
   const handleShowAiKeyInfo = useCallback(() => {
     router.push('/(tabs)/settings');
