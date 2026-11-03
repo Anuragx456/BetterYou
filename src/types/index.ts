@@ -31,6 +31,7 @@ export interface MealLog {
   imageUri?: string;
   ingredientsDetected: string[];
   notes?: string;
+  date?: string; // Local YYYY-MM-DD
 }
 
 export type RiskLevel = 'Safe' | 'Moderate' | 'High Risk';
@@ -104,6 +105,7 @@ export interface ScannedProduct {
   report: ToxicityReport;
   scannedAt: string; // ISO 8601 string
   imageUrl?: string;
+  imageUri?: string;
 }
 
 export interface ExerciseSet {
@@ -130,6 +132,8 @@ export interface WorkoutSession {
   durationSeconds: number;
   exercises: ExerciseItem[];
   totalVolumeKg: number; // Sum of (Weight * Reps) for completed sets
+  notes?: string;
+  date?: string;
 }
 
 export interface DailyGoals {
