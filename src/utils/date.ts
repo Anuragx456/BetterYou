@@ -49,3 +49,64 @@ export function getLocalDayDifference(dateAStr: string, dateBStr: string): numbe
   const dB = new Date(y2, m2 - 1, d2).getTime();
   return Math.round((dB - dA) / (1000 * 60 * 60 * 24));
 }
+
+/**
+ * Adds or subtracts calendar days to a YYYY-MM-DD string.
+ */
+export function addLocalDays(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  if (!y || !m || !d) return dateStr;
+  const target = new Date(y, m - 1, d + days);
+  return getLocalDateString(target);
+}
+
+/**
+ * Returns human-readable label for a YYYY-MM-DD date string (e.g. "Today", "Yesterday", or "Thu, May 15").
+ */
+export function formatDateLabel(dateStr: string): string {
+  const todayStr = getLocalDateString();
+  const diff = getLocalDayDifference(dateStr, todayStr);
+
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  if (diff === -1) return 'Tomorrow';
+
+  const [y, m, d] = dateStr.split('-').map(Number);
+  if (!y || !m || !d) return dateStr;
+  const target = new Date(y, m - 1, d);
+  return target.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+export interface DayItem {
+  dateStr: string;
+  dayNum: number;
+  dayName: string;
+  isToday: boolean;
+}
+
+/**
+ * Returns a list of past N calendar days ending today.
+ */
+export function getRecentDaysList(count: number = 7): DayItem[] {
+  const todayStr = getLocalDateString();
+  const result: DayItem[] = [];
+
+  for (let i = count - 1; i >= 0; i--) {
+    const dStr = addLocalDays(todayStr, -i);
+    const [y, m, d] = dStr.split('-').map(Number);
+    const dateObj = new Date(y, m - 1, d);
+    result.push({
+      dateStr: dStr,
+      dayNum: d,
+      dayName: dateObj.toLocaleDateString('en-US', { weekday: 'narrow' }), // M, T, W...
+      isToday: i === 0,
+    });
+  }
+
+  return result;
+}
+

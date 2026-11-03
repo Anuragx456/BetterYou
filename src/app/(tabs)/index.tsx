@@ -14,7 +14,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ToxicityReportModal } from '../../components/ToxicityReportModal';
-import { getLocalDateString } from '../../utils/date';
+import {
+  addLocalDays,
+  formatDateLabel,
+  getLocalDateString,
+  getRecentDaysList,
+} from '../../utils/date';
+import { safeHaptics } from '../../utils/haptics';
 import {
   useFitnessStore,
 } from '../../store/useFitnessStore';
@@ -45,19 +51,23 @@ export default function DashboardScreen() {
 
   // Today's local date string (YYYY-MM-DD)
   const todayDateString = getLocalDateString();
+  const [selectedDate, setSelectedDate] = useState<string>(todayDateString);
+  const isViewingToday = selectedDate === todayDateString;
 
-  // Filter today's meals
+  const recentDays = useMemo(() => getRecentDaysList(7), []);
+
+  // Filter selected date's meals
   const todayMeals = useMemo(() => {
     return meals.filter((meal) => {
       try {
-        return getLocalDateString(meal.timestamp) === todayDateString;
+        return getLocalDateString(meal.timestamp) === selectedDate;
       } catch {
         return false;
       }
     });
-  }, [meals, todayDateString]);
+  }, [meals, selectedDate]);
 
-  // Compute today's macro totals directly from todayMeals in a single pass
+  // Compute selected date's macro totals directly in a single pass
   const todayTotals = useMemo(() => {
     return todayMeals.reduce<MacroBreakdown>(
       (acc, meal) => ({
@@ -70,19 +80,19 @@ export default function DashboardScreen() {
     );
   }, [todayMeals]);
 
-  // Filter today's completed workouts
+  // Filter selected date's completed workouts
   const todayWorkouts = useMemo(() => {
     return workouts.filter((w) => {
       try {
         const date = w.completedAt || w.startedAt;
-        return getLocalDateString(date) === todayDateString;
+        return getLocalDateString(date) === selectedDate;
       } catch {
         return false;
       }
     });
-  }, [workouts, todayDateString]);
+  }, [workouts, selectedDate]);
 
-  // Today's workout volume & estimated calories burned
+  // Selected date's workout volume & estimated calories burned
   const todayVolumeKg = useMemo(() => {
     return todayWorkouts.reduce((sum, w) => sum + (w.totalVolumeKg || 0), 0);
   }, [todayWorkouts]);
@@ -121,14 +131,59 @@ export default function DashboardScreen() {
   );
 
   const formattedDate = useMemo(() => {
-    return new Date().toLocaleDateString('en-US', {
-      weekday: 'long',
-      month: 'short',
-      day: 'numeric',
-    });
+    if (isViewingToday) {
+      return new Date().toLocaleDateString('en-US', {
+        weekday: 'long',
+        month: 'short',
+        day: 'numeric',
+      });
+    }
+    return formatDateLabel(selectedDate);
+  }, [isViewingToday, selectedDate]);
+
+  const canGoForward = selectedDate < todayDateString;
+
+  const handlePrevDay = useCallback(() => {
+    safeHaptics.selection();
+    setSelectedDate((prev) => addLocalDays(prev, -1));
   }, []);
 
+  const handleNextDay = useCallback(() => {
+    if (selectedDate >= todayDateString) return;
+    safeHaptics.selection();
+    setSelectedDate((prev) => addLocalDays(prev, 1));
+  }, [selectedDate, todayDateString]);
 
+  const handleSelectDay = useCallback((dateStr: string) => {
+    safeHaptics.selection();
+    setSelectedDate(dateStr);
+  }, []);
+
+  const handleReturnToToday = useCallback(() => {
+    safeHaptics.impactLight();
+    setSelectedDate(todayDateString);
+  }, [todayDateString]);
+
+  const hasDataOnDate = useCallback(
+    (dateStr: string) => {
+      const hasMeal = meals.some((m) => {
+        try {
+          return getLocalDateString(m.timestamp) === dateStr;
+        } catch {
+          return false;
+        }
+      });
+      const hasWorkout = workouts.some((w) => {
+        try {
+          return getLocalDateString(w.completedAt || w.startedAt) === dateStr;
+        } catch {
+          return false;
+        }
+      });
+      return hasMeal || hasWorkout;
+    },
+    [meals, workouts]
+  );
 
   const customApiKey = useSettingsStore((state) => state.customApiKey);
   const effectiveKey = customApiKey?.trim() || process.env.EXPO_PUBLIC_GEMINI_API_KEY?.trim() || '';
@@ -142,18 +197,21 @@ export default function DashboardScreen() {
     (meal: MealLog) => {
       Alert.alert(
         'Remove Meal',
-        `Delete "${meal.dishName}" from today's log?`,
+        `Delete "${meal.dishName}" from ${formatDateLabel(selectedDate)}'s log?`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Delete',
             style: 'destructive',
-            onPress: () => removeMeal(meal.id),
+            onPress: () => {
+              safeHaptics.warning();
+              removeMeal(meal.id);
+            },
           },
         ]
       );
     },
-    [removeMeal]
+    [removeMeal, selectedDate]
   );
 
   const handleSelectScannedProduct = useCallback((item: ScannedProduct) => {
@@ -221,6 +279,93 @@ export default function DashboardScreen() {
             </Pressable>
           </View>
         </View>
+
+        {/* Date Navigation Scrubber */}
+        <View style={styles.dateScrubberContainer}>
+          <Pressable
+            style={({ pressed }) => [styles.dateNavArrow, pressed && styles.pressed]}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            onPress={handlePrevDay}
+            accessibilityLabel="Previous day"
+          >
+            <Ionicons name="chevron-back" size={16} color={colors.textSecondary} />
+          </Pressable>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.dateDaysScroll}
+          >
+            {recentDays.map((day) => {
+              const isSelected = day.dateStr === selectedDate;
+              const hasData = hasDataOnDate(day.dateStr);
+
+              return (
+                <Pressable
+                  key={day.dateStr}
+                  style={({ pressed }) => [
+                    styles.dayPill,
+                    isSelected && styles.dayPillSelected,
+                    pressed && styles.pressed,
+                  ]}
+                  onPress={() => handleSelectDay(day.dateStr)}
+                >
+                  <Text style={[styles.dayPillName, isSelected && styles.dayPillTextActive]}>
+                    {day.dayName}
+                  </Text>
+                  <Text style={[styles.dayPillNum, isSelected && styles.dayPillTextActive]}>
+                    {day.dayNum}
+                  </Text>
+                  <View
+                    style={[
+                      styles.dayPillDot,
+                      hasData && (isSelected ? styles.dayPillDotActive : styles.dayPillDotMuted),
+                      !hasData && styles.dayPillDotEmpty,
+                    ]}
+                  />
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.dateNavArrow,
+              !canGoForward && styles.dateNavArrowDisabled,
+              pressed && canGoForward && styles.pressed,
+            ]}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            onPress={handleNextDay}
+            disabled={!canGoForward}
+            accessibilityLabel="Next day"
+          >
+            <Ionicons
+              name="chevron-forward"
+              size={16}
+              color={canGoForward ? colors.textSecondary : colors.hairline}
+            />
+          </Pressable>
+        </View>
+
+        {/* Past Date Notice Banner */}
+        {!isViewingToday && (
+          <View style={styles.pastDateBanner}>
+            <View style={styles.pastDateBannerLeft}>
+              <Ionicons name="calendar-outline" size={15} color={colors.info} />
+              <Text style={styles.pastDateBannerText}>
+                Viewing {formatDateLabel(selectedDate)}
+              </Text>
+            </View>
+            <Pressable
+              style={({ pressed }) => [styles.backToTodayBtn, pressed && styles.pressed]}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              onPress={handleReturnToToday}
+            >
+              <Ionicons name="return-up-back" size={13} color={colors.primary} />
+              <Text style={styles.backToTodayBtnText}>Back to Today</Text>
+            </Pressable>
+          </View>
+        )}
 
         {/* Daily Calorie & Macro Hero Card */}
         <View style={styles.heroCard}>
@@ -343,7 +488,9 @@ export default function DashboardScreen() {
           <View style={styles.cardHeaderRow}>
             <View style={styles.cardTitleWithIcon}>
               <Ionicons name="barbell-outline" size={18} color={colors.primary} />
-              <Text style={styles.cardTitle}>{"Today's Training"}</Text>
+              <Text style={styles.cardTitle}>
+                {isViewingToday ? "Today's Training" : `${formatDateLabel(selectedDate)} Training`}
+              </Text>
             </View>
             <Pressable
               style={({ pressed }) => [styles.cleanLinkBtn, pressed && styles.pressed]}
@@ -355,7 +502,7 @@ export default function DashboardScreen() {
             </Pressable>
           </View>
 
-          {activeWorkout ? (
+          {activeWorkout && isViewingToday ? (
             <View style={styles.activeWorkoutBanner}>
               <View style={styles.activeWorkoutLeft}>
                 <View style={styles.pulseDot} />
@@ -416,13 +563,14 @@ export default function DashboardScreen() {
           )}
         </View>
 
-        {/* Today's Logged Meals Clean Feed */}
+        {/* Logged Meals Clean Feed */}
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
             <View style={styles.cardTitleWithIcon}>
               <Ionicons name="restaurant-outline" size={18} color={colors.calories} />
               <Text style={styles.cardTitle}>
-                {"Today's Meals"} {todayMeals.length > 0 ? `(${todayMeals.length})` : ''}
+                {isViewingToday ? "Today's Meals" : `${formatDateLabel(selectedDate)} Meals`}{' '}
+                {todayMeals.length > 0 ? `(${todayMeals.length})` : ''}
               </Text>
             </View>
             <Pressable
@@ -437,7 +585,9 @@ export default function DashboardScreen() {
 
           {todayMeals.length === 0 ? (
             <View style={styles.emptyCardClean}>
-              <Text style={styles.emptyTitle}>No meals logged yet today</Text>
+              <Text style={styles.emptyTitle}>
+                {isViewingToday ? 'No meals logged yet today' : `No meals logged on ${formatDateLabel(selectedDate)}`}
+              </Text>
               <Text style={styles.emptySubtitle}>
                 Snap a meal photo or select from gallery for automatic calorie & macro vision.
               </Text>
@@ -600,7 +750,120 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
+  },
+
+  // Date Scrubber Strip
+  dateScrubberContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+    gap: 4,
+  },
+  dateNavArrow: {
+    width: 30,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    backgroundColor: colors.surfaceSubtle,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+  },
+  dateNavArrowDisabled: {
+    opacity: 0.35,
+  },
+  dateDaysScroll: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 2,
+  },
+  dayPill: {
+    width: 44,
+    height: 54,
+    borderRadius: 14,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+  },
+  dayPillSelected: {
+    backgroundColor: 'rgba(16, 185, 129, 0.16)',
+    borderColor: colors.primary,
+  },
+  dayPillName: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    marginBottom: 2,
+  },
+  dayPillNum: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+    fontVariant: ['tabular-nums'],
+  },
+  dayPillTextActive: {
+    color: colors.primary,
+    fontWeight: '800',
+  },
+  dayPillDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    marginTop: 3,
+  },
+  dayPillDotActive: {
+    backgroundColor: colors.primary,
+  },
+  dayPillDotMuted: {
+    backgroundColor: colors.textMuted,
+  },
+  dayPillDotEmpty: {
+    backgroundColor: 'transparent',
+  },
+
+  // Past Date Notice Banner
+  pastDateBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(56, 189, 248, 0.08)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.25)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginBottom: 14,
+  },
+  pastDateBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  pastDateBannerText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.info,
+  },
+  backToTodayBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.25)',
+  },
+  backToTodayBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.primary,
   },
   dateLabel: {
     fontSize: 12,

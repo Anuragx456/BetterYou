@@ -23,6 +23,7 @@ import { analyzeIngredientsImage } from '../../services/aiVisionService';
 import { optimizeImageForAiVision } from '../../utils/imageOptimizer';
 import { fetchProductByBarcode, recalculateToxicityReport } from '../../services/barcodeService';
 import { useFitnessStore } from '../../store/useFitnessStore';
+import { safeHaptics } from '../../utils/haptics';
 import { colors } from '../../theme/colors';
 import {
   NovaGroup,
@@ -168,6 +169,7 @@ export default function ToxicityScanScreen() {
 
     try {
       const toxReport = await fetchProductByBarcode(data);
+      safeHaptics.success();
       setReport(toxReport);
       setBarcodeSearchPill(null);
       setScreenState('report');
@@ -198,6 +200,7 @@ export default function ToxicityScanScreen() {
     }
 
     try {
+      safeHaptics.impactHeavy();
       const photo = await cameraRef.current.takePictureAsync({
         quality: 0.8,
       });
@@ -270,6 +273,7 @@ export default function ToxicityScanScreen() {
     });
 
     setIsSaved(true);
+    safeHaptics.success();
     Alert.alert('Saved!', 'Product toxicity report added to your dashboard history.');
   };
 

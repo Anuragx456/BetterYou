@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import { getLocalDateString, getLocalDayDifference } from '../date';
+import {
+  addLocalDays,
+  formatDateLabel,
+  getLocalDateString,
+  getLocalDayDifference,
+  getRecentDaysList,
+} from '../date';
 import { calculateWorkoutVolume } from '../../store/useFitnessStore';
 
 describe('Date & Fitness Calculation Utilities', () => {
@@ -14,6 +20,26 @@ describe('Date & Fitness Calculation Utilities', () => {
     expect(getLocalDayDifference('2026-05-10', '2026-05-15')).toBe(5);
     expect(getLocalDayDifference('2026-05-15', '2026-05-14')).toBe(-1);
   });
+
+  it('adds and subtracts local calendar days accurately', () => {
+    expect(addLocalDays('2026-05-15', 1)).toBe('2026-05-16');
+    expect(addLocalDays('2026-05-15', -1)).toBe('2026-05-14');
+    expect(addLocalDays('2026-05-01', -1)).toBe('2026-04-30');
+  });
+
+  it('formats human readable date labels correctly', () => {
+    const today = getLocalDateString();
+    expect(formatDateLabel(today)).toBe('Today');
+    expect(formatDateLabel(addLocalDays(today, -1))).toBe('Yesterday');
+  });
+
+  it('generates recent days list ending in today', () => {
+    const days = getRecentDaysList(7);
+    expect(days.length).toBe(7);
+    expect(days[days.length - 1].isToday).toBe(true);
+    expect(days[days.length - 1].dateStr).toBe(getLocalDateString());
+  });
+
 
   it('computes total volume only from completed sets', () => {
     const exercises = [

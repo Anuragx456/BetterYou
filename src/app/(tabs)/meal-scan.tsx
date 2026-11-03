@@ -21,6 +21,7 @@ import { ManualMealModal } from '../../components/ManualMealModal';
 import { analyzeMealImage } from '../../services/aiVisionService';
 import { optimizeImageForAiVision } from '../../utils/imageOptimizer';
 import { useFitnessStore } from '../../store/useFitnessStore';
+import { safeHaptics } from '../../utils/haptics';
 import { colors } from '../../theme/colors';
 import { MealAnalysisResult } from '../../types';
 
@@ -103,6 +104,7 @@ export default function MealScanScreen() {
     }
 
     try {
+      safeHaptics.impactHeavy();
       const photo = await cameraRef.current.takePictureAsync({
         quality: 0.8,
       });
@@ -156,6 +158,7 @@ export default function MealScanScreen() {
 
   // Portion multiplier adjustment
   const handleAdjustPortion = (delta: number) => {
+    safeHaptics.selection();
     setPortionMultiplier((prev) => {
       const next = Math.round((prev + delta) * 10) / 10;
       return Math.max(0.2, Math.min(3.0, next));
@@ -186,6 +189,7 @@ export default function MealScanScreen() {
     });
 
     setIsSaving(false);
+    safeHaptics.success();
 
     Alert.alert(
       'Meal Logged',
@@ -370,7 +374,10 @@ export default function MealScanScreen() {
                       isSelected && styles.presetCleanBtnSelected,
                       pressed && styles.pressed,
                     ]}
-                    onPress={() => setPortionMultiplier(preset)}
+                    onPress={() => {
+                      safeHaptics.selection();
+                      setPortionMultiplier(preset);
+                    }}
                   >
                     <Text
                       style={[

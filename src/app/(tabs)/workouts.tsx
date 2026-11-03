@@ -17,6 +17,7 @@ import {
   calculateWorkoutVolume,
   useFitnessStore,
 } from '../../store/useFitnessStore';
+import { safeHaptics } from '../../utils/haptics';
 import { colors } from '../../theme/colors';
 import { ExerciseItem, ExerciseSet, WorkoutSession } from '../../types';
 
@@ -146,11 +147,13 @@ export default function WorkoutsScreen() {
   }, []);
 
   const handleAdjustRestTimer = useCallback((delta: number) => {
+    safeHaptics.selection();
     setRestTimerSeconds((prev) => Math.max(0, prev + delta));
     setRestTimerTotal((prev) => Math.max(15, prev + delta));
   }, []);
 
   const handlePresetRestTimer = useCallback((sec: number) => {
+    safeHaptics.selection();
     setRestTimerTotal(sec);
     setRestTimerSeconds(sec);
   }, []);
@@ -179,7 +182,10 @@ export default function WorkoutsScreen() {
       updateSetInActiveExercise(exerciseId, set.id, { completed: nextCompleted });
 
       if (nextCompleted) {
+        safeHaptics.success();
         triggerRestTimer(restTimerTotal > 0 ? restTimerTotal : 90);
+      } else {
+        safeHaptics.selection();
       }
     },
     [updateSetInActiveExercise, triggerRestTimer, restTimerTotal]
@@ -187,6 +193,7 @@ export default function WorkoutsScreen() {
 
   const handleAddSet = useCallback(
     (exerciseId: string) => {
+      safeHaptics.selection();
       addSetToActiveExercise(exerciseId);
     },
     [addSetToActiveExercise]
@@ -194,6 +201,7 @@ export default function WorkoutsScreen() {
 
   const handleRemoveSet = useCallback(
     (exerciseId: string, setId: string) => {
+      safeHaptics.warning();
       removeSetFromActiveExercise(exerciseId, setId);
     },
     [removeSetFromActiveExercise]
@@ -201,6 +209,7 @@ export default function WorkoutsScreen() {
 
   const handleRemoveExercise = useCallback(
     (exerciseId: string) => {
+      safeHaptics.warning();
       removeExerciseFromActiveWorkout(exerciseId);
     },
     [removeExerciseFromActiveWorkout]
@@ -240,6 +249,7 @@ export default function WorkoutsScreen() {
             });
             finishActiveWorkout();
             handleDismissRestTimer();
+            safeHaptics.success();
             Alert.alert(
               'Session Recorded',
               `Workout completed. You lifted ${totalVolume.toLocaleString()} kg of total volume today.`
@@ -325,7 +335,10 @@ export default function WorkoutsScreen() {
           <Pressable
             style={({ pressed }) => [styles.startEmptyBtn, pressed && styles.pressed]}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            onPress={() => startWorkout('Custom Workout')}
+            onPress={() => {
+              safeHaptics.impactLight();
+              startWorkout('Custom Workout');
+            }}
           >
             <Ionicons name="add" size={16} color={colors.textInverse} />
             <Text style={styles.startEmptyBtnText}>Start Empty</Text>
@@ -340,7 +353,10 @@ export default function WorkoutsScreen() {
             {/* Push Day */}
             <Pressable
               style={({ pressed }) => [styles.templateCard, pressed && styles.pressed]}
-              onPress={() => startWorkout('Push Day')}
+              onPress={() => {
+                safeHaptics.impactLight();
+                startWorkout('Push Day');
+              }}
             >
               <View style={[styles.templateIconBox, { backgroundColor: 'rgba(244, 63, 94, 0.1)' }]}>
                 <Ionicons name="flame-outline" size={20} color="#F43F5E" />
@@ -358,7 +374,10 @@ export default function WorkoutsScreen() {
             {/* Pull Day */}
             <Pressable
               style={({ pressed }) => [styles.templateCard, pressed && styles.pressed]}
-              onPress={() => startWorkout('Pull Day')}
+              onPress={() => {
+                safeHaptics.impactLight();
+                startWorkout('Pull Day');
+              }}
             >
               <View style={[styles.templateIconBox, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }]}>
                 <Ionicons name="barbell-outline" size={20} color="#38BDF8" />
@@ -376,7 +395,10 @@ export default function WorkoutsScreen() {
             {/* Leg Day */}
             <Pressable
               style={({ pressed }) => [styles.templateCard, pressed && styles.pressed]}
-              onPress={() => startWorkout('Leg Day')}
+              onPress={() => {
+                safeHaptics.impactLight();
+                startWorkout('Leg Day');
+              }}
             >
               <View style={[styles.templateIconBox, { backgroundColor: 'rgba(16, 185, 129, 0.1)' }]}>
                 <Ionicons name="fitness-outline" size={20} color="#10B981" />
@@ -887,6 +909,35 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 8,
   },
+  floatingRestTimerFinished: {
+    backgroundColor: '#0A2519',
+    borderColor: '#10B981',
+    borderWidth: 1.5,
+  },
+  restFinishedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  restFinishedIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  restFinishedTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#10B981',
+    letterSpacing: 0.5,
+  },
+  restFinishedSub: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
   restTimerContentRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1387,7 +1438,9 @@ const FloatingRestTimer = React.memo(function FloatingRestTimer({
   onPreset,
 }: FloatingRestTimerProps) {
   const [seconds, setSeconds] = useState<number>(initialSeconds);
+  const [isFinished, setIsFinished] = useState<boolean>(false);
   const onDismissRef = useRef(onDismiss);
+
   useEffect(() => {
     onDismissRef.current = onDismiss;
   }, [onDismiss]);
@@ -1401,7 +1454,11 @@ const FloatingRestTimer = React.memo(function FloatingRestTimer({
       setSeconds((prev) => {
         if (prev <= 1) {
           clearInterval(interval);
-          onDismissRef.current();
+          setIsFinished(true);
+          safeHaptics.timerFinished();
+          setTimeout(() => {
+            onDismissRef.current();
+          }, 2800);
           return 0;
         }
         return prev - 1;
@@ -1409,6 +1466,30 @@ const FloatingRestTimer = React.memo(function FloatingRestTimer({
     }, 1000);
     return () => clearInterval(interval);
   }, [initialSeconds]);
+
+  if (isFinished) {
+    return (
+      <Pressable
+        style={({ pressed }) => [
+          styles.floatingRestTimer,
+          styles.floatingRestTimerFinished,
+          pressed && styles.pressed,
+        ]}
+        onPress={() => onDismissRef.current()}
+      >
+        <View style={styles.restFinishedRow}>
+          <View style={styles.restFinishedIconBox}>
+            <Ionicons name="checkmark-circle" size={24} color="#10B981" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.restFinishedTitle}>REST COMPLETE!</Text>
+            <Text style={styles.restFinishedSub}>Ready for your next set • Tap to dismiss</Text>
+          </View>
+          <Ionicons name="close" size={18} color={colors.textSecondary} />
+        </View>
+      </Pressable>
+    );
+  }
 
   return (
     <View style={styles.floatingRestTimer}>
@@ -1426,7 +1507,10 @@ const FloatingRestTimer = React.memo(function FloatingRestTimer({
           <Pressable
             style={({ pressed }) => [styles.restTimerAdjustBtn, pressed && styles.pressed]}
             hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
-            onPress={() => onAdjust(-15)}
+            onPress={() => {
+              safeHaptics.selection();
+              onAdjust(-15);
+            }}
           >
             <Text style={styles.restTimerAdjustText}>-15s</Text>
           </Pressable>
@@ -1434,7 +1518,10 @@ const FloatingRestTimer = React.memo(function FloatingRestTimer({
           <Pressable
             style={({ pressed }) => [styles.restTimerAdjustBtn, pressed && styles.pressed]}
             hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
-            onPress={() => onAdjust(30)}
+            onPress={() => {
+              safeHaptics.selection();
+              onAdjust(30);
+            }}
           >
             <Text style={styles.restTimerAdjustText}>+30s</Text>
           </Pressable>
@@ -1442,7 +1529,10 @@ const FloatingRestTimer = React.memo(function FloatingRestTimer({
           <Pressable
             style={({ pressed }) => [styles.restTimerSkipBtn, pressed && styles.pressed]}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            onPress={onDismiss}
+            onPress={() => {
+              safeHaptics.selection();
+              onDismiss();
+            }}
           >
             <Text style={styles.restTimerSkipText}>Skip</Text>
           </Pressable>
@@ -1460,7 +1550,10 @@ const FloatingRestTimer = React.memo(function FloatingRestTimer({
               pressed && styles.pressed,
             ]}
             hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-            onPress={() => onPreset(sec)}
+            onPress={() => {
+              safeHaptics.selection();
+              onPreset(sec);
+            }}
           >
             <Text
               style={[
