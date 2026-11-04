@@ -69,4 +69,70 @@ describe('Toxicity Scoring Engine', () => {
     expect(updated.overallSafetyScore).toBeLessThanOrEqual(50);
     expect(updated.riskLevel).not.toBe('Safe');
   });
+
+  it('applies concentration position weighting (primary vs trace ingredient)', () => {
+    // Primary ingredient (index 0) gets 1.5x multiplier
+    const reportPrimary = analyzeIngredientsAndAdditives(
+      'Hair Oil A',
+      'Light Liquid Paraffin, Perfume',
+      []
+    );
+    // Trace ingredient (near end of long list) gets 0.7x multiplier
+    const reportTrace = analyzeIngredientsAndAdditives(
+      'Hair Oil B',
+      'Almond Oil, Sesame Oil, Coconut Oil, Amla, Bhringraj, Brahmi, Methi, Neem, Jatamansi, Light Liquid Paraffin',
+      []
+    );
+
+    const primaryDeduction = reportPrimary.harmfulIngredients.find((h) => h.name.includes('Light Liquid Paraffin'))?.deduction ?? 0;
+    const traceDeduction = reportTrace.harmfulIngredients.find((h) => h.name.includes('Light Liquid Paraffin'))?.deduction ?? 0;
+
+    expect(primaryDeduction).toBeGreaterThan(traceDeduction);
+    expect(reportPrimary.overallSafetyScore).toBeLessThan(reportTrace.overallSafetyScore);
+  });
+
+  it('enforces same-class deduction caps (e.g. artificial colors capped at 12)', () => {
+    // Product with 4 different artificial colors
+    const reportColors = analyzeIngredientsAndAdditives(
+      'Multi-Color Candy',
+      'Sugar, Glucose, Tartrazine (INS 102), Sunset Yellow (INS 110), Allura Red (INS 129), Brilliant Blue (INS 133)',
+      [],
+      null,
+      null
+    );
+
+    const colorItems = reportColors.harmfulIngredients.filter((h) => h.category === 'artificial_color');
+    expect(colorItems.length).toBeGreaterThanOrEqual(3);
+
+    const totalColorDeductions = colorItems.reduce((acc, h) => acc + (h.deduction ?? 0), 0);
+    expect(totalColorDeductions).toBeLessThanOrEqual(12); // Class cap for artificial colors is 12
+  });
+
+  it('preserves empty-data safeguard in recomputeReportScoreAndRisk', () => {
+    const emptyReport = analyzeIngredientsAndAdditives('Unknown Box', '', [], null, null);
+    expect(emptyReport.overallSafetyScore).toBe(50);
+    expect(emptyReport.hasInsufficientData).toBe(true);
+
+    const recomputed = recomputeReportScoreAndRisk(emptyReport);
+    expect(recomputed.overallSafetyScore).toBe(50);
+    expect(recomputed.riskLevel).toBe('Moderate');
+  });
+
+  it('includes per-ingredient why, source citation, and concentration rank', () => {
+    const report = analyzeIngredientsAndAdditives(
+      'Spicy Potato Chips',
+      'Potatoes, Palmolein Oil, Salt, TBHQ',
+      [],
+      null,
+      null
+    );
+
+    const tbhq = report.harmfulIngredients.find((h) => h.name.includes('TBHQ'));
+    expect(tbhq).toBeDefined();
+    expect(tbhq?.rationale).toBeDefined();
+    expect(tbhq?.source).toContain('EFSA');
+    expect(tbhq?.sourceUrl).toContain('https://');
+    expect(tbhq?.concentrationRank).toBeDefined();
+    expect(tbhq?.deduction).toBeGreaterThan(0);
+  });
 });

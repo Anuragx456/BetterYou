@@ -73,6 +73,12 @@ export interface HarmfulAdditive {
   category: string; // e.g. "Preservative", "Petroleum Filler", "Synthetic Pyrethroid", "Industrial Oil", "Azo Dye"
   healthImpact: string; // 1 concise sentence explaining physiological harm or consumer hazard
   severity: SeverityLevel;
+  rationale?: string; // Deep scientific rationale behind the screening flag
+  source?: string; // Official regulatory body: EFSA, FSSAI, IARC, CDSCO, WHO, BIS, CIBRC
+  sourceUrl?: string; // Direct URL to published scientific standard / monograph
+  concentrationRank?: string; // Proxy rank of ingredient order (e.g. "Primary (Rank #1)", "Major (Rank #3)", "Minor Additive")
+  deduction?: number; // Exact safety points deducted after class capping & concentration weighting
+  additiveClass?: string;
 }
 
 export interface IngredientAnalysis {
@@ -100,6 +106,7 @@ export interface ToxicityReport {
   novaGroup?: NovaGroup | null;
   nutriscoreGrade?: NutriscoreGrade | null;
   allIngredients?: string[];
+  hasInsufficientData?: boolean;
 }
 
 export interface ScannedProduct {

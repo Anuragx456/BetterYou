@@ -4,11 +4,16 @@ import {
   NovaGroup,
   NutriscoreGrade,
   RiskLevel,
-  SeverityLevel,
   SupermarketCategory,
   TargetExposure,
   ToxicityReport,
 } from '../types';
+import {
+  parseOrderedIngredientsList,
+  matchAdditiveRule,
+  getClassCap,
+} from './ingredientNormalizer';
+import additiveRulesData from '../data/additiveRules.v1.json';
 
 export class ProductNotFoundError extends Error {
   readonly barcode: string;
@@ -20,612 +25,119 @@ export class ProductNotFoundError extends Error {
 }
 
 /**
- * Toxicological database for common supermarket food and chemical additives
+ * Supermarket category classifier based on packaging terms and regulatory exposure
  */
-const KNOWN_ADDITIVES_DATABASE: Record<string, HarmfulAdditive> = {
-  // Food Additives & Flavour Enhancers
-  'en:e621': {
-    name: 'Monosodium Glutamate (MSG / INS 621)',
-    category: 'Flavor Enhancer',
-    healthImpact: 'Excitotoxic neurotransmitter stimulant; can trigger migraines and appetite overstimulation.',
-    severity: 'moderate',
-  },
-  'en:e627': {
-    name: 'Disodium Guanylate (INS 627)',
-    category: 'Flavor Enhancer',
-    healthImpact: 'Purine-rich nucleotide flavor booster; metabolized to uric acid, problematic for gout sufferers.',
-    severity: 'moderate',
-  },
-  'en:e631': {
-    name: 'Disodium Inosinate (INS 631)',
-    category: 'Flavor Enhancer',
-    healthImpact: 'Synergistic excitotoxin often paired with MSG to amplify hyper-palatability in junk snacks.',
-    severity: 'moderate',
-  },
-  'en:e635': {
-    name: 'Disodium 5-Ribonucleotides (INS 635)',
-    category: 'Flavor Enhancer',
-    healthImpact: 'Potent taste-receptor agonist linked to skin rashes and pruritus in sensitive individuals.',
-    severity: 'moderate',
-  },
-  'en:e250': {
-    name: 'Sodium Nitrite (INS 250)',
-    category: 'Preservative / Color Fixative',
-    healthImpact: 'Forms carcinogenic nitrosamines in gastric acid; classified as a colorectal carcinogen risk.',
-    severity: 'high',
-  },
-  'en:e150d': {
-    name: 'Ammonia Caramel Color (INS 150d)',
-    category: 'Artificial Color',
-    healthImpact: 'Manufactured with ammonia/sulfites; may contain 4-MEI, a classified potential carcinogen.',
-    severity: 'high',
-  },
-  'en:e951': {
-    name: 'Aspartame (INS 951)',
-    category: 'Artificial Sweetener',
-    healthImpact: 'Classified as possibly carcinogenic (IARC Group 2B); alters gut microbiome diversity.',
-    severity: 'high',
-  },
-  'en:e950': {
-    name: 'Acesulfame Potassium (Ace-K / INS 950)',
-    category: 'Artificial Sweetener',
-    healthImpact: 'Contains methylene chloride traces; can impair metabolic satiety signaling.',
-    severity: 'moderate',
-  },
-  'en:e955': {
-    name: 'Sucralose (INS 955)',
-    category: 'Artificial Sweetener',
-    healthImpact: 'Can alter gut microbiome balance and form chloropropanols when baked at high heat.',
-    severity: 'moderate',
-  },
-  'en:e954': {
-    name: 'Sodium Saccharin (INS 954)',
-    category: 'Artificial Sweetener',
-    healthImpact: 'Synthetic petroleum-derived non-caloric sweetener; linked to gut microbial dysbiosis.',
-    severity: 'moderate',
-  },
-  'en:e171': {
-    name: 'Titanium Dioxide (INS 171 / CI 77891)',
-    category: 'Whitening Colorant / Pigment',
-    healthImpact: 'Banned in EU food; nanoparticles accumulate in tissues with genotoxicity and cell damage concerns.',
-    severity: 'high',
-  },
-  'en:e102': {
-    name: 'Tartrazine (Yellow 5 / INS 102)',
-    category: 'Artificial Azo Dye',
-    healthImpact: 'Azo dye linked to hyperactivity in children, allergic hives, and cellular oxidative stress.',
-    severity: 'moderate',
-  },
-  'en:e110': {
-    name: 'Sunset Yellow FCF (Yellow 6 / INS 110)',
-    category: 'Artificial Azo Dye',
-    healthImpact: 'Petroleum-derived azo dye linked to hyperactivity, immune hypersensitivity, and gut inflammation.',
-    severity: 'moderate',
-  },
-  'en:e129': {
-    name: 'Allura Red AC (Red 40 / INS 129)',
-    category: 'Artificial Azo Dye',
-    healthImpact: 'Synthetic dye that may exacerbate gut inflammation, colitis risk, and childhood behavioral issues.',
-    severity: 'high',
-  },
-  'en:e124': {
-    name: 'Ponceau 4R (INS 124)',
-    category: 'Artificial Azo Dye',
-    healthImpact: 'Red azo colorant restricted in multiple countries due to intolerance and hyperactivity concerns.',
-    severity: 'high',
-  },
-  'en:e133': {
-    name: 'Brilliant Blue FCF (Blue 1 / INS 133)',
-    category: 'Artificial Color',
-    healthImpact: 'Synthetic triarylmethane dye associated with allergic cross-reactions.',
-    severity: 'low',
-  },
-  'en:e407': {
-    name: 'Carrageenan (INS 407)',
-    category: 'Thickener / Emulsifier',
-    healthImpact: 'Can induce intestinal inflammation, mucosal erosion, and leaky gut disruption.',
-    severity: 'high',
-  },
-  'en:e433': {
-    name: 'Polysorbate 80 (INS 433)',
-    category: 'Synthetic Emulsifier',
-    healthImpact: 'Detergent-like action strips mucus barrier of the colon, promoting metabolic inflammation.',
-    severity: 'high',
-  },
-  'en:e466': {
-    name: 'Carboxymethylcellulose (CMC / INS 466)',
-    category: 'Emulsifier / Stabilizer',
-    healthImpact: 'Disrupts gut microbiota homeostasis and increases risk of chronic intestinal inflammation.',
-    severity: 'moderate',
-  },
-  'en:e319': {
-    name: 'Tertiary Butylhydroquinone (TBHQ / INS 319)',
-    category: 'Synthetic Antioxidant',
-    healthImpact: 'Petroleum byproduct linked to cellular oxidative stress, liver enlargement, and immune dysregulation.',
-    severity: 'high',
-  },
-  'en:e320': {
-    name: 'Butylated Hydroxyanisole (BHA / INS 320)',
-    category: 'Synthetic Preservative',
-    healthImpact: 'Anticipated human carcinogen with endocrine-disrupting anti-androgenic effects.',
-    severity: 'high',
-  },
-  'en:e321': {
-    name: 'Butylated Hydroxytoluene (BHT / INS 321)',
-    category: 'Synthetic Preservative',
-    healthImpact: 'Synthetic stabilizer associated with liver enzyme changes and endocrine disruption.',
-    severity: 'moderate',
-  },
-  'en:e211': {
-    name: 'Sodium Benzoate (INS 211)',
-    category: 'Preservative',
-    healthImpact: 'Can combine with Vitamin C (ascorbic acid) to form carcinogenic benzene; mitochondrial irritant.',
-    severity: 'high',
-  },
-  'en:e202': {
-    name: 'Potassium Sorbate (INS 202)',
-    category: 'Preservative',
-    healthImpact: 'Synthetic antimicrobial preservative; low acute toxicity but mild mucous membrane irritant.',
-    severity: 'low',
-  },
-  'en:e218': {
-    name: 'Methylparaben (INS 218)',
-    category: 'Endocrine Disrupting Preservative',
-    healthImpact: 'Mimics estrogen in human tissue; linked to reproductive toxicity and cellular disruption.',
-    severity: 'high',
-  },
-  'en:e216': {
-    name: 'Propylparaben (INS 216)',
-    category: 'Endocrine Disrupting Preservative',
-    healthImpact: 'Strong estrogenic activity; banned in EU food and strictly regulated in cosmetics.',
-    severity: 'high',
-  },
-  'en:e1520': {
-    name: 'Propylene Glycol (INS 1520)',
-    category: 'Humectant / Solvent',
-    healthImpact: 'Petroleum-derived carrier; can act as a penetration enhancer carrying allergens through the skin barrier.',
-    severity: 'low',
-  },
-};
-
-/**
- * Comprehensive chemical & additive keywords covering Indian supermarket goods:
- * Foods, Personal Care, Hair Oils, Oral Care, Household Cleaning, Pest Control, Baby Care, Ayurveda & OTC.
- */
-const HARMFUL_TEXT_KEYWORDS: {
-  keyword: RegExp;
-  name: string;
-  category: string;
-  healthImpact: string;
-  severity: SeverityLevel;
-}[] = [
-  // 1. Indian Food & Packaged Groceries
-  {
-    keyword: /high[\s-]fructose[\s-]corn[\s-]syrup|liquid[\s-]glucose|invert[\s-]sugar[\s-]syrup/i,
-    name: 'High Fructose Corn Syrup / Liquid Glucose',
-    category: 'Industrial Refined Sweetener',
-    healthImpact: 'Rapidly metabolized by the liver into visceral fat; primary driver of non-alcoholic fatty liver disease (NAFLD).',
-    severity: 'high',
-  },
-  {
-    keyword: /palm\s*(?:olein|oil|kernel)|refined\s*palmolein/i,
-    name: 'Refined Palm Olein / Palm Oil',
-    category: 'Industrial Frying Oil',
-    healthImpact: 'Refined at high temperatures generating mutagenic glycidyl esters; heavy saturated palmitic acid content.',
-    severity: 'moderate',
-  },
-  {
-    keyword: /hydrogenated|trans[\s-]fat|vanaspati|dalda/i,
-    name: 'Hydrogenated Vegetable Fat (Vanaspati / Trans Fat)',
-    category: 'Industrial Trans Fat',
-    healthImpact: 'Significantly raises atherogenic LDL cholesterol while depleting protective HDL; major cardiovascular risk.',
-    severity: 'high',
-  },
-  {
-    keyword: /monosodium\s*glutamate|ins\s*621|msg\b|flavour\s*enhancer\s*\(?621\)?/i,
-    name: 'Monosodium Glutamate (MSG / INS 621)',
-    category: 'Flavor Enhancer',
-    healthImpact: 'Excitotoxic neurotransmitter stimulant; can trigger migraines and appetite overstimulation.',
-    severity: 'moderate',
-  },
-  {
-    keyword: /ins\s*627|ins\s*631|ins\s*635|disodium\s*inosinate|disodium\s*guanylate/i,
-    name: 'Nucleotide Flavor Boosters (INS 627 / 631 / 635)',
-    category: 'Synthetic Flavor Enhancer',
-    healthImpact: 'Artificial savory agonists used to mask low-grade processed ingredients and trigger hedonic eating.',
-    severity: 'moderate',
-  },
-  {
-    keyword: /tbhq|tertiary\s*butylhydroquinone|ins\s*319/i,
-    name: 'Tertiary Butylhydroquinone (TBHQ / INS 319)',
-    category: 'Petroleum Antioxidant',
-    healthImpact: 'Petroleum byproduct linked to cellular oxidative stress, liver enlargement, and immune dysregulation.',
-    severity: 'high',
-  },
-  {
-    keyword: /\b(?:bha|bht)\b|butylated\s*hydroxyanisole|butylated\s*hydroxytoluene|ins\s*320|ins\s*321/i,
-    name: 'BHA / BHT (INS 320 / 321)',
-    category: 'Synthetic Preservative',
-    healthImpact: 'Suspected endocrine disruptor with anti-androgenic activity and cellular toxicity.',
-    severity: 'high',
-  },
-  {
-    keyword: /ammonia\s*caramel|caramel\s*(?:iv|color\s*iv|color\s*e150d|ins\s*150d)/i,
-    name: 'Ammonia Caramel Color (INS 150d)',
-    category: 'Artificial Color',
-    healthImpact: 'Manufactured with ammonia/sulfites; may contain 4-MEI, a classified potential carcinogen.',
-    severity: 'high',
-  },
-  {
-    keyword: /tartrazine|ins\s*102|yellow\s*5/i,
-    name: 'Tartrazine (Yellow 5 / INS 102)',
-    category: 'Artificial Azo Dye',
-    healthImpact: 'Petroleum-derived azo dye linked to hyperactivity in children and hypersensitivity reactions.',
-    severity: 'moderate',
-  },
-  {
-    keyword: /sunset\s*yellow|ins\s*110|yellow\s*6/i,
-    name: 'Sunset Yellow FCF (Yellow 6 / INS 110)',
-    category: 'Artificial Azo Dye',
-    healthImpact: 'Synthetic dye that may exacerbate gut inflammation and allergic hives.',
-    severity: 'moderate',
-  },
-  {
-    keyword: /allura\s*red|ins\s*129|red\s*40|ponceau\s*4r|ins\s*124/i,
-    name: 'Synthetic Red Dye (Red 40 / Ponceau 4R)',
-    category: 'Artificial Azo Dye',
-    healthImpact: 'Azo dye linked to intestinal mucosal irritation and hyperactivity in children.',
-    severity: 'high',
-  },
-  {
-    keyword: /sodium\s*benzoate|ins\s*211/i,
-    name: 'Sodium Benzoate (INS 211)',
-    category: 'Synthetic Preservative',
-    healthImpact: 'Can combine with Vitamin C (ascorbic acid) to form carcinogenic benzene in liquid solutions.',
-    severity: 'high',
-  },
-  {
-    keyword: /aspartame|acesulfame|sucralose|saccharin|ins\s*950|ins\s*951|ins\s*954|ins\s*955/i,
-    name: 'Artificial Non-Nutritive Sweeteners',
-    category: 'Synthetic Sweetener',
-    healthImpact: 'Disrupts healthy gut microbiome diversity and alters metabolic insulin sensitivity.',
-    severity: 'moderate',
-  },
-
-  // 2. Hair Care & Hair Oils (Major Indian Supermarket Trap)
-  {
-    keyword: /mineral\s*oil|light\s*liquid\s*paraffin|paraffinum\s*liquidum|llp\b/i,
-    name: 'Light Liquid Paraffin (Mineral Oil / LLP)',
-    category: 'Petroleum Filler Oil',
-    healthImpact: 'Cheap crude oil distillate that forms an occlusive barrier on the scalp, clogging follicles with zero biological nutrients.',
-    severity: 'moderate',
-  },
-  {
-    keyword: /dimethicone|cyclopentasiloxane|amodimethicone|cyclomethicone/i,
-    name: 'Insoluble Silicones (Dimethicone / Cyclopentasiloxane)',
-    category: 'Synthetic Conditioning Polymer',
-    healthImpact: 'Hydrophobic silicone coating that suffocates hair cuticle over time and requires harsh sulfates to remove.',
-    severity: 'low',
-  },
-  {
-    keyword: /p-phenylenediamine|para-phenylenediamine|\bppd\b|resorcinol/i,
-    name: 'p-Phenylenediamine (PPD) & Resorcinol',
-    category: 'Oxidative Hair Dye Coupler',
-    healthImpact: 'High-concern contact allergen and potential mutagen; linked to severe facial dermatitis and endocrine disruption.',
-    severity: 'high',
-  },
-
-  // 3. Personal Care, Soaps & Skincare
-  {
-    keyword: /sodium\s*lauryl\s*sulfate|\bsls\b/i,
-    name: 'Sodium Lauryl Sulfate (SLS)',
-    category: 'Harsh Anionic Surfactant',
-    healthImpact: 'Strips the protective skin barrier and lipid layer; primary cause of recurrent canker sores in toothpastes.',
-    severity: 'moderate',
-  },
-  {
-    keyword: /sodium\s*laureth\s*sulfate|\bsles\b/i,
-    name: 'Sodium Laureth Sulfate (SLES)',
-    category: 'Ethoxylated Surfactant',
-    healthImpact: 'Manufactured via ethoxylation, creating potential trace contamination of carcinogenic 1,4-dioxane.',
-    severity: 'low',
-  },
-  {
-    keyword: /methylparaben|propylparaben|butylparaben|ethylparaben|isobutylparaben/i,
-    name: 'Parabens (Endocrine Disruptors)',
-    category: 'Synthetic Preservative',
-    healthImpact: 'Xenoestrogens that bind to human estrogen receptors; detected in human breast tissue and linked to hormonal imbalance.',
-    severity: 'high',
-  },
-  {
-    keyword: /triclosan|triclocarban/i,
-    name: 'Triclosan / Triclocarban',
-    category: 'Antibacterial Agent',
-    healthImpact: 'Endocrine disruptor affecting thyroid metabolism and promoting antimicrobial-resistant superbugs.',
-    severity: 'high',
-  },
-  {
-    keyword: /hydroquinone/i,
-    name: 'Hydroquinone',
-    category: 'Depigmenting Chemical',
-    healthImpact: 'Cytotoxic melanocyte inhibitor; banned in OTC cosmetics globally due to exogenous ochronosis and carcinogenicity concerns.',
-    severity: 'high',
-  },
-  {
-    keyword: /dmdm\s*hydantoin|diazolidinyl\s*urea|imidazolidinyl\s*urea|quaternium-15/i,
-    name: 'Formaldehyde Releasing Preservatives',
-    category: 'Formaldehyde Donor',
-    healthImpact: 'Slowly releases toxic formaldehyde into cosmetic emulsions; recognized human carcinogen and severe sensitizer.',
-    severity: 'high',
-  },
-  {
-    keyword: /methylchloroisothiazolinone|methylisothiazolinone|\bmci\b|\bmi\b/i,
-    name: 'MCI / MI (Isothiazolinones)',
-    category: 'Biocidal Preservative',
-    healthImpact: 'Extreme contact allergen causing chemical burns and severe contact dermatitis; banned in leave-on EU cosmetics.',
-    severity: 'high',
-  },
-  {
-    keyword: /aluminium\s*chlorohydrate|aluminium\s*zirconium/i,
-    name: 'Aluminium Chlorohydrate',
-    category: 'Antiperspirant Pore Blocker',
-    healthImpact: 'Physically precipitates in sweat ducts; potential neurotoxin with concerns regarding bioaccumulation.',
-    severity: 'moderate',
-  },
-  {
-    keyword: /diethyl\s*phthalate|\bdep\b|phthalate/i,
-    name: 'Phthalates (DEP / Diethyl Phthalate)',
-    category: 'Plasticizer & Fragrance Fixative',
-    healthImpact: 'Anti-androgenic plasticizer used in Indian perfumes and incense; impairs reproductive hormone regulation.',
-    severity: 'high',
-  },
-
-  // 4. Household Cleaning & Laundry
-  {
-    keyword: /linear\s*alkylbenzene\s*sulfon|alkylbenzene\s*sulfonate|\blabs\b|\blas\b/i,
-    name: 'Linear Alkylbenzene Sulfonate (LABS / LAS)',
-    category: 'Industrial Detergent Surfactant',
-    healthImpact: 'Caustic surfactant that causes contact dermatitis on hands and is persistent and toxic to aquatic ecosystems.',
-    severity: 'moderate',
-  },
-  {
-    keyword: /sodium\s*hypochlorite|chlorine\s*bleach/i,
-    name: 'Sodium Hypochlorite (Chlorine Bleach)',
-    category: 'Corrosive Oxidizing Biocide',
-    healthImpact: 'Releases irritating chlorine vapors that damage airway epithelial cells; corrosive to skin and eyes.',
-    severity: 'high',
-  },
-  {
-    keyword: /hydrochloric\s*acid|muriatic\s*acid/i,
-    name: 'Hydrochloric Acid (HCl ~10.5%)',
-    category: 'Corrosive Mineral Acid',
-    healthImpact: 'Releases choking acidic fumes that trigger bronchospasm and pulmonary irritation; severely corrosive.',
-    severity: 'high',
-  },
-  {
-    keyword: /benzalkonium\s*chloride|quaternary\s*ammonium|\bbkc\b/i,
-    name: 'Benzalkonium Chloride (BKC / Quat)',
-    category: 'Quaternary Disinfectant Surfactant',
-    healthImpact: 'Known cause of occupational asthma; acute respiratory irritant and highly toxic to household pets (especially cats).',
-    severity: 'high',
-  },
-
-  // 5. Pest Control & Mosquito Repellents
-  {
-    keyword: /transfluthrin/i,
-    name: 'Transfluthrin (0.88% w/w)',
-    category: 'Synthetic Pyrethroid Neurotoxin',
-    healthImpact: 'Volatile insect neurotoxin vaporized into bedroom air; chronic inhalation triggers morning headaches, lethargy, and airway irritation.',
-    severity: 'high',
-  },
-  {
-    keyword: /prallethrin/i,
-    name: 'Prallethrin',
-    category: 'Synthetic Pyrethroid Insecticide',
-    healthImpact: 'Voltage-gated sodium channel disruptor; prolonged inhalation in enclosed rooms causes dizziness and nausea.',
-    severity: 'high',
-  },
-  {
-    keyword: /cypermethrin|deltamethrin|permethrin/i,
-    name: 'Agricultural / Domestic Pyrethroids',
-    category: 'Broad-Spectrum Insecticide',
-    healthImpact: 'Neurotoxic insecticide with aquatic toxicity; can trigger skin paresthesia and respiratory distress.',
-    severity: 'high',
-  },
-  {
-    keyword: /deet\b|diethyltoluamide|n,n-diethyl/i,
-    name: 'DEET (N,N-Diethyl-meta-toluamide)',
-    category: 'Chemical Insect Repellent',
-    healthImpact: 'Penetrates human skin into blood circulation; high concentrations can cause skin blistering and neurotoxic side effects.',
-    severity: 'moderate',
-  },
-  {
-    keyword: /paradichlorobenzene|\bpdcb\b/i,
-    name: 'Paradichlorobenzene (PDCB)',
-    category: 'Volatile Fumigant',
-    healthImpact: 'Used in mothballs and urinal/bathroom blocks; classified animal carcinogen linked to liver and kidney toxicity.',
-    severity: 'high',
-  },
-  {
-    keyword: /deodorized\s*kerosene|petroleum\s*distillate/i,
-    name: 'Deodorized Kerosene Solvent Base',
-    category: 'Petroleum Hydrocarbon Solvent',
-    healthImpact: 'Aerosolized petroleum hydrocarbons that irritate respiratory mucous membranes and lungs.',
-    severity: 'moderate',
-  },
-
-  // 6. Baby Care
-  {
-    keyword: /talc\b|hydrated\s*magnesium\s*silicate/i,
-    name: 'Talc (Hydrated Magnesium Silicate)',
-    category: 'Mineral Dust / Absorbent',
-    healthImpact: 'Fine particulate dust that causes infant pulmonary inflammation (talcosis); historical asbestos contamination risks.',
-    severity: 'high',
-  },
-  {
-    keyword: /phenoxyethanol/i,
-    name: 'Phenoxyethanol',
-    category: 'Glycol Ether Preservative',
-    healthImpact: 'Infant exposure can suppress the central nervous system; restricted in baby wipes in France/EU.',
-    severity: 'moderate',
-  },
-
-  // 7. Ayurveda & OTC Formulations
-  {
-    keyword: /sodium\s*methylparaben|sodium\s*propylparaben/i,
-    name: 'Sodium Methylparaben (Preservative in Ayurvedic Tonics)',
-    category: 'Chemical Preservative in Herbal Medicine',
-    healthImpact: 'Synthetic chemical preservative added to shelf-stable Ayurvedic syrups, counteracting holistic purity claims.',
-    severity: 'high',
-  },
-  {
-    keyword: /camphor|kapur\b/i,
-    name: 'Camphor (High Concentration)',
-    category: 'Topical Terpenoid Counter-Irritant',
-    healthImpact: 'Readily absorbed through skin; toxic if accidentally ingested, causing rapid seizures and neurotoxicity in infants.',
-    severity: 'moderate',
-  },
-  {
-    keyword: /methyl\s*salicylate|wintergreen\s*oil/i,
-    name: 'Methyl Salicylate',
-    category: 'Topical Analgesic Ester',
-    healthImpact: 'Rapid dermal absorption; over-application over large skin areas can cause systemic salicylate toxicity.',
-    severity: 'moderate',
-  },
-];
-
-/**
- * OpenFoodFacts & OpenBeautyFacts JSON shape
- */
-interface OpenFactsProductResponse {
-  status: number;
-  status_verbose?: string;
-  product?: {
-    product_name?: string;
-    product_name_en?: string;
-    product_name_hi?: string;
-    ingredients_text?: string;
-    ingredients_text_en?: string;
-    nutriscore_grade?: string;
-    nova_group?: number;
-    additives_tags?: string[];
-    categories?: string;
-  };
-}
-
-/**
- * Infer Indian Supermarket category from product metadata
- */
-export function detectSupermarketCategory(productName: string, ingredientsText: string): SupermarketCategory {
+function detectSupermarketCategory(
+  productName: string,
+  ingredientsText: string
+): SupermarketCategory {
   const combined = `${productName} ${ingredientsText}`.toLowerCase();
 
   if (
-    /transfluthrin|prallethrin|mosquito|vaporizer|all[\s-]out|good[\s-]knight|baygon|hit\b|coil|insecticide|pest|pyrethroid|deet|odonil|paradichlorobenzene/i.test(
-      combined
-    )
+    combined.includes('mosquito') ||
+    combined.includes('vaporizer') ||
+    combined.includes('liquidator') ||
+    combined.includes('coil') ||
+    combined.includes('all out') ||
+    combined.includes('good knight') ||
+    combined.includes('baygon') ||
+    combined.includes('hit spray') ||
+    combined.includes('transfluthrin') ||
+    combined.includes('prallethrin')
   ) {
     return 'Pest Control';
   }
 
   if (
-    /hair[\s-]oil|shampoo|conditioner|hair[\s-]color|hair[\s-]dye|liquid[\s-]paraffin|mineral\s*oil|amla\s*oil|almond\s*drops|parachute|keo[\s-]karpin|scalp|serum/i.test(
-      combined
-    )
-  ) {
-    return 'Hair Care';
-  }
-
-  if (
-    /toothpaste|dentifrice|oral[\s-]care|mouthwash|toothpowder|colgate|pepsodent|sensodyne|close[\s-]up|dant[\s-]kanti|dabur[\s-]red/i.test(
-      combined
-    )
-  ) {
-    return 'Oral Care';
-  }
-
-  if (
-    /detergent|floor[\s-]cleaner|disinfectant|surface[\s-]cleaner|dishwash|toilet[\s-]cleaner|harpic|lizol|vim\b|surf[\s-]excel|ariel|tide|bleach|hypochlorite|colin|pril|wheel/i.test(
-      combined
-    )
-  ) {
-    return 'Household & Cleaning';
-  }
-
-  if (
-    /baby[\s-]powder|baby[\s-]soap|baby[\s-]oil|baby[\s-]wash|baby[\s-]wipes|diaper|baby[\s-]lotion|cerelac|johnson.*baby|himalaya.*baby/i.test(
-      combined
-    )
+    combined.includes('baby powder') ||
+    combined.includes('baby oil') ||
+    combined.includes('baby lotion') ||
+    combined.includes('baby wash') ||
+    combined.includes('diaper') ||
+    combined.includes('johnson') ||
+    combined.includes('sebamed')
   ) {
     return 'Baby Care';
   }
 
   if (
-    /chyawanprash|ayurvedic|balm|amrutanjan|vicks|moov|pain[\s-]relief|iodex|bhasma|churna|herbal[\s-]supplement|ayush|zandu|baidyanath/i.test(
-      combined
-    )
+    combined.includes('toothpaste') ||
+    combined.includes('mouthwash') ||
+    combined.includes('tooth powder') ||
+    combined.includes('colgate') ||
+    combined.includes('sensodyne') ||
+    combined.includes('dant kanti') ||
+    combined.includes('close up') ||
+    combined.includes('pepsodent') ||
+    combined.includes('oral-b')
   ) {
-    return 'Ayurveda & OTC';
+    return 'Oral Care';
   }
 
   if (
-    /face[\s-]wash|soap|body[\s-]wash|fairness|glow[\s-]&[\s-]lovely|sunscreen|cream|lotion|moisturizer|dettol|lifebuoy|dove|lux|cinthol|paraben|skin/i.test(
-      combined
-    )
+    combined.includes('hair oil') ||
+    combined.includes('shampoo') ||
+    combined.includes('conditioner') ||
+    combined.includes('hair dye') ||
+    combined.includes('hair serum') ||
+    combined.includes('almond drops') ||
+    combined.includes('parachute') ||
+    combined.includes('head & shoulders') ||
+    combined.includes('pantene')
+  ) {
+    return 'Hair Care';
+  }
+
+  if (
+    combined.includes('floor cleaner') ||
+    combined.includes('toilet cleaner') ||
+    combined.includes('dishwash') ||
+    combined.includes('detergent') ||
+    combined.includes('disinfectant') ||
+    combined.includes('floor') ||
+    combined.includes('lizol') ||
+    combined.includes('harpic') ||
+    combined.includes('colin') ||
+    combined.includes('surf excel') ||
+    combined.includes('ariel') ||
+    combined.includes('vim')
+  ) {
+    return 'Household & Cleaning';
+  }
+
+  if (
+    combined.includes('soap') ||
+    combined.includes('cream') ||
+    combined.includes('lotion') ||
+    combined.includes('body wash') ||
+    combined.includes('sunscreen') ||
+    combined.includes('face wash') ||
+    combined.includes('fair & lovely') ||
+    combined.includes('glow & lovely') ||
+    combined.includes('dettol') ||
+    combined.includes('nivea') ||
+    combined.includes('dove') ||
+    combined.includes('ponds')
   ) {
     return 'Personal Care & Skincare';
+  }
+
+  if (
+    combined.includes('chyawanprash') ||
+    combined.includes('balm') ||
+    combined.includes('churna') ||
+    combined.includes('asava') ||
+    combined.includes('zandu') ||
+    combined.includes('dabur') ||
+    combined.includes('baidyanath') ||
+    combined.includes('patanjali')
+  ) {
+    return 'Ayurveda & OTC';
   }
 
   return 'Food & Beverages';
 }
 
-/**
- * Generate context-aware Indian Supermarket warning alerts
- */
-export function getIndianMarketAlert(
-  category: SupermarketCategory,
-  harmfulAdditives: HarmfulAdditive[],
-  ingredientsText: string
-): string | null {
-  const text = ingredientsText.toLowerCase();
-
-  if (category === 'Hair Care' && /mineral\s*oil|light\s*liquid\s*paraffin|paraffinum\s*liquidum|llp/i.test(text)) {
-    return 'Indian Supermarket Trap: Contains 75-85% Light Liquid Paraffin (mineral oil). Genuine plant/herbal oil constitutes less than 2-3% of the bottle.';
-  }
-
-  if (category === 'Pest Control' && /transfluthrin|prallethrin/i.test(text)) {
-    return 'Indoor Air Warning: Vaporizing synthetic pyrethroids (Transfluthrin) continuously overnight in closed bedrooms causes respiratory airway inflammation and morning migraines.';
-  }
-
-  if (category === 'Household & Cleaning' && /benzalkonium\s*chloride|quaternary|bkc/i.test(text)) {
-    return 'Pet & Toddler Warning: Contains Benzalkonium Chloride (Quat). Toxic to household cats (who lick paws) and irritates crawling infants.';
-  }
-
-  if (category === 'Oral Care' && /sodium\s*lauryl\s*sulfate|sls/i.test(text)) {
-    return 'Oral Mucosa Alert: Formulated with Sodium Lauryl Sulfate (SLS), a harsh foaming detergent known to strip protective buccal tissue and trigger canker sores.';
-  }
-
-  if (category === 'Baby Care' && /talc\b|magnesium\s*silicate/i.test(text)) {
-    return 'Pediatric Safety Notice: Talc-based powders carry respiratory inhalation hazards for infant lungs; Indian pediatricians advise cornstarch-based alternatives.';
-  }
-
-  if (category === 'Ayurveda & OTC' && /methylparaben|propylparaben/i.test(text)) {
-    return 'Hidden Additive Alert: Marketed as traditional Ayurvedic formulation, yet preserved using synthetic sodium methylparaben and high sucrose syrup.';
-  }
-
-  if (category === 'Food & Beverages' && /palm\s*(?:olein|oil)|tbhq/i.test(text)) {
-    return 'Snack Aisle Alert: Deep-fried in high-heat Refined Palm Olein stabilized with TBHQ petroleum preservative.';
-  }
-
-  if (harmfulAdditives.some((a) => a.severity === 'high')) {
-    return 'Caution: Contains flagged chemicals restricted or under investigation by global consumer safety agencies.';
-  }
-
-  return null;
-}
-
-/**
- * Determine regulatory body and target exposure based on category
- */
 function getCategoryRegulatoryDetails(category: SupermarketCategory): {
   regulatoryStandard: IndianRegulatoryStandard;
   targetExposure: TargetExposure;
@@ -647,18 +159,58 @@ function getCategoryRegulatoryDetails(category: SupermarketCategory): {
       return { regulatoryStandard: 'CDSCO', targetExposure: 'Dermal Absorption' };
     case 'Ayurveda & OTC':
       return { regulatoryStandard: 'AYUSH', targetExposure: 'Ingestion' };
-    default:
-      return { regulatoryStandard: 'BIS', targetExposure: 'General' };
   }
 }
 
 /**
- * Compute positive "Safe For" certification tags
+ * Generates an objective, evidence-based Indian supermarket market alert
+ */
+function getIndianMarketAlert(
+  category: SupermarketCategory,
+  harmfulIngredients: HarmfulAdditive[],
+  ingredientsText: string
+): string | null {
+  const lower = ingredientsText.toLowerCase();
+
+  if (category === 'Hair Care' && (lower.includes('light liquid paraffin') || lower.includes('mineral oil'))) {
+    return 'Hair Formulation Notice: Contains Light Liquid Paraffin (mineral oil). Permitted by CDSCO; acts as an occlusive lubricant with lower biological lipid affinity than cold-pressed vegetable oils.';
+  }
+
+  if (category === 'Pest Control' && (lower.includes('transfluthrin') || lower.includes('prallethrin'))) {
+    return 'Indoor Ventilation Advisory: Contains synthetic pyrethroids (Transfluthrin/Prallethrin, CIBRC registered). Adequate bedroom air circulation is recommended during overnight vaporization.';
+  }
+
+  if (category === 'Oral Care' && lower.includes('sodium lauryl sulfate')) {
+    return 'Oral Mucosa Sensitivity Notice: Formulated with Sodium Lauryl Sulfate (SLS). Clinical research associates SLS with buccal membrane irritation in individuals prone to recurrent aphthous ulcers.';
+  }
+
+  if (category === 'Household & Cleaning' && (lower.includes('benzalkonium chloride') || lower.includes('bkc'))) {
+    return 'Household Surface Notice: Contains Benzalkonium Chloride (quat disinfectant, BIS standard). Ensure floors dry completely before allowing domestic pets or infants contact with surfaces.';
+  }
+
+  if (category === 'Baby Care' && lower.includes('talc')) {
+    return 'Pediatric Inhalation Caution: Formulated with cosmetic-grade talc. Pediatric health guidelines advise gentle application away from the face to prevent infant dust cloud inhalation.';
+  }
+
+  if (category === 'Ayurveda & OTC' && (lower.includes('methylparaben') || lower.includes('sodium benzoate'))) {
+    return 'Formulation Notice: Herbal OTC syrup preserved with synthetic antimicrobial preservatives (parabens/benzoates) under AYUSH guidelines.';
+  }
+
+  if (harmfulIngredients.some((h) => h.severity === 'high')) {
+    const topHigh = harmfulIngredients.find((h) => h.severity === 'high')!;
+    return `Regulatory Notice: Contains ${topHigh.name}. Flagged by ${topHigh.source || 'regulatory standards'} for targeted consumer awareness.`;
+  }
+
+  return null;
+}
+
+/**
+ * Computes safe-for claim tags based on category, score, and additives
  */
 function computeSafeForTags(
   category: SupermarketCategory,
   score: number,
-  harmfulAdditives: HarmfulAdditive[],
+  harmfulIngredients: HarmfulAdditive[],
   hasInsufficientData: boolean = false
 ): string[] {
   if (hasInsufficientData) {
@@ -666,86 +218,142 @@ function computeSafeForTags(
   }
 
   const tags: string[] = [];
-  const harmfulNames = harmfulAdditives.map((a) => a.name.toLowerCase()).join(' ');
+  const lowerNames = harmfulIngredients.map((h) => h.name.toLowerCase()).join(' ');
 
-  if (!harmfulNames.includes('paraben')) {
-    tags.push('No Flagged Parabens');
-  }
-  if (!harmfulNames.includes('sulfate') && !harmfulNames.includes('sls')) {
-    tags.push('Sulfate-Free');
-  }
-  if (!harmfulNames.includes('mineral oil') && !harmfulNames.includes('paraffin')) {
-    tags.push('Zero Mineral Oil');
-  }
-  // Only claim Palm Oil-Free on Food & Beverage items where palm oil is an industrial shortcut
-  if (category === 'Food & Beverages' && !harmfulNames.includes('palm')) {
-    tags.push('Palm Oil-Free');
-  }
-  if (category === 'Household & Cleaning' && !harmfulNames.includes('benzalkonium')) {
-    tags.push('Pet Friendly');
-  }
-  if (category === 'Baby Care' && !harmfulNames.includes('talc')) {
-    tags.push('Talc-Free');
-  }
-  // Factual claim instead of unearned third-party "Certified"
-  if (score >= 71) {
-    tags.unshift('No Flagged Additives');
+  if (!lowerNames.includes('paraben')) {
+    tags.push('Paraben-Free');
   }
 
-  return tags.slice(0, 4);
+  if (category === 'Food & Beverages') {
+    if (!lowerNames.includes('palmolein') && !lowerNames.includes('palm oil')) {
+      tags.push('Palm Oil-Free');
+    }
+    if (!lowerNames.includes('msg') && !lowerNames.includes('glutamate')) {
+      tags.push('No Added MSG');
+    }
+  }
+
+  if (category === 'Hair Care' || category === 'Personal Care & Skincare') {
+    if (!lowerNames.includes('mineral oil') && !lowerNames.includes('paraffin')) {
+      tags.push('Zero Mineral Oil');
+    }
+    if (!lowerNames.includes('sulfate') && !lowerNames.includes('sls')) {
+      tags.push('Sulfate-Free');
+    }
+  }
+
+  if (score >= 80 && harmfulIngredients.length === 0) {
+    tags.push('Clean Formulation', 'No Flagged Additives');
+  }
+
+  return tags.length > 0 ? tags : ['Standard Formulation'];
 }
 
 /**
- * Analyzes raw ingredient text and OpenFacts additive tags
+ * Analyzes ingredients and additives using the versioned additive rules,
+ * accounting for ingredient order (concentration weighting) and same-class caps.
  */
 export function analyzeIngredientsAndAdditives(
   productName: string,
   ingredientsText: string,
-  additivesTags: string[],
-  novaGroup: NovaGroup | null,
-  nutriscoreGrade: NutriscoreGrade | null
+  additivesTags: string[] = [],
+  novaGroup: NovaGroup | null = null,
+  nutriscoreGrade: NutriscoreGrade | null = null
 ): ToxicityReport {
+  const category = detectSupermarketCategory(productName, ingredientsText);
+  const { regulatoryStandard, targetExposure } = getCategoryRegulatoryDetails(category);
+
+  // 1. Parse ordered ingredients list
+  const orderedIngredients = parseOrderedIngredientsList(ingredientsText);
+  const totalCount = orderedIngredients.length;
+  const trimmed = ingredientsText ? ingredientsText.trim() : '';
+  const hasInsufficientData = trimmed.length < 5 && additivesTags.length === 0 && orderedIngredients.length === 0;
+
   const harmfulMap = new Map<string, HarmfulAdditive>();
+  const classCumulativeDeductions = new Map<string, number>();
 
-  // 1. Check known additive tags
-  for (const tag of additivesTags) {
-    const cleanTag = tag.toLowerCase().trim();
-    const known = KNOWN_ADDITIVES_DATABASE[cleanTag];
-    if (known) {
-      harmfulMap.set(known.name, known);
+  if (!hasInsufficientData) {
+    // A. Match ordered text ingredients
+    for (let i = 0; i < orderedIngredients.length; i++) {
+      const rawIngredient = orderedIngredients[i];
+      const match = matchAdditiveRule(rawIngredient, i, totalCount);
+
+      if (match) {
+        const { rule, concentrationMultiplier, concentrationRank } = match;
+        if (!harmfulMap.has(rule.id)) {
+          const cls = rule.additiveClass;
+          const cap = getClassCap(cls);
+          const currentClassDeduction = classCumulativeDeductions.get(cls) || 0;
+
+          const baseDeduction = rule.severity === 'high' ? 18 : rule.severity === 'moderate' ? 9 : 4;
+          const weightedDeduction = Math.round(baseDeduction * concentrationMultiplier);
+          const remainingCap = Math.max(0, cap - currentClassDeduction);
+          const effectiveDeduction = Math.min(weightedDeduction, remainingCap);
+
+          classCumulativeDeductions.set(cls, currentClassDeduction + effectiveDeduction);
+
+          harmfulMap.set(rule.id, {
+            name: rule.canonicalName,
+            category: rule.additiveClass,
+            healthImpact: rule.rationale,
+            severity: rule.severity,
+            rationale: rule.rationale,
+            source: rule.source,
+            sourceUrl: rule.sourceUrl,
+            concentrationRank,
+            deduction: effectiveDeduction,
+            additiveClass: cls,
+          });
+        }
+      }
     }
-  }
 
-  // 2. Check text keywords
-  for (const item of HARMFUL_TEXT_KEYWORDS) {
-    if (item.keyword.test(ingredientsText)) {
-      if (!harmfulMap.has(item.name)) {
-        harmfulMap.set(item.name, {
-          name: item.name,
-          category: item.category,
-          healthImpact: item.healthImpact,
-          severity: item.severity,
+    // B. Match OpenFoodFacts additives_tags (e.g. "en:e319")
+    const allRules = additiveRulesData.rules;
+    for (const tag of additivesTags) {
+      const cleanTag = tag.toLowerCase().replace(/^en:/, '').replace(/[^a-z0-9]/g, '');
+      const matchedRule = allRules.find(
+        (r) =>
+          r.id === cleanTag ||
+          r.aliases.some((a) => a.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanTag)
+      );
+
+      if (matchedRule && !harmfulMap.has(matchedRule.id)) {
+        const cls = matchedRule.additiveClass;
+        const cap = getClassCap(cls);
+        const currentClassDeduction = classCumulativeDeductions.get(cls) || 0;
+
+        const baseDeduction = matchedRule.severity === 'high' ? 18 : matchedRule.severity === 'moderate' ? 9 : 4;
+        const remainingCap = Math.max(0, cap - currentClassDeduction);
+        const effectiveDeduction = Math.min(baseDeduction, remainingCap);
+
+        classCumulativeDeductions.set(cls, currentClassDeduction + effectiveDeduction);
+
+        harmfulMap.set(matchedRule.id, {
+          name: matchedRule.canonicalName,
+          category: matchedRule.additiveClass,
+          healthImpact: matchedRule.rationale,
+          severity: matchedRule.severity as any,
+          rationale: matchedRule.rationale,
+          source: matchedRule.source,
+          sourceUrl: matchedRule.sourceUrl,
+          concentrationRank: 'Packaged Additive Tag',
+          deduction: effectiveDeduction,
+          additiveClass: cls,
         });
       }
     }
   }
 
   const harmfulIngredients = Array.from(harmfulMap.values());
-  const category = detectSupermarketCategory(productName, ingredientsText);
-  const { regulatoryStandard, targetExposure } = getCategoryRegulatoryDetails(category);
 
-  // 3. Check for empty or insufficient ingredient data
-  const trimmedIngredients = ingredientsText ? ingredientsText.trim() : '';
-  const hasInsufficientData = trimmedIngredients.length < 5 && additivesTags.length === 0;
-
-  // 4. Compute Safety Score (0-100)
+  // 2. Compute Overall Safety Score (5 to 100)
   let score = 100;
 
   if (hasInsufficientData) {
-    // Crucial safety guard: If database or OCR has 0 ingredients, NEVER mark as 100/100 Safe!
     score = 50;
   } else {
-    // Food specific deductions
+    // Food processing penalties (NOVA and Nutri-Score)
     if (category === 'Food & Beverages') {
       if (novaGroup === 4) score -= 30;
       else if (novaGroup === 3) score -= 15;
@@ -755,22 +363,19 @@ export function analyzeIngredientsAndAdditives(
       else if (nutriscoreGrade === 'd') score -= 12;
       else if (nutriscoreGrade === 'c') score -= 6;
     } else {
-      // Non-food category base penalty if industrial synthetic base
+      // Non-food category base penalties
       if (category === 'Pest Control') score -= 35;
       if (category === 'Household & Cleaning') score -= 20;
     }
 
-    // Additives penalty
+    // Sum effective class-capped additive deductions
     for (const additive of harmfulIngredients) {
-      if (additive.severity === 'high') score -= 18;
-      else if (additive.severity === 'moderate') score -= 9;
-      else score -= 4;
+      score -= additive.deduction ?? (additive.severity === 'high' ? 18 : additive.severity === 'moderate' ? 9 : 4);
     }
   }
 
   const clampedScore = hasInsufficientData ? 50 : Math.max(5, Math.min(100, score));
 
-  // Determine risk level
   let riskLevel: RiskLevel = 'Safe';
   if (hasInsufficientData) {
     riskLevel = 'Moderate';
@@ -780,7 +385,6 @@ export function analyzeIngredientsAndAdditives(
     riskLevel = 'Moderate';
   }
 
-  // Hazard Rating for non-food items
   const hazardRating = hasInsufficientData
     ? 'Moderate Hazard'
     : clampedScore >= 71
@@ -789,21 +393,19 @@ export function analyzeIngredientsAndAdditives(
     ? 'Moderate Hazard'
     : 'High Hazard';
 
-  // Indian Market Alert
   const indianMarketAlert = hasInsufficientData
     ? 'Data Notice: Ingredient text was not found in registry. Please photograph or type ingredients to verify packaging.'
     : getIndianMarketAlert(category, harmfulIngredients, ingredientsText);
 
-  // Clean Summary
   let cleanSummary = '';
   if (hasInsufficientData) {
-    cleanSummary = `${productName || 'This product'} has insufficient ingredient data recorded. Safety cannot be verified until ingredients are inspected.`;
+    cleanSummary = `${productName || 'This product'} has insufficient ingredient data recorded. Risk screening requires visible ingredients.`;
   } else if (riskLevel === 'Safe') {
-    cleanSummary = `${productName || 'This product'} shows a clean toxicological profile with minimal processing and no high-risk chemicals detected.`;
+    cleanSummary = `${productName || 'This product'} shows a clean ingredient screening profile with minimal processing and no high-risk additives flagged.`;
   } else if (riskLevel === 'Moderate') {
-    cleanSummary = `${productName || 'This product'} contains ${harmfulIngredients.length} flagged chemicals or industrial additives. Exercise caution with daily exposure.`;
+    cleanSummary = `${productName || 'This product'} contains ${harmfulIngredients.length} flagged ingredients or industrial additives. Review highlighted rationales for exposure context.`;
   } else {
-    cleanSummary = `${productName || 'This product'} contains ${harmfulIngredients.length} high-concern chemicals, endocrine disruptors, or industrial toxins. Prolonged or chronic exposure is not recommended.`;
+    cleanSummary = `${productName || 'This product'} contains ${harmfulIngredients.length} high-concern ingredients or heavy ultra-processing. Consider clean alternatives.`;
   }
 
   const safeFor = computeSafeForTags(category, clampedScore, harmfulIngredients, hasInsufficientData);
@@ -822,15 +424,26 @@ export function analyzeIngredientsAndAdditives(
     safeFor,
     novaGroup: category === 'Food & Beverages' ? novaGroup : null,
     nutriscoreGrade: category === 'Food & Beverages' ? nutriscoreGrade : null,
-    allIngredients: ingredientsText ? ingredientsText.split(/[,;]\s*/).map((s) => s.trim()) : [],
+    allIngredients: orderedIngredients.length > 0 ? orderedIngredients : (ingredientsText ? ingredientsText.split(/[,;]\s*/).map((s) => s.trim()) : []),
+    hasInsufficientData,
   };
 }
 
 /**
- * Recomputes safety score, risk level, and safe-for tags when harmful additives
- * are added or modified (e.g. after Gemini multimodal vision merges new additives).
+ * Recomputes safety score and risk level when ingredients or additives are modified.
+ * Correctly preserves the insufficient data guard and enforces class caps.
  */
 export function recomputeReportScoreAndRisk(report: ToxicityReport): ToxicityReport {
+  // Preserve empty-data safeguard
+  if (report.hasInsufficientData && (!report.allIngredients || report.allIngredients.length === 0)) {
+    return {
+      ...report,
+      overallSafetyScore: 50,
+      riskLevel: 'Moderate',
+      hazardRating: 'Moderate Hazard',
+    };
+  }
+
   const category = report.category || 'Food & Beverages';
   let score = 100;
 
@@ -847,10 +460,27 @@ export function recomputeReportScoreAndRisk(report: ToxicityReport): ToxicityRep
     if (category === 'Household & Cleaning') score -= 20;
   }
 
+  const classCumulativeDeductions = new Map<string, number>();
+
   for (const additive of report.harmfulIngredients) {
-    if (additive.severity === 'high') score -= 18;
-    else if (additive.severity === 'moderate') score -= 9;
-    else score -= 4;
+    const cls = additive.additiveClass || additive.category || 'other';
+    const cap = getClassCap(cls);
+    const currentClassDeduction = classCumulativeDeductions.get(cls) || 0;
+
+    const baseDeduction =
+      additive.deduction !== undefined
+        ? additive.deduction
+        : additive.severity === 'high'
+        ? 18
+        : additive.severity === 'moderate'
+        ? 9
+        : 4;
+
+    const remainingCap = Math.max(0, cap - currentClassDeduction);
+    const effectiveDeduction = Math.min(baseDeduction, remainingCap);
+
+    classCumulativeDeductions.set(cls, currentClassDeduction + effectiveDeduction);
+    score -= effectiveDeduction;
   }
 
   const clampedScore = Math.max(5, Math.min(100, score));
@@ -873,334 +503,470 @@ export function recomputeReportScoreAndRisk(report: ToxicityReport): ToxicityRep
     riskLevel,
     hazardRating,
     safeFor,
+    hasInsufficientData: false,
   };
 }
 
 /**
- * Comprehensive authentic Indian Supermarket offline catalog
+ * Authentic Indian Supermarket offline catalog with objective, factual regulatory screening copy
  */
-const INDIAN_SUPERMARKET_PRESETS: Record<string, ToxicityReport> = {
-  // Kurkure Masala Munch (Food)
+export const INDIAN_SUPERMARKET_PRESETS: Record<string, ToxicityReport> = {
+  // 1. Kurkure Masala Munch (Food)
   '8901030383749': {
     productName: 'Kurkure Masala Munch (Packaged Namkeen)',
     barcode: '8901030383749',
     category: 'Food & Beverages',
-    overallSafetyScore: 32,
+    overallSafetyScore: 9,
     riskLevel: 'High Risk',
     regulatoryStandard: 'FSSAI',
     targetExposure: 'Ingestion',
     novaGroup: 4,
     nutriscoreGrade: 'e',
-    indianMarketAlert: 'Snack Aisle Alert: Deep-fried in high-heat Refined Palm Olein stabilized with TBHQ petroleum preservative.',
+    indianMarketAlert: 'Frying Oil Advisory: Fried in refined palmolein oil and stabilized with permitted antioxidant TBHQ (INS 319).',
     safeFor: ['Paraben-Free'],
-    cleanSummary: 'Extensively ultra-processed snack with multiple synthetic flavor enhancers (MSG, INS 627, 631) and industrial frying palm olein.',
+    cleanSummary: 'Ultra-processed savory snack (NOVA 4) combining refined palm olein with multiple synthetic flavor enhancers and industrial antioxidant TBHQ.',
     harmfulIngredients: [
       {
-        name: 'Monosodium Glutamate (MSG / INS 621)',
-        category: 'Flavor Enhancer',
-        healthImpact: 'Excitotoxic neurotransmitter stimulant; may trigger migraines and appetite overstimulation.',
-        severity: 'moderate',
-      },
-      {
-        name: 'Tertiary Butylhydroquinone (TBHQ / INS 319)',
-        category: 'Synthetic Antioxidant',
-        healthImpact: 'Petroleum byproduct linked to cellular oxidative stress and immune dysregulation.',
+        name: 'TBHQ (Tertiary Butylhydroquinone / INS 319)',
+        category: 'synthetic_antioxidant',
+        healthImpact: 'Synthetic phenolic antioxidant permitted by FSSAI; subject to strict daily intake limits by EFSA.',
         severity: 'high',
+        rationale: 'Synthetic phenolic antioxidant used to prolong oil shelf-life. EFSA and FSSAI permit strictly limited doses.',
+        source: 'EFSA / FSSAI',
+        sourceUrl: 'https://www.efsa.europa.eu/en/efsajournal/pub/3794',
+        concentrationRank: 'Minor Additive (INS 319)',
+        deduction: 18,
+        additiveClass: 'synthetic_antioxidant',
       },
       {
-        name: 'Refined Palm Olein',
-        category: 'Industrial Oil',
-        healthImpact: 'Refined under high heat generating toxic glycidyl esters; heavy saturated palmitic acid content.',
+        name: 'Monosodium Glutamate (MSG / INS 621)',
+        category: 'flavor_enhancer',
+        healthImpact: 'Purified umami flavor enhancer permitted under FSSAI limits; may cause sensitivity reactions in select subsets.',
         severity: 'moderate',
+        rationale: 'Flavor enhancer that stimulates umami taste receptors; evaluated as safe at permitted levels by JECFA.',
+        source: 'FSSAI / EFSA',
+        sourceUrl: 'https://www.efsa.europa.eu/en/efsajournal/pub/4910',
+        concentrationRank: 'Minor Additive',
+        deduction: 9,
+        additiveClass: 'flavor_enhancer',
       },
       {
         name: 'Disodium 5-Ribonucleotides (INS 635)',
-        category: 'Synthetic Flavor Enhancer',
-        healthImpact: 'Potent taste-receptor agonist linked to skin irritation and hyper-palatable binge cycles.',
+        category: 'flavor_enhancer',
+        healthImpact: 'Nucleotide flavor enhancer paired with MSG to amplify taste receptor stimulation.',
         severity: 'moderate',
+        rationale: 'Synergistic flavor enhancer blend; capped by class limits.',
+        source: 'FSSAI',
+        sourceUrl: 'https://fssai.gov.in/',
+        concentrationRank: 'Minor Additive',
+        deduction: 5, // Class cap for flavor enhancers = 14 (9 + 5)
+        additiveClass: 'flavor_enhancer',
+      },
+      {
+        name: 'Palmolein / Refined Palm Oil',
+        category: 'refined_tropical_fat',
+        healthImpact: 'High-saturated tropical oil used for high-temperature commercial fry stability.',
+        severity: 'moderate',
+        rationale: 'High in saturated palmitic acid (~50%); consumption should be balanced with unsaturated fats.',
+        source: 'FSSAI / WHO',
+        sourceUrl: 'https://www.who.int/news-room/fact-sheets/detail/healthy-diet',
+        concentrationRank: 'Major Constituent (Rank #2)',
+        deduction: 9,
+        additiveClass: 'refined_tropical_fat',
       },
     ],
     allIngredients: ['Rice Meal', 'Edible Vegetable Oil (Palmolein)', 'Corn Meal', 'Gram Meal', 'Spices & Condiments', 'Salt', 'INS 621', 'INS 627', 'INS 631', 'INS 319'],
+    hasInsufficientData: false,
   },
 
-  // Maggi 2-Minute Noodles (Food)
+  // 2. Maggi 2-Minute Noodles (Food)
   '8901030005702': {
     productName: 'Maggi 2-Minute Masala Instant Noodles',
     barcode: '8901030005702',
     category: 'Food & Beverages',
-    overallSafetyScore: 38,
+    overallSafetyScore: 28,
     riskLevel: 'High Risk',
     regulatoryStandard: 'FSSAI',
     targetExposure: 'Ingestion',
     novaGroup: 4,
     nutriscoreGrade: 'd',
-    indianMarketAlert: 'High Glycemic Load: High refined wheat maida base combined with palm oil frying and hidden nucleotide flavor boosters.',
+    indianMarketAlert: 'Refined Carbohydrate & Oil Advisory: Formulated with refined wheat flour (maida) and palm oil frying base.',
     safeFor: ['Paraben-Free'],
-    cleanSummary: 'Ultra-processed instant noodles formulated with refined wheat flour (maida), refined palm oil, and nucleotide enhancers.',
+    cleanSummary: 'Ultra-processed instant noodles formulated with refined wheat flour (maida), fractionated palm oil, and nucleotide enhancers.',
     harmfulIngredients: [
       {
-        name: 'Refined Palm Oil',
-        category: 'Industrial Oil',
-        healthImpact: 'Dense in saturated palmitic acid and prone to oxidative rancidity compounds.',
+        name: 'Palmolein / Refined Palm Oil',
+        category: 'refined_tropical_fat',
+        healthImpact: 'High in saturated palmitic fatty acids; standard industrial frying oil.',
         severity: 'moderate',
+        rationale: 'Saturated lipid base used for rapid noodle shelf dehydration.',
+        source: 'FSSAI / WHO',
+        sourceUrl: 'https://www.who.int/news-room/fact-sheets/detail/healthy-diet',
+        concentrationRank: 'Major Constituent (Rank #2)',
+        deduction: 9,
+        additiveClass: 'refined_tropical_fat',
       },
       {
-        name: 'Disodium 5-Ribonucleotides (INS 635)',
-        category: 'Synthetic Flavor Enhancer',
-        healthImpact: 'Artificial savory enhancer designed to induce hyper-palatable cravings.',
+        name: "Disodium 5'-Ribonucleotides (INS 635)",
+        category: 'flavor_enhancer',
+        healthImpact: 'Nucleotide flavor booster providing intense savory taste.',
         severity: 'moderate',
+        rationale: '50/50 blend of disodium inosinate and guanylate.',
+        source: 'FSSAI',
+        sourceUrl: 'https://fssai.gov.in/',
+        concentrationRank: 'Minor Additive',
+        deduction: 9,
+        additiveClass: 'flavor_enhancer',
       },
       {
-        name: 'Ammonia Caramel Color (INS 150d)',
-        category: 'Artificial Color',
-        healthImpact: 'Contains 4-MEI chemical residue from ammonia-caramelization.',
+        name: 'Caramel Color IV (Sulfite Ammonia Caramel / INS 150d)',
+        category: 'artificial_color',
+        healthImpact: 'Manufactured with ammonia and sulfites; may carry trace 4-MEI.',
         severity: 'high',
+        rationale: 'Classified under IARC Group 2B with specific daily intake limits.',
+        source: 'IARC / EFSA',
+        sourceUrl: 'https://monographs.iarc.who.int/',
+        concentrationRank: 'Minor Additive',
+        deduction: 12, // Class cap for artificial color = 12
+        additiveClass: 'artificial_color',
       },
     ],
     allIngredients: ['Refined Wheat Flour (Maida)', 'Palm Oil', 'Iodised Salt', 'Hydrolysed Peanut Protein', 'Spices & Condiments', 'Flavor Enhancer 635', 'Caramel 150d'],
+    hasInsufficientData: false,
   },
 
-  // Haldiram's Aloo Bhujia (Food)
+  // 3. Haldiram's Aloo Bhujia (Food)
   '8901725181222': {
     productName: "Haldiram's Nagpur Aloo Bhujia",
     barcode: '8901725181222',
     category: 'Food & Beverages',
-    overallSafetyScore: 36,
+    overallSafetyScore: 23,
     riskLevel: 'High Risk',
     regulatoryStandard: 'FSSAI',
     targetExposure: 'Ingestion',
     novaGroup: 4,
     nutriscoreGrade: 'e',
-    indianMarketAlert: 'High Saturated Fat: Contains over 35g fat per 100g from deep frying in refined cottonseed and palm olein oils with TBHQ.',
+    indianMarketAlert: 'High Lipid Density: Contains over 35% total fat from deep frying in palmolein and cottonseed oils.',
     safeFor: ['Paraben-Free'],
-    cleanSummary: 'Deep-fried savory snack high in saturated lipids, refined palmolein, and chemical preservatives.',
+    cleanSummary: 'Traditional deep-fried potato & pulse namkeen with high saturated fat density and permitted synthetic antioxidant TBHQ.',
     harmfulIngredients: [
       {
-        name: 'Tertiary Butylhydroquinone (TBHQ / INS 319)',
-        category: 'Petroleum Antioxidant',
-        healthImpact: 'Petroleum-derived preservative linked to cellular oxidative stress.',
+        name: 'TBHQ (Tertiary Butylhydroquinone / INS 319)',
+        category: 'synthetic_antioxidant',
+        healthImpact: 'Synthetic phenolic antioxidant used to stabilize frying oil against rancidity.',
         severity: 'high',
+        rationale: 'Subject to strict acceptable daily intake limits by EFSA and FSSAI.',
+        source: 'EFSA / FSSAI',
+        sourceUrl: 'https://www.efsa.europa.eu/en/efsajournal/pub/3794',
+        concentrationRank: 'Minor Additive',
+        deduction: 18,
+        additiveClass: 'synthetic_antioxidant',
       },
       {
-        name: 'Refined Palm Olein',
-        category: 'Industrial Oil',
-        healthImpact: 'Rich in atherogenic saturated palmitic acid and lipid oxidation products.',
+        name: 'Palmolein / Refined Palm Oil',
+        category: 'refined_tropical_fat',
+        healthImpact: 'Refined tropical oil rich in saturated fatty acids.',
         severity: 'moderate',
+        rationale: 'Permitted frying medium; moderate dietary moderation advised.',
+        source: 'FSSAI / WHO',
+        sourceUrl: 'https://www.who.int/news-room/fact-sheets/detail/healthy-diet',
+        concentrationRank: 'Major Constituent (Rank #2)',
+        deduction: 9,
+        additiveClass: 'refined_tropical_fat',
       },
     ],
     allIngredients: ['Potatoes', 'Edible Vegetable Oil (Palmolein & Cottonseed)', 'Gram Pulse Flour', 'Tepary Beans Flour', 'Spices & Condiments', 'Salt', 'INS 319'],
+    hasInsufficientData: false,
   },
 
-
-
-
-  // Glow & Lovely Advanced Multi-Vitamin Cream (Personal Care)
+  // 4. Glow & Lovely Advanced Multi-Vitamin Cream (Personal Care)
   '8901030825317': {
     productName: 'Glow & Lovely Advanced Multi-Vitamin Cream',
     barcode: '8901030825317',
     category: 'Personal Care & Skincare',
-    overallSafetyScore: 35,
-    riskLevel: 'High Risk',
+    overallSafetyScore: 53,
+    riskLevel: 'Moderate',
     regulatoryStandard: 'CDSCO',
     targetExposure: 'Dermal Absorption',
-    hazardRating: 'High Hazard',
-    indianMarketAlert: 'Endocrine Disruption Warning: Formulated with both Methylparaben and Propylparaben, alongside Titanium Dioxide nanoparticles for an artificial whitening mask.',
+    hazardRating: 'Moderate Hazard',
+    indianMarketAlert: 'Preservative & Pigment Screening: Formulated with parabens and titanium dioxide pigment for optical radiance masking.',
     safeFor: ['Sulfate-Free'],
-    cleanSummary: 'Contains multiple xenoestrogenic parabens, synthetic BHT, and mineral whitening pigments that coat facial pores.',
+    cleanSummary: 'Cosmetic facial cream combining topical niacinamide with CDSCO-permitted paraben preservatives and titanium dioxide mineral pigment.',
     harmfulIngredients: [
       {
-        name: 'Methylparaben & Propylparaben',
-        category: 'Endocrine Disrupting Preservative',
-        healthImpact: 'Mimics estrogen in human tissue; linked to reproductive toxicity and cellular disruption.',
-        severity: 'high',
-      },
-      {
-        name: 'Titanium Dioxide (CI 77891)',
-        category: 'Whitening Nanoparticle Pigment',
-        healthImpact: 'Creates an artificial white cast; nanoparticles can generate reactive oxygen species under sunlight.',
-        severity: 'high',
-      },
-      {
-        name: 'Butylated Hydroxytoluene (BHT)',
-        category: 'Synthetic Preservative',
-        healthImpact: 'Synthetic antioxidant linked in toxicology reports to cellular and endocrine toxicity.',
+        name: 'Methylparaben (Preservative)',
+        category: 'preservative',
+        healthImpact: 'Antimicrobial preservative permitted under CDSCO limits; subject to strict cumulative concentration caps.',
         severity: 'moderate',
+        rationale: 'Weak estrogenic affinity observed in in-vitro biological testing.',
+        source: 'EU SCCS / CDSCO',
+        sourceUrl: 'https://ec.europa.eu/health/scientific_committees/consumer_safety/docs/sccs_o_132.pdf',
+        concentrationRank: 'Minor Formulation Ingredient',
+        deduction: 9,
+        additiveClass: 'preservative',
+      },
+      {
+        name: 'Propylparaben (Preservative)',
+        category: 'preservative',
+        healthImpact: 'Longer chain paraben preservative regulated under tighter global cosmetic ceilings.',
+        severity: 'high',
+        rationale: 'Class capped alongside methylparaben under total paraben ceiling.',
+        source: 'EU SCCS / CDSCO',
+        sourceUrl: 'https://ec.europa.eu/health/scientific_committees/consumer_safety/docs/sccs_o_132.pdf',
+        concentrationRank: 'Minor Formulation Ingredient',
+        deduction: 11, // Class cap for preservative = 20 (9 + 11)
+        additiveClass: 'preservative',
+      },
+      {
+        name: 'Titanium Dioxide (INS 171 / CI 77891)',
+        category: 'nano_whitener',
+        healthImpact: 'Mineral pigment providing immediate visual white cast; CDSCO permitted in topical cosmetics.',
+        severity: 'high',
+        rationale: 'Safe for intact dermal application; distinct from European oral ingestion restrictions.',
+        source: 'CDSCO / CIR',
+        sourceUrl: 'https://www.cir-safety.org/',
+        concentrationRank: 'Secondary Formulation',
+        deduction: 18,
+        additiveClass: 'nano_whitener',
+      },
+      {
+        name: 'BHT (Butylated Hydroxytoluene / INS 321)',
+        category: 'synthetic_antioxidant',
+        healthImpact: 'Lipid antioxidant stabilizer preventing cosmetic oil rancidity.',
+        severity: 'moderate',
+        rationale: 'Permitted within cosmetic safety limits by CIR and CDSCO.',
+        source: 'CIR / CDSCO',
+        sourceUrl: 'https://www.cir-safety.org/',
+        concentrationRank: 'Trace Stabilizer',
+        deduction: 9,
+        additiveClass: 'synthetic_antioxidant',
       },
     ],
     allIngredients: ['Water', 'Palmitic Acid', 'Niacinamide', 'Glycerin', 'Titanium Dioxide', 'Methylparaben', 'Propylparaben', 'BHT', 'Perfume'],
+    hasInsufficientData: false,
   },
 
-  // Dettol Original Antiseptic Bathing Soap (Personal Care)
+  // 5. Dettol Original Antiseptic Bathing Soap (Personal Care)
   '8901030584504': {
     productName: 'Dettol Original Germ Protection Bathing Soap',
     barcode: '8901030584504',
     category: 'Personal Care & Skincare',
-    overallSafetyScore: 48,
-    riskLevel: 'Moderate',
+    overallSafetyScore: 78,
+    riskLevel: 'Safe',
     regulatoryStandard: 'CDSCO',
     targetExposure: 'Dermal Absorption',
-    hazardRating: 'Moderate Hazard',
-    indianMarketAlert: 'Skin Barrier Alert: Strong chemical biocides (Chloroxylenol) strip the skin microbiome of beneficial protective bacteria.',
+    hazardRating: 'Low Hazard',
+    indianMarketAlert: 'Antimicrobial Screening: Formulated with active biocide Chloroxylenol (PCMX) for targeted pathogen control.',
     safeFor: ['Paraben-Free'],
-    cleanSummary: 'Potent antimicrobial soap containing Chloroxylenol, synthetic BHT stabilizer, and industrial chelating agents.',
+    cleanSummary: 'Topical cleansing bar utilizing active biocide Chloroxylenol alongside standard saponified palm oil base and BHT stabilizer.',
     harmfulIngredients: [
       {
-        name: 'Chloroxylenol (PCMX)',
-        category: 'Antimicrobial Chemical',
-        healthImpact: 'Broad-spectrum phenolic biocide that disrupts natural dermal microbiome biodiversity and can induce dermatitis.',
+        name: 'Chloroxylenol (PCMX Disinfectant)',
+        category: 'industrial_disinfectant',
+        healthImpact: 'Broad-spectrum phenolic antimicrobial biocide; may cause contact dryness on eczema-prone skin.',
         severity: 'moderate',
+        rationale: 'Effective topical antibacterial agent; rinse-off application mitigates prolonged dermal exposure.',
+        source: 'CDSCO / US EPA',
+        sourceUrl: 'https://cdsco.gov.in/',
+        concentrationRank: 'Active Constituent',
+        deduction: 9,
+        additiveClass: 'industrial_disinfectant',
       },
       {
-        name: 'Butylated Hydroxytoluene (BHT)',
-        category: 'Synthetic Preservative',
-        healthImpact: 'Petroleum-derived stabilizer associated with contact allergy and cellular irritation.',
+        name: 'BHT (Butylated Hydroxytoluene / INS 321)',
+        category: 'synthetic_antioxidant',
+        healthImpact: 'Antioxidant stabilizer used to prevent soap base degradation.',
         severity: 'moderate',
+        rationale: 'Cosmetic preservative with established safe rinse-off profile.',
+        source: 'CIR',
+        sourceUrl: 'https://www.cir-safety.org/',
+        concentrationRank: 'Trace Stabilizer',
+        deduction: 9,
+        additiveClass: 'synthetic_antioxidant',
       },
       {
         name: 'Tetrasodium EDTA',
-        category: 'Chelating Agent',
-        healthImpact: 'Penetration enhancer that alters cellular membrane permeability to environmental toxins.',
+        category: 'chelating_agent',
+        healthImpact: 'Chelating agent used to bind hard water mineral ions.',
         severity: 'low',
+        rationale: 'Cosmetic stabilizer with low skin permeability.',
+        source: 'CIR',
+        sourceUrl: 'https://www.cir-safety.org/',
+        concentrationRank: 'Trace Additive',
+        deduction: 4,
+        additiveClass: 'chelating_agent',
       },
     ],
     allIngredients: ['Sodium Palmate', 'Sodium Palm Kernelate', 'Aqua', 'Chloroxylenol', 'BHT', 'Tetrasodium EDTA', 'Etidronic Acid', 'CI 11680'],
+    hasInsufficientData: false,
   },
 
-  // Colgate Strong Teeth Toothpaste (Oral Care)
+  // 6. Colgate Strong Teeth Toothpaste (Oral Care)
   '8901314010520': {
     productName: 'Colgate Strong Teeth Amino Shakti Toothpaste',
     barcode: '8901314010520',
     category: 'Oral Care',
-    overallSafetyScore: 50,
+    overallSafetyScore: 62,
     riskLevel: 'Moderate',
     regulatoryStandard: 'CDSCO',
     targetExposure: 'Mucous Membrane',
     hazardRating: 'Moderate Hazard',
-    indianMarketAlert: 'Oral Mucosa Alert: Formulated with Sodium Lauryl Sulfate (SLS), a harsh foaming detergent known to strip protective buccal tissue and trigger canker sores.',
+    indianMarketAlert: 'Oral Detergent Notice: Formulated with Sodium Lauryl Sulfate (SLS), which may cause mucosal sensitivity in individuals prone to mouth ulcers.',
     safeFor: ['Paraben-Free', 'Zero Mineral Oil'],
-    cleanSummary: 'Mainstream toothpaste utilizing Sodium Lauryl Sulfate for heavy foam, synthetic sodium saccharin, and titanium dioxide whitener.',
+    cleanSummary: 'Standard anti-cavity dentifrice combining calcium carbonate and sodium monofluorophosphate with SLS foaming surfactant.',
     harmfulIngredients: [
       {
         name: 'Sodium Lauryl Sulfate (SLS)',
-        category: 'Harsh Anionic Surfactant',
-        healthImpact: 'Strips the protective mucin lining in the mouth; primary trigger for recurrent aphthous stomatitis (canker sores).',
+        category: 'surfactant',
+        healthImpact: 'Anionic foaming surfactant associated with mucosal irritation and recurrent canker sores.',
         severity: 'moderate',
+        rationale: 'Primary detergent responsible for toothpaste foam; sensitive users frequently benefit from SLS-free formulations.',
+        source: 'CDSCO / CIR',
+        sourceUrl: 'https://pubmed.ncbi.nlm.nih.gov/10518866/',
+        concentrationRank: 'Secondary Formulation',
+        deduction: 11, // Weighted for mucosal exposure
+        additiveClass: 'surfactant',
       },
       {
-        name: 'Sodium Saccharin',
-        category: 'Artificial Sweetener',
-        healthImpact: 'Synthetic petroleum derivative that can disturb the balance of healthy oral and gut microbiomes.',
+        name: 'Sodium Saccharin (INS 954)',
+        category: 'artificial_sweetener',
+        healthImpact: 'Non-caloric sweetener used to mask chalky calcium carbonate taste.',
         severity: 'moderate',
+        rationale: 'Petroleum-derived sweetener approved for oral hygiene formulations.',
+        source: 'FSSAI / EFSA',
+        sourceUrl: 'https://www.efsa.europa.eu/en/efsajournal/pub/4580',
+        concentrationRank: 'Minor Additive',
+        deduction: 9,
+        additiveClass: 'artificial_sweetener',
       },
       {
-        name: 'Titanium Dioxide (CI 77891)',
-        category: 'Whitening Nanopigment',
-        healthImpact: 'Added purely for aesthetic paste whiteness; oral absorption of nanoparticles carries cellular toxicity concerns.',
+        name: 'Titanium Dioxide (INS 171 / CI 77891)',
+        category: 'nano_whitener',
+        healthImpact: 'Mineral pigment added for toothpaste paste opacity and whiteness.',
         severity: 'high',
+        rationale: 'Non-functional cosmetic whitener; oral toothpaste ingestion is minimal when properly rinsed.',
+        source: 'CDSCO / EFSA',
+        sourceUrl: 'https://www.efsa.europa.eu/en/efsajournal/pub/6585',
+        concentrationRank: 'Minor Mineral Pigment',
+        deduction: 18,
+        additiveClass: 'nano_whitener',
       },
     ],
     allIngredients: ['Calcium Carbonate', 'Sorbitol', 'Sodium Lauryl Sulfate', 'Silica', 'Titanium Dioxide', 'Sodium Saccharin', 'Sodium Monofluorophosphate'],
+    hasInsufficientData: false,
   },
 
-  // Good Knight Active+ Liquid Vaporizer (Pest Control)
+  // 7. Good Knight Active+ Liquid Vaporizer (Pest Control)
   '8901023010101': {
     productName: 'Good Knight Active+ Mosquito Liquid Vaporizer',
     barcode: '8901023010101',
     category: 'Pest Control',
-    overallSafetyScore: 22,
-    riskLevel: 'High Risk',
+    overallSafetyScore: 47,
+    riskLevel: 'Moderate',
     regulatoryStandard: 'CIBRC',
     targetExposure: 'Inhalation',
-    hazardRating: 'High Hazard',
-    indianMarketAlert: 'Indoor Air Warning: Vaporizing synthetic pyrethroids (Transfluthrin) continuously overnight in closed bedrooms causes respiratory airway inflammation and morning migraines.',
+    hazardRating: 'Moderate Hazard',
+    indianMarketAlert: 'Bedroom Inhalation Notice: Vaporizes active synthetic pyrethroid (Transfluthrin) in a deodorized kerosene solvent base. Adequate room ventilation advised.',
     safeFor: ['Paraben-Free'],
-    cleanSummary: 'Vaporizes synthetic pyrethroid neurotoxin (Transfluthrin 0.88%) dissolved in deodorized kerosene. Significant chronic bedroom inhalation risk.',
+    cleanSummary: 'Household spatial insecticide registered under CIBRC standards utilizing Transfluthrin pyrethroid for mosquito knockdown.',
     harmfulIngredients: [
       {
-        name: 'Transfluthrin (0.88% w/w)',
-        category: 'Synthetic Pyrethroid Neurotoxin',
-        healthImpact: 'Voltage-gated sodium channel disruptor; prolonged inhalation during sleep triggers headaches, lethargy, and airway irritation.',
+        name: 'Transfluthrin (Synthetic Neurotoxic Pyrethroid)',
+        category: 'synthetic_pyrethroid',
+        healthImpact: 'Volatile pyrethroid insect neurotoxin; prolonged continuous breathing in enclosed rooms can trigger airway hypersensitivity.',
         severity: 'high',
-      },
-      {
-        name: 'Deodorized Kerosene Solvent Base',
-        category: 'Petroleum Hydrocarbon Solvent',
-        healthImpact: 'Aerosolized petroleum hydrocarbons that irritate respiratory mucous membranes and alveolar tissues.',
-        severity: 'moderate',
+        rationale: 'CIBRC registered domestic pesticide; recommended for ventilated space use.',
+        source: 'CIBRC / WHO',
+        sourceUrl: 'http://cibrc.nic.in/',
+        concentrationRank: 'Active Insecticide Agent (1.6% w/w)',
+        deduction: 18,
+        additiveClass: 'synthetic_pyrethroid',
       },
     ],
     allIngredients: ['Transfluthrin (a.i.) 0.88% w/w', 'Butylated Hydroxytoluene (BHT) 1.0% w/w', 'Deodorized Kerosene (Solvent) 98.12% w/w'],
+    hasInsufficientData: false,
   },
 
-  // Lizol Disinfectant Floor Cleaner (Household)
+  // 8. Lizol Disinfectant Floor Cleaner (Household)
   '8901096312456': {
     productName: 'Lizol Disinfectant Surface & Floor Cleaner',
     barcode: '8901096312456',
     category: 'Household & Cleaning',
-    overallSafetyScore: 42,
+    overallSafetyScore: 58,
     riskLevel: 'Moderate',
     regulatoryStandard: 'BIS',
     targetExposure: 'General',
     hazardRating: 'Moderate Hazard',
-    indianMarketAlert: 'Pet & Toddler Warning: Contains Benzalkonium Chloride (Quat). Toxic to household cats (who lick paws) and irritates crawling infants.',
+    indianMarketAlert: 'Household Surface Advisory: Contains Benzalkonium Chloride (quat disinfectant, BIS standard). Ensure wet surfaces dry before pet or infant contact.',
     safeFor: ['Paraben-Free', 'Bleach-Free'],
-    cleanSummary: 'Quaternary ammonium-based floor cleaner effective against bacteria but dangerous for household pets and crawling toddlers.',
+    cleanSummary: 'Cationic quaternary ammonium disinfectant surface cleaner conforming to BIS antibacterial standards.',
     harmfulIngredients: [
       {
-        name: 'Benzalkonium Chloride (BKC 80% - 4.0% w/w)',
-        category: 'Quaternary Disinfectant Surfactant',
-        healthImpact: 'Known cause of occupational asthma; acute respiratory irritant and highly toxic to household pets (especially cats).',
+        name: 'Benzalkonium Chloride (BKC / Quaternary Ammonium)',
+        category: 'industrial_disinfectant',
+        healthImpact: 'Cationic disinfectant surfactant; toxic to household felines via paw licking and irritating to crawling toddlers.',
         severity: 'high',
+        rationale: 'BIS approved hard surface antimicrobial sanitizer; wet residue carries contact risks.',
+        source: 'BIS / US EPA',
+        sourceUrl: 'https://standardsbis.bsbedge.com/',
+        concentrationRank: 'Active Antimicrobial Agent',
+        deduction: 18,
+        additiveClass: 'industrial_disinfectant',
       },
       {
-        name: 'Synthetic Citrus Fragrance & Tartrazine',
-        category: 'Artificial Fragrance & Color',
-        healthImpact: 'Volatile organic compounds (VOCs) that irritate sensitive airways and induce skin allergies upon floor contact.',
+        name: 'Tartrazine (Synthetic Yellow 5 / INS 102)',
+        category: 'artificial_color',
+        healthImpact: 'Synthetic dye added for product citrus color identity.',
         severity: 'moderate',
+        rationale: 'Subject to class capping for synthetic dyes.',
+        source: 'EFSA',
+        sourceUrl: 'https://www.efsa.europa.eu/en/efsajournal/pub/1331',
+        concentrationRank: 'Trace Dye',
+        deduction: 4,
+        additiveClass: 'artificial_color',
       },
     ],
     allIngredients: ['Benzalkonium Chloride Solution 4% w/w', 'Fatty Alcohol Ethoxylate', 'Sodium Bicarbonate', 'Tartrazine CI 19140', 'Perfume'],
+    hasInsufficientData: false,
   },
 
-  // Johnson's Baby Powder (Baby Care)
+  // 9. Johnson's Baby Powder (Baby Care)
   '8901030112233': {
     productName: "Johnson's Pure Cornstarch/Talc Baby Powder",
     barcode: '8901030112233',
     category: 'Baby Care',
-    overallSafetyScore: 34,
-    riskLevel: 'High Risk',
+    overallSafetyScore: 73,
+    riskLevel: 'Safe',
     regulatoryStandard: 'CDSCO',
     targetExposure: 'Dermal Absorption',
-    hazardRating: 'High Hazard',
-    indianMarketAlert: 'Pediatric Safety Notice: Talc-based powders carry respiratory inhalation hazards for infant lungs; Indian pediatricians advise cornstarch-based alternatives.',
+    hazardRating: 'Low Hazard',
+    indianMarketAlert: 'Pediatric Application Notice: Formulated with cosmetic-grade talc. Pediatric health guidelines advise gentle application away from infant nasal passages.',
     safeFor: ['Paraben-Free', 'Sulfate-Free'],
-    cleanSummary: 'Mineral talc dust base that poses significant pulmonary inhalation risks for infants; associated with chronic respiratory distress.',
+    cleanSummary: 'Mineral talc absorbent powder registered with CDSCO; pediatric guidelines advise caution against loose powder cloud inhalation.',
     harmfulIngredients: [
       {
-        name: 'Talc (Hydrated Magnesium Silicate)',
-        category: 'Mineral Dust / Absorbent',
-        healthImpact: 'Fine particulate dust that causes infant pulmonary inflammation (talcosis); historical asbestos contamination risks.',
+        name: 'Purified Talc (Hydrated Magnesium Silicate)',
+        category: 'pulmonary_inhalant',
+        healthImpact: 'Mineral absorbent; acute particulate inhalation in infants can cause respiratory coughing or pneumonitis.',
         severity: 'high',
-      },
-      {
-        name: 'Synthetic Fragrance (Parfum)',
-        category: 'Artificial Fragrance',
-        healthImpact: 'Undisclosed chemical blend that can disrupt sensitive infant dermal barriers and trigger eczema.',
-        severity: 'moderate',
+        rationale: 'CDSCO registered topical absorbent; pediatric safety guidelines recommend minimizing airborne dust.',
+        source: 'CDSCO / AAP',
+        sourceUrl: 'https://pubmed.ncbi.nlm.nih.gov/2237092/',
+        concentrationRank: 'Primary Constituent (Rank #1)',
+        deduction: 27, // 18 * 1.5x concentration multiplier = 27
+        additiveClass: 'pulmonary_inhalant',
       },
     ],
     allIngredients: ['Talc', 'Fragrance'],
+    hasInsufficientData: false,
   },
 
-
-
-
-  // Organic Cold Pressed Mustard Oil (Pantry Clean)
+  // 10. Organic Cold Pressed Mustard Oil (Pantry Clean)
   '8901500000000': {
     productName: '100% Cold Pressed Pure Mustard Oil (Kachi Ghani)',
     barcode: '8901500000000',
     category: 'Food & Beverages',
-    overallSafetyScore: 98,
+    overallSafetyScore: 95,
     riskLevel: 'Safe',
     regulatoryStandard: 'FSSAI',
     targetExposure: 'Ingestion',
@@ -1208,20 +974,37 @@ const INDIAN_SUPERMARKET_PRESETS: Record<string, ToxicityReport> = {
     nutriscoreGrade: 'a',
     indianMarketAlert: null,
     safeFor: ['Paraben-Free', 'Palm Oil-Free', 'Zero Mineral Oil', 'No Flagged Additives'],
-    cleanSummary: 'Single-ingredient, unrefined cold-pressed mustard oil rich in monounsaturated fats and natural antioxidants. Completely unadulterated.',
+    cleanSummary: 'Single-ingredient, unrefined cold-pressed mustard oil rich in monounsaturated fats and natural plant antioxidants. Completely unadulterated.',
     harmfulIngredients: [],
     allIngredients: ['100% Pure Cold-Pressed Mustard Oil'],
+    hasInsufficientData: false,
   },
 };
 
-/**
- * In-memory Barcode Cache & In-Flight Request Deduplication Map
- * Guarantees <1ms response and 0 network requests for repeated scans
- */
 const barcodeMemoryCache = new Map<string, ToxicityReport>();
 const inFlightLookups = new Map<string, Promise<ToxicityReport>>();
 const negativeBarcodeCache = new Map<string, number>();
 const NEGATIVE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+export function clearBarcodeCaches(): void {
+  barcodeMemoryCache.clear();
+  inFlightLookups.clear();
+  negativeBarcodeCache.clear();
+}
+
+interface OpenFactsProductResponse {
+  status: number;
+  product?: {
+    product_name?: string;
+    product_name_en?: string;
+    product_name_hi?: string;
+    ingredients_text?: string;
+    ingredients_text_en?: string;
+    additives_tags?: string[];
+    nova_group?: number;
+    nutriscore_grade?: string;
+  };
+}
 
 /**
  * Fetches product metadata and ingredients from OpenFoodFacts and OpenBeautyFacts APIs
@@ -1251,7 +1034,8 @@ export async function fetchProductByBarcode(barcode: string): Promise<ToxicityRe
   }
 
   // 4. Parallel multi-database lookup with field filtering (~2KB instead of ~80KB per query)
-  const queryFields = 'product_name,product_name_en,product_name_hi,ingredients_text,ingredients_text_en,additives_tags,nova_group,nutriscore_grade';
+  const queryFields =
+    'product_name,product_name_en,product_name_hi,ingredients_text,ingredients_text_en,additives_tags,nova_group,nutriscore_grade';
   const endpoints = [
     `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(cleanBarcode)}.json?fields=${queryFields}`,
     `https://world.openbeautyfacts.org/api/v2/product/${encodeURIComponent(cleanBarcode)}.json?fields=${queryFields}`,
@@ -1265,7 +1049,7 @@ export async function fetchProductByBarcode(barcode: string): Promise<ToxicityRe
       const response = await fetch(url, {
         method: 'GET',
         headers: {
-          'User-Agent': 'BetterYouApp/1.0 (fitness-nutrition-toxicity; contact@betteryou.app)',
+          'User-Agent': 'BetterYouApp/1.0 (fitness-nutrition-risk-screening; contact@betteryou.app)',
           Accept: 'application/json',
         },
         signal: controller.signal,
@@ -1319,9 +1103,7 @@ export async function fetchProductByBarcode(barcode: string): Promise<ToxicityRe
       barcodeMemoryCache.set(cleanBarcode, report);
       return report;
     } catch {
-      // Negative cache to protect against continuous network request loops
       negativeBarcodeCache.set(cleanBarcode, Date.now());
-      // Fallback: If not found in any database, throw ProductNotFoundError so user can snap photo via OCR
       throw new ProductNotFoundError(cleanBarcode);
     } finally {
       inFlightLookups.delete(cleanBarcode);
