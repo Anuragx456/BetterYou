@@ -1,0 +1,63 @@
+name: CI Quality Gate
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Verify Typecheck, Lint, Tests, Doctor & Secrets
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history required for gitleaks secrets scan
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Client Dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Server Dependencies
+        run: |
+          cd server
+          bun install
+
+      - name: TypeScript Typecheck
+        run: bunx tsc --noEmit
+
+      - name: ESLint Check
+        run: bunx expo lint
+
+      - name: Run Test Suite (Client & Server)
+        run: bun test
+
+      - name: Run Server Tests
+        run: |
+          cd server
+          bun test
+
+      - name: Expo Doctor Diagnostic Check
+        run: bunx expo-doctor
+
+      - name: Gitleaks Secrets Scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: false

@@ -396,11 +396,25 @@ bun run eval
 
 ---
 
-## Privacy & Security
+## Privacy, Telemetry & Security
 
-- **Local Data Ownership**: All logged meals, workouts, personal targets, and scanned product histories are stored locally on the user's device via `AsyncStorage`. No user data is sent to private backends or third-party analytical trackers.
-- **Direct API Communication**: When using Gemini Vision, requests are dispatched directly from the device to Google's official endpoints over HTTPS.
-- **Secure Key Storage**: API keys entered into the app remain in isolated on-device storage and are never logged or exported.
+BetterYou is architected around local-first data ownership and privacy by default:
+
+- **Local-First SQLite Database**: All meals, workout sessions, exercises, sets, scanned products, and daily nutrition targets are persisted locally in an embedded SQLite database (`betteryou.db` via `expo-sqlite` and `drizzle-orm`) with indexed date queries and foreign-key cascades. No account creation, cloud database login, or remote user profile is required.
+- **Persistent Media Sandboxing**: Captured meal photos and packaging scans are saved directly to the application's private, sandboxed `documentDirectory` (`meals/`, `scans/`). Only relative filesystem paths are stored in SQLite, and an automated orphan cleanup job purges unreferenced media files.
+- **AI Vision Pipeline & Edge Proxy**:
+  - **Default Managed Mode**: Scans are routed through a stateless edge proxy (`server/`) that holds the upstream Gemini API key, validates payload sizes/types (capped at 4MB), enforces per-device HMAC-authenticated rate limits, and forwards requests to Gemini.
+  - **BYOK (Bring Your Own Key) Mode**: Users can opt in to provide their own personal Gemini API key. User-entered keys are stored exclusively in hardware-backed keystores (Android Keystore / iOS Keychain) via `expo-secure-store`, strictly never logged or committed, and used to communicate directly with official endpoints.
+- **Anonymous Barcode Queries**: Barcode lookups query the public OpenFoodFacts and OpenBeautyFacts databases using a compliant, identifying User-Agent (`BetterYouApp/1.0 (fitness-nutrition-risk-screening; contact@betteryou.app)`). In-memory caching and negative caching (5-minute TTL) prevent redundant network queries.
+- **PII-Scrubbed Telemetry (Sentry)**:
+  - Error and crash monitoring is configured with strict, automated PII scrubbing before any event or breadcrumb leaves the device.
+  - `scrubSentryEvent` and `scrubSentryBreadcrumb` filters automatically redact:
+    - Google Gemini and API keys (`AIza...`, Bearer tokens, secrets)
+    - Device tokens and UUIDs
+    - Local filesystem image paths (`file://...`, `meals/photo_...jpg`, `scans/scan_...jpg`)
+    - Base64 payload previews
+    - User identification: IP addresses, emails, and user objects are completely stripped to enforce total anonymity.
+- **Zero Third-Party Ad Trackers**: BetterYou includes no advertising SDKs, tracking pixels, or data-brokering monetization SDKs. All code is audited and continuously scanned for secret leaks via `gitleaks`.
 
 ---
 
