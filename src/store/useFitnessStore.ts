@@ -4,6 +4,7 @@ import {
   dbDeleteMeal,
   dbDeleteScannedProduct,
   dbDeleteWorkout,
+  dbUpdateWorkout,
   dbGetAllMealImagePaths,
   dbGetAllMeals,
   dbGetAllProductImagePaths,
@@ -72,6 +73,7 @@ export interface FitnessState {
   finishActiveWorkout: () => Promise<WorkoutSession | null>;
   cancelActiveWorkout: () => void;
   addWorkout: (workout: WorkoutSession) => Promise<void>;
+  updateWorkout: (id: string, updates: Partial<WorkoutSession>) => Promise<void>;
   removeWorkout: (id: string) => Promise<void>;
 
   // Scanned Products Actions
@@ -479,6 +481,15 @@ export const useFitnessStore = create<FitnessState>()(
         await dbInsertWorkout(workout);
         set((state) => ({
           workouts: [workout, ...state.workouts].slice(0, 150),
+        }));
+      },
+
+      updateWorkout: async (id, updates) => {
+        await dbUpdateWorkout(id, updates);
+        set((state) => ({
+          workouts: state.workouts.map((w) =>
+            w.id === id ? { ...w, ...updates } : w
+          ),
         }));
       },
 

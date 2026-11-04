@@ -550,6 +550,19 @@ export async function dbDeleteWorkout(id: string): Promise<void> {
   await db.runAsync('DELETE FROM workout_sessions WHERE id = ?', [id]);
 }
 
+export async function dbUpdateWorkout(id: string, updates: Partial<WorkoutSession>): Promise<void> {
+  const db = await getDatabase();
+  if (updates.title !== undefined) {
+    await db.runAsync('UPDATE workout_sessions SET title = ? WHERE id = ?', [updates.title, id]);
+  }
+  if (updates.notes !== undefined) {
+    await db.runAsync('UPDATE workout_sessions SET notes = ? WHERE id = ?', [updates.notes, id]);
+  }
+  if (updates.totalVolumeKg !== undefined) {
+    await db.runAsync('UPDATE workout_sessions SET total_volume_kg = ? WHERE id = ?', [updates.totalVolumeKg, id]);
+  }
+}
+
 // -------------------------------------------------------------
 // SCANNED PRODUCTS REPOSITORY
 // -------------------------------------------------------------
