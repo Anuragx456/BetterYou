@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { analyzeMealText } from '../services/aiVisionService';
+import { validateMacroPlausibility } from '../services/aiSchemas';
 import { colors } from '../theme/colors';
 import { MealAnalysisResult } from '../types';
 
@@ -75,14 +76,21 @@ export function ManualMealModal({ visible, onClose, onSubmitResult }: ManualMeal
       return;
     }
 
+    const p = Math.max(0, parseInt(protein, 10) || 0);
+    const c = Math.max(0, parseInt(carbs, 10) || 0);
+    const f = Math.max(0, parseInt(fat, 10) || 0);
+    const plausibility = validateMacroPlausibility(cals, p, c, f);
+
     const result: MealAnalysisResult = {
       dishName: name,
       calories: cals,
-      protein: Math.max(0, parseInt(protein, 10) || 0),
-      carbs: Math.max(0, parseInt(carbs, 10) || 0),
-      fat: Math.max(0, parseInt(fat, 10) || 0),
+      protein: p,
+      carbs: c,
+      fat: f,
       estimatedWeightGrams: Math.max(10, parseInt(weightGrams, 10) || 250),
-      confidenceScore: 1.0,
+      isPlausible: plausibility.isPlausible,
+      plausibilityDeviation: plausibility.deviationPercent,
+      plausibilityWarning: plausibility.warning,
       ingredientsDetected: [name],
     };
 

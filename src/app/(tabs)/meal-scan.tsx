@@ -254,7 +254,6 @@ export default function MealScanScreen() {
     const scaledCarbs = Math.round(aiResult.carbs * portionMultiplier);
     const scaledFat = Math.round(aiResult.fat * portionMultiplier);
     const scaledGrams = Math.round(aiResult.estimatedWeightGrams * portionMultiplier);
-    const confidencePct = Math.round(aiResult.confidenceScore * 100);
 
     return (
       <SafeAreaView style={styles.container}>
@@ -277,10 +276,15 @@ export default function MealScanScreen() {
                 <Ionicons name="flask-outline" size={14} color={colors.calories} />
                 <Text style={[styles.confidenceText, { color: colors.calories }]}>Offline Demo Simulation</Text>
               </View>
-            ) : (
+            ) : aiResult.isPlausible ? (
               <View style={styles.confidenceBadge}>
                 <Ionicons name="checkmark-circle" size={14} color={colors.primary} />
-                <Text style={styles.confidenceText}>AI Verified · {confidencePct}% match</Text>
+                <Text style={styles.confidenceText}>Macro Balanced (4P+4C+9F)</Text>
+              </View>
+            ) : (
+              <View style={[styles.confidenceBadge, { backgroundColor: 'rgba(239, 68, 68, 0.15)', borderColor: '#ef4444' }]}>
+                <Ionicons name="warning-outline" size={14} color="#ef4444" />
+                <Text style={[styles.confidenceText, { color: '#ef4444' }]}>Macro Discrepancy</Text>
               </View>
             )}
           </View>
@@ -301,6 +305,33 @@ export default function MealScanScreen() {
             <Text style={styles.dishNameTextClean}>{aiResult.dishName}</Text>
             <Text style={styles.dishWeightSubClean}>~{scaledGrams}g</Text>
           </View>
+
+          {/* Plausibility Warning Banner */}
+          {!aiResult.isPlausible && aiResult.plausibilityWarning && (
+            <View style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', padding: 12, borderRadius: 8, marginHorizontal: 20, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.3)' }}>
+              <Text style={{ color: '#fca5a5', fontSize: 12, lineHeight: 16 }}>
+                ⚠️ {aiResult.plausibilityWarning}
+              </Text>
+            </View>
+          )}
+
+          {/* Fallback to Manual Entry Prompt */}
+          {aiResult.fallbackToManual && (
+            <View style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)', padding: 12, borderRadius: 8, marginHorizontal: 20, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.3)' }}>
+              <Text style={{ color: colors.calories, fontSize: 13, fontWeight: '600', marginBottom: 4 }}>
+                Uncertain Vision Estimate
+              </Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 16, marginBottom: 8 }}>
+                Visual recognition could not confirm high-confidence macros. You can adjust the numbers below or switch to manual entry.
+              </Text>
+              <Pressable
+                style={{ alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 12, backgroundColor: colors.card, borderRadius: 6, borderWidth: 1, borderColor: colors.cardBorder }}
+                onPress={() => setIsTypeModalVisible(true)}
+              >
+                <Text style={{ color: colors.text, fontSize: 12, fontWeight: '600' }}>Enter Details Manually</Text>
+              </Pressable>
+            </View>
+          )}
 
           {/* Calorie Hero Metric */}
           <View style={styles.calorieHeroContainer}>
