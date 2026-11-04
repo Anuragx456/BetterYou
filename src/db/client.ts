@@ -262,7 +262,7 @@ export async function dbInsertMeal(meal: Omit<MealLog, 'id' | 'timestamp'> & { i
       meal.protein,
       meal.carbs,
       meal.fat,
-      meal.estimatedWeightGrams,
+      meal.estimatedWeightGrams ?? 0,
       meal.portionMultiplier ?? 1.0,
       meal.imageUri ?? null,
       JSON.stringify(meal.ingredientsDetected || []),
