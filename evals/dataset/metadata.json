@@ -1,0 +1,556 @@
+{
+  "version": "1.0.0",
+  "totalSamples": 50,
+  "description": "Ground-truth evaluation benchmark dataset for BetterYou (25 Meals + 25 Indian Supermarket Packaged Products)",
+  "meals": [
+    {
+      "id": "meal_01",
+      "dishName": "Paneer Butter Masala with 2 Butter Roti",
+      "groundTruthCalories": 620,
+      "groundTruthProtein": 22.0,
+      "groundTruthCarbs": 58.0,
+      "groundTruthFat": 34.0,
+      "groundTruthWeightGrams": 400,
+      "ingredients": ["Paneer", "Butter", "Cream", "Tomato Gravy", "Whole Wheat Flour", "Spices"]
+    },
+    {
+      "id": "meal_02",
+      "dishName": "Hyderabadi Chicken Biryani with Mirchi Ka Salan",
+      "groundTruthCalories": 750,
+      "groundTruthProtein": 42.0,
+      "groundTruthCarbs": 82.0,
+      "groundTruthFat": 28.0,
+      "groundTruthWeightGrams": 450,
+      "ingredients": ["Basmati Rice", "Chicken", "Ghee", "Fried Onions", "Yogurt", "Saffron", "Spices"]
+    },
+    {
+      "id": "meal_03",
+      "dishName": "Masala Dosa with Sambar and Coconut Chutney",
+      "groundTruthCalories": 440,
+      "groundTruthProtein": 10.0,
+      "groundTruthCarbs": 66.0,
+      "groundTruthFat": 16.0,
+      "groundTruthWeightGrams": 320,
+      "ingredients": ["Fermented Rice & Urad Dal Batter", "Potato Filling", "Coconut Chutney", "Toor Dal", "Mustard Seeds"]
+    },
+    {
+      "id": "meal_04",
+      "dishName": "Yellow Dal Tadka with Steamed Basmati Rice",
+      "groundTruthCalories": 420,
+      "groundTruthProtein": 15.0,
+      "groundTruthCarbs": 74.0,
+      "groundTruthFat": 8.0,
+      "groundTruthWeightGrams": 380,
+      "ingredients": ["Toor Dal", "Basmati Rice", "Ghee", "Cumin", "Garlic", "Tomato", "Turmeric"]
+    },
+    {
+      "id": "meal_05",
+      "dishName": "Rolled Oatmeal with Almond Milk, Chia Seeds & Honey",
+      "groundTruthCalories": 360,
+      "groundTruthProtein": 12.0,
+      "groundTruthCarbs": 56.0,
+      "groundTruthFat": 10.0,
+      "groundTruthWeightGrams": 280,
+      "ingredients": ["Rolled Oats", "Almond Milk", "Chia Seeds", "Honey", "Crushed Almonds"]
+    },
+    {
+      "id": "meal_06",
+      "dishName": "Whey Protein Shake with Peanut Butter & Banana",
+      "groundTruthCalories": 410,
+      "groundTruthProtein": 36.0,
+      "groundTruthCarbs": 38.0,
+      "groundTruthFat": 14.0,
+      "groundTruthWeightGrams": 350,
+      "ingredients": ["Whey Protein Isolate", "Peanut Butter", "Banana", "Water"]
+    },
+    {
+      "id": "meal_07",
+      "dishName": "Egg Bhurji (3 Eggs) with 2 Multigrain Parathas",
+      "groundTruthCalories": 510,
+      "groundTruthProtein": 26.0,
+      "groundTruthCarbs": 44.0,
+      "groundTruthFat": 25.0,
+      "groundTruthWeightGrams": 320,
+      "ingredients": ["Whole Eggs", "Onion", "Green Chilli", "Multigrain Flour", "Mustard Oil"]
+    },
+    {
+      "id": "meal_08",
+      "dishName": "Rajma Chawal (Kidney Beans Curry with Rice)",
+      "groundTruthCalories": 530,
+      "groundTruthProtein": 18.0,
+      "groundTruthCarbs": 88.0,
+      "groundTruthFat": 12.0,
+      "groundTruthWeightGrams": 420,
+      "ingredients": ["Kidney Beans", "Basmati Rice", "Tomato Onion Gravy", "Ginger", "Coriander", "Oil"]
+    },
+    {
+      "id": "meal_09",
+      "dishName": "Grilled Chicken Breast with Quinoa & Steamed Broccoli",
+      "groundTruthCalories": 460,
+      "groundTruthProtein": 48.0,
+      "groundTruthCarbs": 32.0,
+      "groundTruthFat": 14.0,
+      "groundTruthWeightGrams": 360,
+      "ingredients": ["Chicken Breast", "Quinoa", "Broccoli", "Olive Oil", "Black Pepper", "Garlic"]
+    },
+    {
+      "id": "meal_10",
+      "dishName": "Palak Paneer with 2 Whole Wheat Phulkas",
+      "groundTruthCalories": 480,
+      "groundTruthProtein": 20.0,
+      "groundTruthCarbs": 46.0,
+      "groundTruthFat": 24.0,
+      "groundTruthWeightGrams": 350,
+      "ingredients": ["Spinach Puree", "Paneer", "Whole Wheat Flour", "Cream", "Ginger Garlic Paste", "Ghee"]
+    },
+    {
+      "id": "meal_11",
+      "dishName": "Chana Masala (Chickpea Curry) with Bhatura",
+      "groundTruthCalories": 680,
+      "groundTruthProtein": 18.0,
+      "groundTruthCarbs": 82.0,
+      "groundTruthFat": 32.0,
+      "groundTruthWeightGrams": 400,
+      "ingredients": ["Kabuli Chana", "Refined Flour (Maida)", "Yogurt", "Sunflower Oil", "Amchur", "Pomegranate Seeds"]
+    },
+    {
+      "id": "meal_12",
+      "dishName": "Idli Sambar (3 Idlis) with Tomato Chutney",
+      "groundTruthCalories": 310,
+      "groundTruthProtein": 11.0,
+      "groundTruthCarbs": 60.0,
+      "groundTruthFat": 3.0,
+      "groundTruthWeightGrams": 300,
+      "ingredients": ["Steamed Rice & Urad Dal Cakes", "Toor Dal Sambar", "Drumsticks", "Tomato Chutney"]
+    },
+    {
+      "id": "meal_13",
+      "dishName": "Pan-Seared Salmon with Brown Rice & Asparagus",
+      "groundTruthCalories": 540,
+      "groundTruthProtein": 40.0,
+      "groundTruthCarbs": 38.0,
+      "groundTruthFat": 24.0,
+      "groundTruthWeightGrams": 340,
+      "ingredients": ["Salmon Fillet", "Brown Rice", "Asparagus", "Olive Oil", "Lemon Juice", "Sea Salt"]
+    },
+    {
+      "id": "meal_14",
+      "dishName": "Tofu & Mixed Veggie Stir-Fry with Soba Noodles",
+      "groundTruthCalories": 420,
+      "groundTruthProtein": 22.0,
+      "groundTruthCarbs": 58.0,
+      "groundTruthFat": 12.0,
+      "groundTruthWeightGrams": 380,
+      "ingredients": ["Firm Tofu", "Buckwheat Soba Noodles", "Bell Peppers", "Snap Peas", "Sesame Oil", "Soy Sauce"]
+    },
+    {
+      "id": "meal_15",
+      "dishName": "Moong Dal Khichdi with Curd & Pickle",
+      "groundTruthCalories": 390,
+      "groundTruthProtein": 16.0,
+      "groundTruthCarbs": 65.0,
+      "groundTruthFat": 8.0,
+      "groundTruthWeightGrams": 360,
+      "ingredients": ["Yellow Moong Dal", "Rice", "Cumin", "Turmeric", "Cow Ghee", "Whole Milk Curd"]
+    },
+    {
+      "id": "meal_16",
+      "dishName": "Maharashtrian Kanda Poha with Peanuts & Sev",
+      "groundTruthCalories": 350,
+      "groundTruthProtein": 8.0,
+      "groundTruthCarbs": 55.0,
+      "groundTruthFat": 12.0,
+      "groundTruthWeightGrams": 240,
+      "ingredients": ["Flattened Rice", "Onion", "Roasted Peanuts", "Curry Leaves", "Mustard Seeds", "Besan Sev"]
+    },
+    {
+      "id": "meal_17",
+      "dishName": "Rava Upma with Mixed Vegetables & Cashews",
+      "groundTruthCalories": 330,
+      "groundTruthProtein": 7.0,
+      "groundTruthCarbs": 52.0,
+      "groundTruthFat": 11.0,
+      "groundTruthWeightGrams": 250,
+      "ingredients": ["Semolina (Sooji)", "Carrots", "Green Peas", "Cashews", "Ginger", "Ghee"]
+    },
+    {
+      "id": "meal_18",
+      "dishName": "Besan Chilla (2 Savory Gram Flour Pancakes)",
+      "groundTruthCalories": 290,
+      "groundTruthProtein": 14.0,
+      "groundTruthCarbs": 38.0,
+      "groundTruthFat": 9.0,
+      "groundTruthWeightGrams": 220,
+      "ingredients": ["Gram Flour (Besan)", "Ajwain", "Chopped Onion", "Tomato", "Green Chilli", "Mustard Oil"]
+    },
+    {
+      "id": "meal_19",
+      "dishName": "Sprouted Moong & Pomegranate Fitness Salad",
+      "groundTruthCalories": 210,
+      "groundTruthProtein": 12.0,
+      "groundTruthCarbs": 36.0,
+      "groundTruthFat": 2.0,
+      "groundTruthWeightGrams": 220,
+      "ingredients": ["Sprouted Green Gram", "Pomegranate Arils", "Cucumber", "Lemon Juice", "Chaat Masala"]
+    },
+    {
+      "id": "meal_20",
+      "dishName": "Soya Chunks Curry with 3 Phulkas",
+      "groundTruthCalories": 470,
+      "groundTruthProtein": 35.0,
+      "groundTruthCarbs": 62.0,
+      "groundTruthFat": 9.0,
+      "groundTruthWeightGrams": 360,
+      "ingredients": ["Defatted Soya Chunks", "Onion Tomato Gravy", "Whole Wheat Phulkas", "Coriander", "Cumin"]
+    },
+    {
+      "id": "meal_21",
+      "dishName": "Fish Curry (Rohu) with Boiled Rice",
+      "groundTruthCalories": 490,
+      "groundTruthProtein": 32.0,
+      "groundTruthCarbs": 68.0,
+      "groundTruthFat": 10.0,
+      "groundTruthWeightGrams": 390,
+      "ingredients": ["Rohu Freshwater Fish", "Boiled Rice", "Mustard Paste", "Kalonji", "Mustard Oil", "Turmeric"]
+    },
+    {
+      "id": "meal_22",
+      "dishName": "Greek Yogurt Bowl with Blueberries & Walnuts",
+      "groundTruthCalories": 280,
+      "groundTruthProtein": 20.0,
+      "groundTruthCarbs": 24.0,
+      "groundTruthFat": 12.0,
+      "groundTruthWeightGrams": 250,
+      "ingredients": ["Unsweetened Greek Yogurt", "Fresh Blueberries", "Crushed Walnuts", "Stevia Drops"]
+    },
+    {
+      "id": "meal_23",
+      "dishName": "Butter Chicken with 1 Garlic Naan",
+      "groundTruthCalories": 790,
+      "groundTruthProtein": 44.0,
+      "groundTruthCarbs": 64.0,
+      "groundTruthFat": 40.0,
+      "groundTruthWeightGrams": 420,
+      "ingredients": ["Tandoori Chicken", "Butter", "Cashew Paste", "Tomato Puree", "Cream", "Refined Flour Naan"]
+    },
+    {
+      "id": "meal_24",
+      "dishName": "Methi Thepla (3 Pieces) with Sweet Mango Pickle",
+      "groundTruthCalories": 360,
+      "groundTruthProtein": 9.0,
+      "groundTruthCarbs": 54.0,
+      "groundTruthFat": 12.0,
+      "groundTruthWeightGrams": 210,
+      "ingredients": ["Fenugreek Leaves", "Whole Wheat Flour", "Besan", "Yogurt", "Sesame Seeds", "Oil"]
+    },
+    {
+      "id": "meal_25",
+      "dishName": "Masala Chai with 2 Marie Biscuits",
+      "groundTruthCalories": 160,
+      "groundTruthProtein": 4.0,
+      "groundTruthCarbs": 26.0,
+      "groundTruthFat": 4.0,
+      "groundTruthWeightGrams": 200,
+      "ingredients": ["Whole Buffalo Milk", "Black Tea", "Sugar", "Crushed Cardamom & Ginger", "Wheat Biscuits"]
+    }
+  ],
+  "products": [
+    {
+      "id": "prod_01",
+      "productName": "Kurkure Masala Munch",
+      "category": "Food & Beverages",
+      "novaGroup": 4,
+      "nutriscoreGrade": "e",
+      "ingredients": [
+        "Rice Meal", "Edible Vegetable Oil (Palmolein)", "Corn Meal", "Gram Meal",
+        "Spices & Condiments", "Salt", "Sugar", "Tartaric Acid (E334)", "Citric Acid (E330)",
+        "Flavour Enhancer (INS 627, INS 631)", "TBHQ (Antioxidant INS 319)"
+      ],
+      "harmfulAdditives": ["TBHQ (Antioxidant INS 319)", "Flavour Enhancer (INS 627, INS 631)"]
+    },
+    {
+      "id": "prod_02",
+      "productName": "Maggi 2-Minute Noodles",
+      "category": "Food & Beverages",
+      "novaGroup": 4,
+      "nutriscoreGrade": "e",
+      "ingredients": [
+        "Refined Wheat Flour (Maida)", "Palm Oil", "Iodised Salt", "Wheat Gluten",
+        "Thickeners (508, 412)", "Acidity Regulators (501i, 500i)", "Humectant (451i)",
+        "Hydrolised Groundnut Protein", "Mixed Spices", "Flavour Enhancer (635)"
+      ],
+      "harmfulAdditives": ["Palm Oil", "Flavour Enhancer (635)", "Humectant (451i)"]
+    },
+    {
+      "id": "prod_03",
+      "productName": "Haldiram's Aloo Bhujia",
+      "category": "Food & Beverages",
+      "novaGroup": 4,
+      "nutriscoreGrade": "e",
+      "ingredients": [
+        "Potatoes", "Edible Vegetable Oil (Palmolein Oil, Cottonseed Oil)", "Gram Pulse Flour",
+        "Tepary Bean Flour", "Edible Starch", "Iodised Salt", "Red Chilli Powder", "Citric Acid (E330)"
+      ],
+      "harmfulAdditives": ["Palmolein Oil", "Cottonseed Oil"]
+    },
+    {
+      "id": "prod_04",
+      "productName": "Oreo Original Vanilla Sandwich Biscuits",
+      "category": "Food & Beverages",
+      "novaGroup": 4,
+      "nutriscoreGrade": "e",
+      "ingredients": [
+        "Refined Wheat Flour", "Sugar", "Fractionated Palm Oil", "Invert Sugar",
+        "Cocoa Solids", "Leavening Agents (500ii, 503ii)", "Iodised Salt", "Emulsifier (Soy Lecithin 322)",
+        "Artificial Vanilla Flavouring"
+      ],
+      "harmfulAdditives": ["Fractionated Palm Oil", "Artificial Vanilla Flavouring"]
+    },
+    {
+      "id": "prod_05",
+      "productName": "Lay's India's Magic Masala Potato Chips",
+      "category": "Food & Beverages",
+      "novaGroup": 4,
+      "nutriscoreGrade": "e",
+      "ingredients": [
+        "Potato", "Edible Vegetable Oil (Palmolein)", "Seasoning", "Spices & Condiments",
+        "Salt", "Black Salt", "Sugar", "Tomato Powder", "Citric Acid", "Flavour Enhancers (627, 631)"
+      ],
+      "harmfulAdditives": ["Palmolein", "Flavour Enhancers (627, 631)"]
+    },
+    {
+      "id": "prod_06",
+      "productName": "Amul Pasteurised Butter",
+      "category": "Food & Beverages",
+      "novaGroup": 2,
+      "nutriscoreGrade": "d",
+      "ingredients": ["Butterfat", "Common Salt", "Permitted Natural Colour (Annatto E160b)"],
+      "harmfulAdditives": []
+    },
+    {
+      "id": "prod_07",
+      "productName": "Kissan Mixed Fruit Jam",
+      "category": "Food & Beverages",
+      "novaGroup": 3,
+      "nutriscoreGrade": "d",
+      "ingredients": [
+        "Sugar", "Mixed Fruit Pulp (46%)", "Thickener (INS 440)", "Acidity Regulator (INS 330)",
+        "Preservative (INS 211)", "Synthetic Food Colours (INS 122)", "Artificial Flavouring Substances"
+      ],
+      "harmfulAdditives": ["Preservative (INS 211)", "Synthetic Food Colours (INS 122)"]
+    },
+    {
+      "id": "prod_08",
+      "productName": "Britannia Good Day Cashew Cookies",
+      "category": "Food & Beverages",
+      "novaGroup": 4,
+      "nutriscoreGrade": "e",
+      "ingredients": [
+        "Refined Wheat Flour", "Sugar", "Hydrogenated Vegetable Oil", "Cashew Bits (4.5%)",
+        "Butter", "Invert Sugar Syrup", "Raising Agents (503ii, 500ii)", "Artificial Butter Flavour"
+      ],
+      "harmfulAdditives": ["Hydrogenated Vegetable Oil", "Artificial Butter Flavour"]
+    },
+    {
+      "id": "prod_09",
+      "productName": "Glow & Lovely Advanced Multivitamin Cream",
+      "category": "Personal Care & Skincare",
+      "novaGroup": null,
+      "nutriscoreGrade": null,
+      "ingredients": [
+        "Water", "Palmitic Acid", "Stearic Acid", "Niacinamide", "Glycerin",
+        "Dimethicone", "Ethylhexyl Methoxycinnamate", "Butyl Methoxydibenzoylmethane",
+        "Titanium Dioxide", "Methylparaben", "Propylparaben", "Phenoxyethanol", "Perfume"
+      ],
+      "harmfulAdditives": ["Titanium Dioxide", "Methylparaben", "Propylparaben"]
+    },
+    {
+      "id": "prod_10",
+      "productName": "Dettol Original Bathing Soap",
+      "category": "Personal Care & Skincare",
+      "novaGroup": null,
+      "nutriscoreGrade": null,
+      "ingredients": [
+        "Sodium Palmate", "Sodium Palm Kernelate", "Aqua", "Chloroxylenol (PCMX)",
+        "Parfum", "Glycerin", "Sodium Chloride", "Tetrasodium EDTA", "Etidronic Acid", "Cl 11680"
+      ],
+      "harmfulAdditives": ["Chloroxylenol (PCMX)", "Tetrasodium EDTA", "Synthetic Fragrance"]
+    },
+    {
+      "id": "prod_11",
+      "productName": "Nivea Soft Light Moisturiser",
+      "category": "Personal Care & Skincare",
+      "novaGroup": null,
+      "nutriscoreGrade": null,
+      "ingredients": [
+        "Aqua", "Glycerin", "Paraffinum Liquidum (Mineral Oil)", "Myristyl Alcohol",
+        "Butylene Glycol", "Alcohol Denat", "Stearic Acid", "Jojoba Seed Oil", "Tocopheryl Acetate", "Parfum"
+      ],
+      "harmfulAdditives": ["Paraffinum Liquidum (Mineral Oil)", "Alcohol Denat", "Parfum"]
+    },
+    {
+      "id": "prod_12",
+      "productName": "Dove Deeply Nourishing Body Wash",
+      "category": "Personal Care & Skincare",
+      "novaGroup": null,
+      "nutriscoreGrade": null,
+      "ingredients": [
+        "Water", "Cocamidopropyl Betaine", "Sodium Hydroxypropyl Starch Phosphate",
+        "Lauric Acid", "Sodium Lauroyl Glycinate", "Sodium Lauroyl Isethionate", "Hydrogenated Soybean Oil",
+        "Sodium Chloride", "Glycerin", "Parfum", "Phenoxyethanol", "BHT"
+      ],
+      "harmfulAdditives": ["BHT", "Parfum"]
+    },
+    {
+      "id": "prod_13",
+      "productName": "Pond's Super Light Gel Moisturizer",
+      "category": "Personal Care & Skincare",
+      "novaGroup": null,
+      "nutriscoreGrade": null,
+      "ingredients": [
+        "Water", "Dimethicone", "Glycerin", "Niacinamide", "Sodium Hyaluronate",
+        "Tocopheryl Acetate", "Carbomer", "Disodium EDTA", "Sodium Hydroxide", "Phenoxyethanol", "Methylparaben"
+      ],
+      "harmfulAdditives": ["Methylparaben", "Disodium EDTA"]
+    },
+    {
+      "id": "prod_14",
+      "productName": "Bajaj Almond Drops Non-Sticky Hair Oil",
+      "category": "Hair Care",
+      "novaGroup": null,
+      "nutriscoreGrade": null,
+      "ingredients": [
+        "Mineral Oil (Light Liquid Paraffin 76.8%)", "Vegetable Oil (20%)", "Almond Oil (0.5%)",
+        "Perfume", "TBHQ (Antioxidant)", "CI 47000", "CI 26100"
+      ],
+      "harmfulAdditives": ["Mineral Oil (Light Liquid Paraffin 76.8%)", "TBHQ (Antioxidant)", "Synthetic Azo Dyes"]
+    },
+    {
+      "id": "prod_15",
+      "productName": "Parachute 100% Pure Coconut Oil",
+      "category": "Hair Care",
+      "novaGroup": 1,
+      "nutriscoreGrade": null,
+      "ingredients": ["100% Pure Coconut Oil (Cold Pressed / Unrefined)"],
+      "harmfulAdditives": []
+    },
+    {
+      "id": "prod_16",
+      "productName": "Head & Shoulders Cool Menthol Anti-Dandruff Shampoo",
+      "category": "Hair Care",
+      "novaGroup": null,
+      "nutriscoreGrade": null,
+      "ingredients": [
+        "Water", "Sodium Laureth Sulfate", "Sodium Xylenesulfonate", "Zinc Carbonate",
+        "Cocamide MEA", "Cocamidopropyl Betaine", "Zinc Pyrithione", "Menthol", "Dimethicone",
+        "Sodium Chloride", "Fragrance", "Methylchloroisothiazolinone", "Methylisothiazolinone"
+      ],
+      "harmfulAdditives": ["Sodium Laureth Sulfate", "Zinc Pyrithione", "Methylisothiazolinone"]
+    },
+    {
+      "id": "prod_17",
+      "productName": "Colgate Strong Teeth Toothpaste",
+      "category": "Oral Care",
+      "novaGroup": null,
+      "nutriscoreGrade": null,
+      "ingredients": [
+        "Calcium Carbonate", "Water", "Sorbitol", "Sodium Lauryl Sulfate (SLS)",
+        "Silica", "Sodium Monofluorophosphate", "Flavour", "Sodium Silicate", "Sodium Carboxymethyl Cellulose",
+        "Sodium Saccharin", "Titanium Dioxide"
+      ],
+      "harmfulAdditives": ["Sodium Lauryl Sulfate (SLS)", "Titanium Dioxide", "Sodium Saccharin"]
+    },
+    {
+      "id": "prod_18",
+      "productName": "Sensodyne Rapid Relief Toothpaste",
+      "category": "Oral Care",
+      "novaGroup": null,
+      "nutriscoreGrade": null,
+      "ingredients": [
+        "Glycerin", "PEG-8", "Hydrated Silica", "Stannous Fluoride",
+        "Sodium Lauryl Sulfate", "Titanium Dioxide", "Sodium Saccharin", "Cocamidopropyl Betaine"
+      ],
+      "harmfulAdditives": ["Sodium Lauryl Sulfate", "Titanium Dioxide", "PEG-8"]
+    },
+    {
+      "id": "prod_19",
+      "productName": "Lizol Disinfectant Surface Floor Cleaner (Citrus)",
+      "category": "Household & Cleaning",
+      "novaGroup": null,
+      "nutriscoreGrade": null,
+      "ingredients": [
+        "Benzalkonium Chloride (BKC 80% - 2.45% w/w)", "Lauryl Alcohol Ethoxylate",
+        "Sodium Bicarbonate", "Disodium EDTA", "Perfume", "Tartrazine Yellow CI 19140", "Deionized Water"
+      ],
+      "harmfulAdditives": ["Benzalkonium Chloride (BKC 80% - 2.45% w/w)", "Disodium EDTA"]
+    },
+    {
+      "id": "prod_20",
+      "productName": "Vim Lemon Dishwash Gel",
+      "category": "Household & Cleaning",
+      "novaGroup": null,
+      "nutriscoreGrade": null,
+      "ingredients": [
+        "Linear Alkylbenzene Sulfonate (LABS Surfactant)", "Sodium Hydroxide",
+        "Magnesium Sulfate", "Fragrance", "Synthetic Green Dye", "Preservatives (MIT/CMIT)"
+      ],
+      "harmfulAdditives": ["Linear Alkylbenzene Sulfonate (LABS Surfactant)", "Preservatives (MIT/CMIT)"]
+    },
+    {
+      "id": "prod_21",
+      "productName": "Harpic Power Plus 10x Toilet Cleaner",
+      "category": "Household & Cleaning",
+      "novaGroup": null,
+      "nutriscoreGrade": null,
+      "ingredients": [
+        "Hydrochloric Acid (10.5% w/w)", "Hydroxyethyl Oleylamine", "Cetyl Trimethyl Ammonium Chloride",
+        "Methyl Salicylate", "Acid Blue 9", "Deionized Water"
+      ],
+      "harmfulAdditives": ["Hydrochloric Acid (10.5% w/w)", "Cetyl Trimethyl Ammonium Chloride"]
+    },
+    {
+      "id": "prod_22",
+      "productName": "Good Knight Gold Flash Liquid Mosquito Vaporizer",
+      "category": "Pest Control",
+      "novaGroup": null,
+      "nutriscoreGrade": null,
+      "ingredients": [
+        "Transfluthrin (a.i.) 1.6% w/w", "Deodorised Kerosene (Hydrocarbon Solvent 98.4% w/w)"
+      ],
+      "harmfulAdditives": ["Transfluthrin (Synthetic Neurotoxic Pyrethroid)", "Deodorised Kerosene Hydrocarbons"]
+    },
+    {
+      "id": "prod_23",
+      "productName": "Johnson's Baby Powder",
+      "category": "Baby Care",
+      "novaGroup": null,
+      "nutriscoreGrade": null,
+      "ingredients": ["Purified Talc (Magnesium Silicate Hydrate)", "Fragrance"],
+      "harmfulAdditives": ["Purified Talc (Pulmonary Inhalation Risk)", "Synthetic Fragrance"]
+    },
+    {
+      "id": "prod_24",
+      "productName": "Dabur Chyawanprash Awaleha",
+      "category": "Ayurveda & OTC",
+      "novaGroup": 3,
+      "nutriscoreGrade": "d",
+      "ingredients": [
+        "Amla (Indian Gooseberry Pulp)", "Sugar (Sucrose 65%)", "Honey", "Clarified Butter (Ghee)",
+        "Sesame Oil", "Pippali", "Bambusa Arundinacea (Vanshlochan)", "Sodium Benzoate (Preservative)"
+      ],
+      "harmfulAdditives": ["Sodium Benzoate (Preservative)", "High Refined Sugar (Sucrose 65%)"]
+    },
+    {
+      "id": "prod_25",
+      "productName": "Zandu Balm Fast Pain Relief",
+      "category": "Ayurveda & OTC",
+      "novaGroup": null,
+      "nutriscoreGrade": null,
+      "ingredients": [
+        "Mentha Spicata (Pudina Satva 16%)", "Gaultheria Fragrantissima (Gandhapura Tel / Methyl Salicylate 10%)",
+        "Hard Paraffin Base (Ointment Vehicle q.s.)"
+      ],
+      "harmfulAdditives": ["Methyl Salicylate (High Concentration)", "Hard Paraffin Petroleum Base"]
+    }
+  ]
+}

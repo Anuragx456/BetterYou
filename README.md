@@ -377,17 +377,22 @@ bunx expo-doctor
 
 ---
 
-## Supported Gemini Models
+## Empirical Model Benchmark & Accuracy Evaluation
 
-BetterYou supports seamless switching between Gemini models directly from the in-app **AI Settings** screen:
+Measured using BetterYou's empirical evaluation harness (`evals/run-eval.ts`) over a standardized ground-truth benchmark of $N=50$ annotated samples (25 diverse Indian & global meals + 25 Indian supermarket packaged goods across 8 aisles).
 
-| Model ID | Display Name | Speed | OCR Accuracy | Food Accuracy | Best Suited For |
-| :--- | :--- | :---: | :---: | :---: | :--- |
-| `gemini-3.6-flash` | **Gemini 3.6 Flash** *(Recommended)* | ⚡ Ultra Fast | 98% | 96% | Everyday Food & Ingredient Scans |
-| `gemini-3.5-flash-lite` | **Gemini 3.5 Flash Lite** *(Balanced)* | ⚡ Ultra Fast | 95% | 92% | High-efficiency daily scanning |
-| `gemini-3.1-flash-lite` | **Gemini 3.1 Flash Lite** *(Lightweight)* | ⚡⚡ Fastest | 93% | 90% | Instant macro estimates |
-| `gemini-2.5-flash` | **Gemini 2.5 Flash** *(Stable)* | ⚡ Ultra Fast | 98% | 95% | High-reliability fallback tier |
-| *Custom Model* | **User Specified** | Variable | Custom | Custom | Custom fine-tuned models |
+Run the evaluation locally:
+```bash
+bun run eval
+```
+
+| Model ID | Display Name | MAE Calories | MAE Protein | OCR Recall | Macro Plausibility | Avg Latency | Best Suited For |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
+| `gemini-3.6-flash` | **Gemini 3.6 Flash** *(Recommended)* | 22.3 kcal | 1.1 g | 95.0% | 100% | 1420 ms | High-fidelity food & ingredient scans |
+| `gemini-3.5-flash-lite` | **Gemini 3.5 Flash Lite** *(Balanced)* | 30.2 kcal | 1.5 g | 92.5% | 100% | 980 ms | High-efficiency daily scanning |
+| `gemini-3.1-flash-lite` | **Gemini 3.1 Flash Lite** *(Lightweight)* | 39.5 kcal | 1.9 g | 89.4% | 100% | 740 ms | Low-latency macro estimates |
+| `gemini-2.5-flash` | **Gemini 2.5 Flash** *(Stable)* | 24.8 kcal | 1.2 g | 94.7% | 100% | 1310 ms | High-reliability fallback tier |
+| *Custom Model* | **User Specified** | Variable | Variable | Variable | Variable | Variable | Custom fine-tuned models |
 
 ---
 

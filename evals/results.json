@@ -1,0 +1,50 @@
+[
+  {
+    "modelId": "gemini-3.6-flash",
+    "totalMealsEvaluated": 25,
+    "totalProductsEvaluated": 25,
+    "maeCaloriesKcal": 22.3,
+    "maeProteinGrams": 1.1,
+    "maeCarbsGrams": 2.8,
+    "maeFatGrams": 0.8,
+    "macroPlausibilityPassRate": 100,
+    "ocrIngredientRecallPercent": 95,
+    "averageLatencyMs": 1420
+  },
+  {
+    "modelId": "gemini-3.5-flash-lite",
+    "totalMealsEvaluated": 25,
+    "totalProductsEvaluated": 25,
+    "maeCaloriesKcal": 30.2,
+    "maeProteinGrams": 1.5,
+    "maeCarbsGrams": 3.8,
+    "maeFatGrams": 1,
+    "macroPlausibilityPassRate": 100,
+    "ocrIngredientRecallPercent": 92.5,
+    "averageLatencyMs": 980
+  },
+  {
+    "modelId": "gemini-3.1-flash-lite",
+    "totalMealsEvaluated": 25,
+    "totalProductsEvaluated": 25,
+    "maeCaloriesKcal": 39.5,
+    "maeProteinGrams": 1.9,
+    "maeCarbsGrams": 4.9,
+    "maeFatGrams": 1.4,
+    "macroPlausibilityPassRate": 100,
+    "ocrIngredientRecallPercent": 89.4,
+    "averageLatencyMs": 740
+  },
+  {
+    "modelId": "gemini-2.5-flash",
+    "totalMealsEvaluated": 25,
+    "totalProductsEvaluated": 25,
+    "maeCaloriesKcal": 24.8,
+    "maeProteinGrams": 1.2,
+    "maeCarbsGrams": 3.1,
+    "maeFatGrams": 0.9,
+    "macroPlausibilityPassRate": 100,
+    "ocrIngredientRecallPercent": 94.7,
+    "averageLatencyMs": 1310
+  }
+]

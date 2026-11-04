@@ -51,6 +51,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "test": "bun test && (cd server && bun test)",
+    "eval": "bun run evals/run-eval.ts",
     "secrets:scan": "gitleaks detect --verbose",
     "server:start": "cd server && bun run src/index.ts",
     "server:dev": "cd server && bun --watch src/index.ts",
