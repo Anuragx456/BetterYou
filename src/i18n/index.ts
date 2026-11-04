@@ -1,5 +1,3 @@
-import * as Localization from 'expo-localization';
-
 export type SupportedLanguage = 'en' | 'hi';
 
 export interface Translations {
@@ -169,16 +167,21 @@ export const TRANSLATIONS: Record<SupportedLanguage, Translations> = {
 
 /**
  * Detects device language code (defaults to 'en').
+ * Gracefully handles missing native modules in unlinked builds, Expo Go, or testing environments.
  */
 export function getDeviceLanguage(): SupportedLanguage {
   try {
-    const locales = Localization.getLocales();
-    if (locales && locales.length > 0) {
+    // Dynamic require inside try/catch prevents app crash if native binary
+    // does not yet have the ExpoLocalization native module compiled into it.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Localization = require('expo-localization');
+    const locales = Localization?.getLocales?.();
+    if (Array.isArray(locales) && locales.length > 0) {
       const code = locales[0]?.languageCode;
       if (code === 'hi') return 'hi';
     }
   } catch {
-    // fallback
+    // Graceful fallback to English
   }
   return 'en';
 }

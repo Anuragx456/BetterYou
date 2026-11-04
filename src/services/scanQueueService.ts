@@ -1,6 +1,5 @@
 import type { NetInfoState } from '@react-native-community/netinfo';
 import { safeAsyncStorage } from '../utils/storage';
-import { analyzeMealImage, analyzeIngredientsImage } from './aiVisionService';
 import { getFullImageUri } from '../utils/imageManager';
 import { dbInsertMeal, dbInsertScannedProduct } from '../db/client';
 
@@ -156,6 +155,8 @@ export async function processOfflineScanQueue(): Promise<{
             base64Data = fullUri;
           }
         }
+
+        const { analyzeMealImage, analyzeIngredientsImage } = await import('./aiVisionService');
 
         if (item.type === 'meal') {
           const result = await analyzeMealImage(base64Data);
