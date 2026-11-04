@@ -307,7 +307,7 @@ export function getModelEstimations(modelId: string): ModelEstimations {
   if (lower.includes('pro')) {
     return {
       estimatedAccuracy: 97.5,
-      accuracyRating: 'Custom Pro Tier (High Forensic Depth)',
+      accuracyRating: 'Custom Pro Tier (High Screening Depth)',
       ocrAccuracy: 98,
       foodAccuracy: 96,
       toxicityAccuracy: 98,

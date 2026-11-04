@@ -3,6 +3,7 @@ import { Image } from 'expo-image';
 import React, { useState } from 'react';
 import {
   Alert,
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -149,8 +150,8 @@ export function ToxicityReportModal({
           </Pressable>
 
           <View style={styles.headerTitleCol}>
-            <Text style={styles.headerTitle}>Full Toxicity Report</Text>
-            <Text style={styles.headerSub}>Saved Scan</Text>
+            <Text style={styles.headerTitle}>Ingredient Risk Screening</Text>
+            <Text style={styles.headerSub}>Saved Screening</Text>
           </View>
 
           <View style={styles.headerActionsRight}>
@@ -247,8 +248,8 @@ export function ToxicityReportModal({
           <View style={styles.verdictCardClean}>
             <Text style={styles.verdictTextBold}>
               {report.harmfulIngredients.length === 0
-                ? '0 harmful endocrine disruptors or toxic additives detected.'
-                : `${report.harmfulIngredients.length} harmful ${report.harmfulIngredients.length === 1 ? 'additive' : 'additives'} flagged.`}
+                ? '0 flagged additives or elevated hazards detected.'
+                : `${report.harmfulIngredients.length} flagged ${report.harmfulIngredients.length === 1 ? 'additive' : 'additives'} detected.`}
             </Text>
             {report.cleanSummary ? (
               <Text style={styles.verdictTextSub}>{report.cleanSummary}</Text>
@@ -280,17 +281,61 @@ export function ToxicityReportModal({
             <View style={styles.ingredientsListClean}>
               {/* Flagged Harmful Additives first */}
               {report.harmfulIngredients.map((item, idx) => (
-                <View key={`harmful-${idx}`} style={styles.ingredientRowClean}>
-                  <View style={styles.ingredientRowLeft}>
-                    <View style={[styles.statusDotClean, { backgroundColor: colors.danger }]} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.ingredientNameHarmful}>{item.name}</Text>
-                      <Text style={styles.ingredientHarmSub}>{item.healthImpact}</Text>
+                <View key={`harmful-${idx}`} style={styles.harmfulItemCard}>
+                  <View style={styles.harmfulItemHeader}>
+                    <View style={styles.harmfulItemTitleRow}>
+                      <View style={[styles.statusDotClean, { backgroundColor: colors.danger, marginTop: 4 }]} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.ingredientNameHarmful}>{item.name}</Text>
+                        <View style={styles.harmfulMetaRow}>
+                          <Text style={styles.harmfulCategoryTag}>{item.category}</Text>
+                          {item.concentrationRank ? (
+                            <Text style={styles.harmfulRankTag}>{item.concentrationRank}</Text>
+                          ) : null}
+                        </View>
+                      </View>
+                    </View>
+                    <View style={styles.badgeGroup}>
+                      <View style={styles.severityBadgeClean}>
+                        <Text style={styles.severityBadgeText}>{item.severity}</Text>
+                      </View>
+                      {typeof item.deduction === 'number' && item.deduction > 0 ? (
+                        <View style={styles.deductionBadge}>
+                          <Text style={styles.deductionBadgeText}>-{item.deduction} pts</Text>
+                        </View>
+                      ) : null}
                     </View>
                   </View>
-                  <View style={styles.severityBadgeClean}>
-                    <Text style={styles.severityBadgeText}>{item.severity}</Text>
-                  </View>
+
+                  <Text style={styles.ingredientHarmSub}>{item.healthImpact}</Text>
+
+                  {/* Scientific Rationale ("Why it's flagged") */}
+                  {item.rationale ? (
+                    <View style={styles.rationaleBox}>
+                      <Text style={styles.rationaleLabel}>Why it&apos;s flagged:</Text>
+                      <Text style={styles.rationaleText}>{item.rationale}</Text>
+                    </View>
+                  ) : null}
+
+                  {/* Regulatory Source & Citation Link */}
+                  {(item.source || item.sourceUrl) ? (
+                    <View style={styles.sourceCitationRow}>
+                      <View style={styles.sourcePill}>
+                        <Ionicons name="shield-checkmark" size={11} color={colors.primary} />
+                        <Text style={styles.sourcePillText}>Source: {item.source || 'Regulatory Monograph'}</Text>
+                      </View>
+                      {item.sourceUrl ? (
+                        <Pressable
+                          style={({ pressed }) => [styles.sourceLinkBtn, pressed && styles.pressed]}
+                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                          onPress={() => Linking.openURL(item.sourceUrl!).catch(() => {})}
+                        >
+                          <Text style={styles.sourceLinkText}>View standard</Text>
+                          <Ionicons name="open-outline" size={12} color={colors.primary} />
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  ) : null}
                 </View>
               ))}
 
@@ -679,6 +724,112 @@ const styles = StyleSheet.create({
     color: colors.danger,
     fontWeight: '700',
     textTransform: 'uppercase',
+  },
+  harmfulItemCard: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.hairline,
+  },
+  harmfulItemHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  harmfulItemTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    flex: 1,
+    marginRight: 8,
+  },
+  harmfulMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 3,
+  },
+  harmfulCategoryTag: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    backgroundColor: colors.surfaceSubtle,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  harmfulRankTag: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.warning,
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  badgeGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  deductionBadge: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  deductionBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.danger,
+  },
+  rationaleBox: {
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 8,
+    padding: 8,
+    marginTop: 8,
+    borderLeftWidth: 2,
+    borderLeftColor: colors.primary,
+  },
+  rationaleLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  rationaleText: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    lineHeight: 16,
+  },
+  sourceCitationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  sourcePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  sourcePillText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.primary,
+  },
+  sourceLinkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  sourceLinkText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.primary,
+    textDecorationLine: 'underline',
   },
 
   // Standards Disclosure

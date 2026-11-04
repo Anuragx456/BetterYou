@@ -6,7 +6,9 @@ export const AI_NUTRITION_DISCLAIMER =
   'AI-generated nutritional estimate. Values may vary based on exact recipe and preparation. Not medical or dietary advice.';
 
 export const AI_TOXICITY_DISCLAIMER =
-  'AI & deterministic toxicological evaluation based on public safety databases (FSSAI, CDSCO, BIS, EWG). Always cross-reference physical packaging. Not clinical or medical advice.';
+  'Automated ingredient risk screening based on published regulatory monographs and public safety databases (EFSA, FSSAI, CDSCO, IARC, BIS). Not clinical toxicology or medical advice. Always cross-reference physical packaging.';
+
+export const AI_INGREDIENT_SCREENING_DISCLAIMER = AI_TOXICITY_DISCLAIMER;
 
 export const AI_PRIVACY_NOTICE =
   'Photos are securely analyzed via Google Gemini Vision API for nutritional and ingredient evaluation only.';

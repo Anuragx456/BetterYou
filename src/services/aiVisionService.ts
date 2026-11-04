@@ -979,16 +979,16 @@ export async function analyzeProductText(
     baseReport.generatedBy = 'manual-input-recalculation';
 
     try {
-      const prompt = `You are an elite forensic toxicologist and Indian supermarket consumer safety expert.
+      const prompt = `You are an expert consumer safety and regulatory compliance specialist evaluating Indian supermarket products.
 Product Name: "${cleanName}"
 Ingredients: "${rawIngredients.join(', ')}"
 
-Provide forensic analysis for this Indian product.
+Provide ingredient risk screening for this Indian product.
 Extract:
 1. category: EXACTLY ONE OF: "Food & Beverages" | "Personal Care & Skincare" | "Hair Care" | "Oral Care" | "Household & Cleaning" | "Pest Control" | "Baby Care" | "Ayurveda & OTC"
 2. harmfulIngredients: Array of { name, category, healthImpact, severity: "low" | "moderate" | "high" }
 3. indianMarketAlert: A 1-2 sentence contextual Indian supermarket consumer alert exposing deceptive marketing or major health hazards, or null if clean.
-4. cleanSummary: 1-2 sentence plain-language clinical verdict.
+4. cleanSummary: 1-2 sentence plain-language screening summary.
 
 Return ONLY a valid JSON object matching the requested schema.`;
       const { text: rawJson, usedModel } = await callGeminiText(prompt);
@@ -1005,7 +1005,7 @@ Return ONLY a valid JSON object matching the requested schema.`;
   }
 
   // If ONLY product name was provided (no ingredients typed):
-  const prompt = `You are an elite forensic toxicologist and Indian supermarket consumer safety expert.
+  const prompt = `You are an expert consumer safety and regulatory compliance specialist evaluating Indian supermarket products.
 The user wants to analyze this product found in Indian markets: "${cleanName}".
 
 Identify its typical packaging formulation, brand ingredients, and chemical profile:
@@ -1017,7 +1017,7 @@ Identify its typical packaging formulation, brand ingredients, and chemical prof
 5. indianMarketAlert: A 1-2 sentence contextual alert exposing deceptive marketing or null if clean.
 6. novaGroup: If Food & Beverage, integer 1 to 4; otherwise null.
 7. nutriscoreGrade: If Food & Beverage, "a" | "b" | "c" | "d" | "e"; otherwise null.
-8. cleanSummary: 1-2 sentence plain-language clinical verdict.
+8. cleanSummary: 1-2 sentence plain-language screening summary.
 
 Return ONLY a valid JSON object matching the requested schema.`;
 

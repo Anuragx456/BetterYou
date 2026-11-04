@@ -80,7 +80,7 @@ export function ManualProductModal({ visible, onClose, onSubmitResult }: ManualP
 
             <View style={styles.headerTitleCol}>
               <Text style={styles.headerTitle}>Type Product</Text>
-              <Text style={styles.headerSub}>Forensic Toxicological Safety Analysis</Text>
+              <Text style={styles.headerSub}>Ingredient Risk Screening Analysis</Text>
             </View>
 
             <View style={{ width: 40 }} />
@@ -144,7 +144,7 @@ export function ManualProductModal({ visible, onClose, onSubmitResult }: ManualP
               <View style={styles.infoBanner}>
                 <Ionicons name="shield-checkmark-outline" size={16} color={colors.primary} />
                 <Text style={styles.infoBannerText}>
-                  Our forensic engine detects endocrine disruptors, carcinogenic preservatives, and Indian supermarket marketing traps.
+                  Our screening engine cross-references additives with published food & cosmetic safety monographs (EFSA, FSSAI, CDSCO, IARC).
                 </Text>
               </View>
 
@@ -157,12 +157,12 @@ export function ManualProductModal({ visible, onClose, onSubmitResult }: ManualP
                 {isAnalyzing ? (
                   <View style={styles.actionBtnInner}>
                     <ActivityIndicator size="small" color={colors.textInverse} />
-                    <Text style={styles.actionBtnText}>Analyzing Chemical Profile...</Text>
+                    <Text style={styles.actionBtnText}>Screening Ingredients...</Text>
                   </View>
                 ) : (
                   <View style={styles.actionBtnInner}>
                     <Ionicons name="shield-checkmark" size={16} color={colors.textInverse} />
-                    <Text style={styles.actionBtnText}>Analyze Product Safety</Text>
+                    <Text style={styles.actionBtnText}>Screen Product Ingredients</Text>
                   </View>
                 )}
               </Pressable>
