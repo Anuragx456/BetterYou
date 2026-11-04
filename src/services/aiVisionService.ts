@@ -1,12 +1,7 @@
 import {
-  IndianRegulatoryStandard,
   MealAnalysisResult,
   NovaGroup,
   NutriscoreGrade,
-  RiskLevel,
-  SeverityLevel,
-  SupermarketCategory,
-  TargetExposure,
   ToxicityReport,
 } from '../types';
 import {
@@ -16,10 +11,42 @@ import {
 } from '../store/useSettingsStore';
 import { getSignedDeviceHeaders } from '../utils/secureStorage';
 import { recalculateToxicityReport, recomputeReportScoreAndRisk } from './barcodeService';
+import {
+  MealAnalysisAiSchema,
+  ToxicityAnalysisAiSchema,
+  GEMINI_MEAL_RESPONSE_SCHEMA,
+  GEMINI_TOXICITY_RESPONSE_SCHEMA,
+  validateMacroPlausibility,
+  RawMealAnalysisAiOutput,
+  RawToxicityAiOutput,
+} from './aiSchemas';
+import { enqueueOfflineScan } from './scanQueueService';
 
 // In-memory Scan Cache (Fingerprint -> { report, timestamp })
 const toxicityScanCache = new Map<string, { report: ToxicityReport; timestamp: number }>();
+// In-memory Image Signature Cache (Image Hash -> { report/result, timestamp }) to eliminate duplicate network calls
+const toxicityImageHashCache = new Map<string, { report: ToxicityReport; timestamp: number }>();
+const mealImageHashCache = new Map<string, { result: MealAnalysisResult; timestamp: number }>();
 const SCAN_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+export function clearAiVisionCaches() {
+  toxicityScanCache.clear();
+  toxicityImageHashCache.clear();
+  mealImageHashCache.clear();
+}
+
+/**
+ * Computes a fast deterministic signature for an image payload
+ * to detect repeated scans prior to any network dispatch.
+ */
+function computeImageSignature(base64Image: string): string {
+  const len = base64Image.length;
+  if (len < 500) return base64Image;
+  const head = base64Image.slice(0, 150);
+  const mid = base64Image.slice(Math.floor(len / 2) - 75, Math.floor(len / 2) + 75);
+  const tail = base64Image.slice(-150);
+  return `${len}:${head}:${mid}:${tail}`;
+}
 
 function computeScanFingerprint(name: string, ingredients: string[]): string {
   const normName = name.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -53,7 +80,7 @@ function parseBase64Image(input: string): { mimeType: string; base64Data: string
 /**
  * Strips markdown code blocks (```json ... ```) and extracts valid JSON objects
  */
-function extractJsonString(rawText: string): string {
+export function extractJsonString(rawText: string): string {
   const trimmed = rawText.trim();
   const codeBlockRegex = /```(?:json)?\s*([\s\S]*?)\s*```/;
   const match = trimmed.match(codeBlockRegex);
@@ -70,14 +97,44 @@ function extractJsonString(rawText: string): string {
 }
 
 /**
+ * Backoff wait with randomized jitter to mitigate thundering herd
+ */
+async function waitWithJitter(attempt: number, retryAfterSec?: number): Promise<void> {
+  if (retryAfterSec && retryAfterSec > 0) {
+    const ms = Math.min(retryAfterSec * 1000, 15000);
+    await new Promise((r) => setTimeout(r, ms));
+    return;
+  }
+  const baseDelay = 600;
+  const maxDelay = 6000;
+  const backoff = Math.min(maxDelay, baseDelay * Math.pow(2, attempt));
+  const jitter = Math.random() * 400;
+  await new Promise((r) => setTimeout(r, backoff + jitter));
+}
+
+export interface GeminiVisionOptions {
+  responseSchema?: Record<string, unknown>;
+  timeoutMs?: number;
+  maxRetries?: number;
+}
+
+/**
  * Caller for Gemini Multimodal Vision:
  * Routes through secure BetterYou Proxy by default, or directly to Google AI Studio if user provides BYOK key.
+ * Handles timeouts, 429 rate limits, exponential backoff with jitter, and model fallback chain.
  * Never logs API keys, raw auth headers, or secret credentials.
  */
-async function callGeminiVision(prompt: string, base64Image: string): Promise<{ text: string; usedModel: string }> {
+export async function callGeminiVision(
+  prompt: string,
+  base64Image: string,
+  options?: GeminiVisionOptions
+): Promise<{ text: string; usedModel: string }> {
   const customKey = getEffectiveApiKey();
   const { mimeType, base64Data } = parseBase64Image(base64Image);
   const chosenModel = getEffectiveModel();
+  const timeoutMs = options?.timeoutMs ?? 30000;
+  const maxRetries = options?.maxRetries ?? 2;
+  const responseSchema = options?.responseSchema;
 
   // 1. Direct BYOK Route (User-supplied key stored in hardware-backed SecureStore)
   if (customKey) {
@@ -97,8 +154,9 @@ async function callGeminiVision(prompt: string, base64Image: string): Promise<{ 
       ],
       generationConfig: {
         responseMimeType: 'application/json',
+        ...(responseSchema ? { responseSchema } : {}),
         temperature: 0.0,
-        maxOutputTokens: 1024,
+        maxOutputTokens: 2048,
       },
     };
 
@@ -108,54 +166,68 @@ async function callGeminiVision(prompt: string, base64Image: string): Promise<{ 
     const serializedBody = JSON.stringify(requestBody);
 
     for (const model of modelsToTry) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 45000);
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-      try {
-        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': customKey,
-          },
-          body: serializedBody,
-          signal: controller.signal,
-        });
+        try {
+          const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-goog-api-key': customKey,
+            },
+            body: serializedBody,
+            signal: controller.signal,
+          });
 
-        if (!response.ok) {
-          if (response.status === 400 || response.status === 401 || response.status === 403) {
-            throw new Error(`Gemini API Authentication Error (${response.status}). Please check your custom API key.`);
+          if (!response.ok) {
+            // Fatal auth errors - do not retry
+            if (response.status === 400 || response.status === 401 || response.status === 403) {
+              throw new Error(`Gemini API Authentication Error (${response.status}). Please verify your custom API key.`);
+            }
+
+            // 429 Rate limit or 503 Overloaded: back off with jitter
+            if ((response.status === 429 || response.status === 503) && attempt < maxRetries) {
+              const retryAfterHeader = response.headers.get('retry-after');
+              const retryAfterSec = retryAfterHeader ? parseInt(retryAfterHeader, 10) : undefined;
+              await waitWithJitter(attempt, isNaN(retryAfterSec || 0) ? undefined : retryAfterSec);
+              continue;
+            }
+
+            throw new Error(`Gemini ${model} returned HTTP ${response.status}`);
           }
-          throw new Error(`Gemini ${model} returned HTTP ${response.status}`);
-        }
 
-        interface GeminiResponse {
-          candidates?: {
-            content?: {
-              parts?: { text?: string }[];
-            };
-          }[];
-        }
+          interface GeminiResponse {
+            candidates?: {
+              content?: {
+                parts?: { text?: string }[];
+              };
+            }[];
+          }
 
-        const result = (await response.json()) as GeminiResponse;
-        const parts = result.candidates?.[0]?.content?.parts || [];
-        const candidateText = parts.map((p) => p.text || '').join('').trim();
+          const result = (await response.json()) as GeminiResponse;
+          const parts = result.candidates?.[0]?.content?.parts || [];
+          const candidateText = parts.map((p) => p.text || '').join('').trim();
 
-        if (!candidateText) {
-          throw new Error(`Gemini ${model} returned empty text.`);
-        }
+          if (!candidateText) {
+            throw new Error(`Gemini ${model} returned empty content.`);
+          }
 
-        return { text: extractJsonString(candidateText), usedModel: model };
-      } catch (err: unknown) {
-        lastError = err instanceof Error ? err : new Error(String(err));
-        // Sanitize: Do not log raw error messages which might contain sensitive credentials
-        console.warn(`[aiVisionService] BYOK Model ${model} failed`);
-        if (lastError.message.includes('Authentication Error')) {
-          break;
+          return { text: extractJsonString(candidateText), usedModel: model };
+        } catch (err: unknown) {
+          lastError = err instanceof Error ? err : new Error(String(err));
+          if (lastError.message.includes('Authentication Error')) {
+            throw lastError;
+          }
+          if (attempt === maxRetries) {
+            // Fall through to next model in fallback chain
+            break;
+          }
+        } finally {
+          clearTimeout(timeoutId);
         }
-      } finally {
-        clearTimeout(timeoutId);
       }
     }
 
@@ -170,55 +242,111 @@ async function callGeminiVision(prompt: string, base64Image: string): Promise<{ 
     imageBase64: base64Data,
     mimeType,
     model: chosenModel,
+    responseSchema,
   });
 
-  const authHeaders = await getSignedDeviceHeaders('POST', '/v1/vision/analyze', proxyPayload);
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 50000);
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const authHeaders = await getSignedDeviceHeaders('POST', '/v1/vision/analyze', proxyPayload);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
+    try {
+      const response = await fetch(proxyEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders,
+        },
+        body: proxyPayload,
+        signal: controller.signal,
+      });
+
+      if (response.status === 429) {
+        const retryAfterHeader = response.headers.get('retry-after');
+        const retryAfterSec = retryAfterHeader ? parseInt(retryAfterHeader, 10) : undefined;
+        if (attempt < maxRetries) {
+          await waitWithJitter(attempt, isNaN(retryAfterSec || 0) ? undefined : retryAfterSec);
+          continue;
+        }
+        throw new Error('Device rate limit reached (15 scans/min or daily quota). Please try again shortly.');
+      }
+      if (response.status === 413) {
+        throw new Error('Image file is too large for processing. Please select a smaller photo.');
+      }
+      if (response.status === 401) {
+        throw new Error('Device authentication failed with proxy server.');
+      }
+      if (!response.ok) {
+        if ((response.status === 502 || response.status === 503) && attempt < maxRetries) {
+          await waitWithJitter(attempt);
+          continue;
+        }
+        const errJson = await response.json().catch(() => null);
+        throw new Error(errJson?.error || `Proxy error (HTTP ${response.status}).`);
+      }
+
+      interface ProxyVisionResponse {
+        text?: string;
+        usedModel?: string;
+        error?: string;
+      }
+
+      const data = (await response.json()) as ProxyVisionResponse;
+      if (!data.text) {
+        throw new Error(data.error || 'Proxy returned empty response.');
+      }
+
+      return { text: extractJsonString(data.text), usedModel: data.usedModel || chosenModel };
+    } catch (err: unknown) {
+      if (attempt < maxRetries && !(err instanceof Error && err.message.includes('rate limit'))) {
+        await waitWithJitter(attempt);
+        continue;
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Vision Service: ${msg}`);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  throw new Error('Vision Service request failed after retries.');
+}
+
+/**
+ * Executes a single repair retry if initial output fails Zod validation constraints
+ */
+async function attemptRepairRetry<T>(
+  rawText: string,
+  zodError: string,
+  schemaPrompt: string,
+  base64Image: string,
+  responseSchema: Record<string, unknown>,
+  validator: (raw: unknown) => { success: boolean; data?: T }
+): Promise<T | null> {
   try {
-    const response = await fetch(proxyEndpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...authHeaders,
-      },
-      body: proxyPayload,
-      signal: controller.signal,
+    const repairPrompt = `Your previous JSON response was malformed or failed validation constraints:
+Validation Error: ${zodError}
+Previous Output:
+${rawText.slice(0, 400)}
+
+Please output strictly valid JSON conforming to this specification:
+${schemaPrompt}`;
+
+    const { text: repairedJson } = await callGeminiVision(repairPrompt, base64Image, {
+      responseSchema,
+      timeoutMs: 25000,
+      maxRetries: 1,
     });
 
-    if (response.status === 429) {
-      throw new Error('Device rate limit reached (15 scans/min or daily quota). Please try again shortly.');
+    const parsedJson = JSON.parse(repairedJson);
+    const validated = validator(parsedJson);
+    if (validated.success && validated.data) {
+      return validated.data;
     }
-    if (response.status === 413) {
-      throw new Error('Image file is too large for processing. Please select a smaller photo.');
-    }
-    if (response.status === 401) {
-      throw new Error('Device authentication failed with proxy server.');
-    }
-    if (!response.ok) {
-      const errJson = await response.json().catch(() => null);
-      throw new Error(errJson?.error || `Proxy error (HTTP ${response.status}).`);
-    }
-
-    interface ProxyVisionResponse {
-      text?: string;
-      usedModel?: string;
-      error?: string;
-    }
-
-    const data = (await response.json()) as ProxyVisionResponse;
-    if (!data.text) {
-      throw new Error(data.error || 'Proxy returned empty response.');
-    }
-
-    return { text: extractJsonString(data.text), usedModel: data.usedModel || chosenModel };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Vision Service: ${msg}`);
-  } finally {
-    clearTimeout(timeoutId);
+  } catch {
+    // Repair failed, proceed to manual fallback
   }
+  return null;
 }
 
 // -------------------------------------------------------------
@@ -233,7 +361,9 @@ function getMockMealAnalysis(): MealAnalysisResult {
     protein: 42,
     carbs: 36,
     fat: 16,
-    confidenceScore: 0.94,
+    isPlausible: true,
+    plausibilityDeviation: 5,
+    plausibilityWarning: null,
     ingredientsDetected: [
       'Grilled Chicken Breast',
       'Cooked Quinoa',
@@ -246,264 +376,74 @@ function getMockMealAnalysis(): MealAnalysisResult {
 }
 
 function getMockToxicityReport(productHint?: string): ToxicityReport {
-  // If productHint is base64 image data or URI, ignore it to prevent accidental substring collisions
   const isImagePayload =
-    Boolean(productHint) &&
-    (productHint!.length > 40 ||
-      productHint!.startsWith('data:') ||
-      productHint!.includes(';base64,') ||
-      productHint!.startsWith('/9j/'));
-  const safeHint = isImagePayload ? '' : (productHint || '').trim();
-  const lowerHint = safeHint.toLowerCase();
+    typeof productHint === 'string' &&
+    (productHint.startsWith('data:') ||
+      productHint.startsWith('/9j/') ||
+      productHint.startsWith('iVBORw') ||
+      productHint.length > 100);
 
-  if (lowerHint.includes('pure') || lowerHint.includes('mustard') || lowerHint.includes('clean_oil')) {
-    return {
-      productName: '100% Pure Cold-Pressed Kachi Ghani Mustard Oil',
-      category: 'Food & Beverages',
-      overallSafetyScore: 98,
-      riskLevel: 'Safe',
-      regulatoryStandard: 'FSSAI',
-      targetExposure: 'Ingestion',
-      novaGroup: 2,
-      nutriscoreGrade: 'a',
-      indianMarketAlert: null,
-      safeFor: ['Paraben-Free', 'Palm Oil-Free', 'Zero Mineral Oil', 'Clean Label Certified'],
-      cleanSummary: 'Single-ingredient, unrefined cold-pressed mustard oil rich in monounsaturated fats and natural antioxidants. Completely unadulterated.',
-      harmfulIngredients: [],
-      allIngredients: ['100% Pure Cold-Pressed Mustard Oil'],
-    };
-  }
+  const cleanHint = isImagePayload ? 'Inspected Supermarket Item' : (productHint?.trim() || 'Inspected Supermarket Item');
+  const lowerHint = cleanHint.toLowerCase();
 
-  if (lowerHint.includes('hair') || lowerHint.includes('shampoo') || lowerHint.includes('hair_oil')) {
+  if (lowerHint.includes('hair') || lowerHint.includes('almond') || lowerHint.includes('oil')) {
     return {
-      productName: 'Herbal Infusion Hair Nourishing Oil',
+      productName: 'Commercial Hair Oil',
+      overallSafetyScore: 42,
+      riskLevel: 'Moderate',
       category: 'Hair Care',
-      overallSafetyScore: 32,
-      riskLevel: 'High Risk',
       regulatoryStandard: 'CDSCO',
       targetExposure: 'Dermal Absorption',
-      hazardRating: 'High Hazard',
-      indianMarketAlert: 'Indian Supermarket Trap: Contains ~78% Light Liquid Paraffin (mineral oil). Active herbal extracts account for under 2% of the bottle.',
-      safeFor: ['Paraben-Free', 'Sulfate-Free'],
-      cleanSummary: 'Product base consists predominantly of petroleum mineral oil (LLP) with synthetic fragrance and dye that can clog hair follicles.',
+      hazardRating: 'Moderate Hazard',
+      cleanSummary: 'Mineral oil-heavy formulation (75-85% Light Liquid Paraffin) marketed as pure herbal hair oil.',
+      indianMarketAlert: 'Hair Oil Trap: Contains 75-85% Light Liquid Paraffin (mineral oil filler). Provides minimal follicle nourishment compared to pure cold-pressed oils.',
+      safeFor: ['External Use Only'],
       harmfulIngredients: [
         {
           name: 'Light Liquid Paraffin (Mineral Oil)',
-          category: 'Petroleum Filler Oil',
-          healthImpact: 'Occlusive crude oil derivative that coats scalp pores without providing fatty acid nourishment.',
+          category: 'Petroleum Hydrocarbon Filler',
+          healthImpact: 'Inert petroleum derivative that coats hair shafts without providing cellular lipid nutrition.',
           severity: 'moderate',
         },
         {
-          name: 'Tertiary Butylhydroquinone (TBHQ)',
-          category: 'Synthetic Preservative',
-          healthImpact: 'Petroleum antioxidant linked to cellular oxidative stress and potential dermal contact allergy.',
-          severity: 'high',
+          name: 'Synthetic Perfume / Fragrance',
+          category: 'Synthetic Aromatic Blend',
+          healthImpact: 'Contains unlisted phthalates and sensitizers prone to causing contact dermatitis on sensitive scalps.',
+          severity: 'low',
         },
       ],
-      allIngredients: ['Light Liquid Paraffin (78%)', 'Til Oil', 'Almond Extract (0.5%)', 'Fragrance', 'TBHQ', 'CI 47000'],
     };
   }
 
-  if (lowerHint.includes('mosquito') || lowerHint.includes('vaporizer') || lowerHint.includes('pest')) {
-    return {
-      productName: 'Mosquito Liquid Vaporizer Refill',
-      category: 'Pest Control',
-      overallSafetyScore: 24,
-      riskLevel: 'High Risk',
-      regulatoryStandard: 'CIBRC',
-      targetExposure: 'Inhalation',
-      hazardRating: 'High Hazard',
-      indianMarketAlert: 'Indoor Air Warning: Vaporizing synthetic pyrethroids (Transfluthrin) continuously overnight in closed bedrooms causes respiratory airway inflammation and morning migraines.',
-      safeFor: ['Paraben-Free'],
-      cleanSummary: 'Vaporizes synthetic pyrethroid neurotoxins into indoor air. Prolonged inhalation during sleep carries respiratory distress risks.',
-      harmfulIngredients: [
-        {
-          name: 'Transfluthrin (0.88% w/w)',
-          category: 'Synthetic Pyrethroid Neurotoxin',
-          healthImpact: 'Voltage-gated sodium channel disruptor; chronic inhalation in enclosed spaces causes airway irritation and headaches.',
-          severity: 'high',
-        },
-        {
-          name: 'Deodorized Kerosene Solvent',
-          category: 'Petroleum Distillate',
-          healthImpact: 'Aerosolized hydrocarbons that irritate alveolar lung tissue.',
-          severity: 'moderate',
-        },
-      ],
-      allIngredients: ['Transfluthrin 0.88%', 'Deodorized Kerosene 98.12%', 'BHT 1.0%'],
-    };
-  }
-
-  if (lowerHint.includes('toothpaste') || lowerHint.includes('oral') || lowerHint.includes('dent')) {
-    return {
-      productName: 'Total Active Amino Toothpaste',
-      category: 'Oral Care',
-      overallSafetyScore: 50,
-      riskLevel: 'Moderate',
-      regulatoryStandard: 'CDSCO',
-      targetExposure: 'Mucous Membrane',
-      hazardRating: 'Moderate Hazard',
-      indianMarketAlert: 'Oral Mucosa Alert: Formulated with Sodium Lauryl Sulfate (SLS), a harsh foaming detergent known to strip protective buccal tissue and trigger canker sores.',
-      safeFor: ['Paraben-Free', 'Zero Mineral Oil'],
-      cleanSummary: 'Contains Sodium Lauryl Sulfate for high foam volume and synthetic sodium saccharin sweetener.',
-      harmfulIngredients: [
-        {
-          name: 'Sodium Lauryl Sulfate (SLS)',
-          category: 'Harsh Anionic Surfactant',
-          healthImpact: 'Strips protective oral mucosa; leading trigger for recurrent aphthous stomatitis (canker sores).',
-          severity: 'moderate',
-        },
-        {
-          name: 'Titanium Dioxide (CI 77891)',
-          category: 'Whitening Nanopigment',
-          healthImpact: 'Added purely for paste whiteness; potential cellular toxicity on oral mucosa.',
-          severity: 'high',
-        },
-      ],
-      allIngredients: ['Calcium Carbonate', 'Sorbitol', 'Sodium Lauryl Sulfate', 'Silica', 'Titanium Dioxide', 'Sodium Saccharin'],
-    };
-  }
-
-  if (lowerHint.includes('cleaner') || lowerHint.includes('floor') || lowerHint.includes('disinfectant')) {
-    return {
-      productName: 'Citrus Surface & Floor Disinfectant',
-      category: 'Household & Cleaning',
-      overallSafetyScore: 42,
-      riskLevel: 'Moderate',
-      regulatoryStandard: 'BIS',
-      targetExposure: 'General',
-      hazardRating: 'Moderate Hazard',
-      indianMarketAlert: 'Pet & Toddler Warning: Contains Benzalkonium Chloride (Quat). Toxic to household cats (who lick paws) and irritates crawling infants.',
-      safeFor: ['Paraben-Free', 'Bleach-Free'],
-      cleanSummary: 'Quaternary ammonium-based floor cleaner effective against bacteria but dangerous for household pets and crawling toddlers.',
-      harmfulIngredients: [
-        {
-          name: 'Benzalkonium Chloride (BKC 4.0% w/w)',
-          category: 'Quaternary Disinfectant Surfactant',
-          healthImpact: 'Known cause of occupational asthma; acute respiratory irritant and highly toxic to household pets.',
-          severity: 'high',
-        },
-        {
-          name: 'Synthetic Citrus Fragrance & Tartrazine',
-          category: 'Artificial Fragrance & Color',
-          healthImpact: 'Volatile organic compounds that can trigger contact allergies and airway irritation.',
-          severity: 'moderate',
-        },
-      ],
-      allIngredients: ['Benzalkonium Chloride Solution 4%', 'Non-ionic Surfactant', 'Tartrazine CI 19140', 'Perfume'],
-    };
-  }
-
-  if (lowerHint.includes('baby') || lowerHint.includes('talc')) {
-    return {
-      productName: 'Gentle Talcum Baby Powder',
-      category: 'Baby Care',
-      overallSafetyScore: 34,
-      riskLevel: 'High Risk',
-      regulatoryStandard: 'CDSCO',
-      targetExposure: 'Dermal Absorption',
-      hazardRating: 'High Hazard',
-      indianMarketAlert: 'Pediatric Safety Notice: Talc-based powders carry respiratory inhalation hazards for infant lungs; Indian pediatricians advise cornstarch-based alternatives.',
-      safeFor: ['Paraben-Free', 'Sulfate-Free'],
-      cleanSummary: 'Mineral talc dust base that poses significant pulmonary inhalation risks for infants.',
-      harmfulIngredients: [
-        {
-          name: 'Talc (Hydrated Magnesium Silicate)',
-          category: 'Mineral Dust / Absorbent',
-          healthImpact: 'Fine particulate dust that causes infant pulmonary inflammation (talcosis).',
-          severity: 'high',
-        },
-        {
-          name: 'Synthetic Fragrance (Parfum)',
-          category: 'Artificial Fragrance',
-          healthImpact: 'Undisclosed chemical blend that can disrupt sensitive infant dermal barriers.',
-          severity: 'moderate',
-        },
-      ],
-      allIngredients: ['Talc', 'Fragrance'],
-    };
-  }
-
-  // Default Indian Supermarket Snack / Food Mock
   return {
-    productName: 'Masala Spiced Crispy Crunchies',
+    productName: cleanHint,
+    overallSafetyScore: 50,
+    riskLevel: 'Moderate',
     category: 'Food & Beverages',
-    overallSafetyScore: 35,
-    riskLevel: 'High Risk',
     regulatoryStandard: 'FSSAI',
     targetExposure: 'Ingestion',
-    novaGroup: 4,
-    nutriscoreGrade: 'e',
-    indianMarketAlert: 'Snack Aisle Alert: Deep-fried in high-heat Refined Palm Olein stabilized with TBHQ petroleum preservative.',
-    safeFor: ['Paraben-Free'],
-    cleanSummary: 'Extensively ultra-processed snack with multiple synthetic flavor enhancers (MSG) and refined frying palm olein.',
+    hazardRating: 'Moderate Hazard',
+    cleanSummary: 'Moderately processed formulation with standard industrial stabilizers.',
+    safeFor: ['Vegetarian'],
     harmfulIngredients: [
       {
-        name: 'Monosodium Glutamate (INS 621)',
-        category: 'Flavor Enhancer',
-        healthImpact: 'Excitotoxic additive that can trigger headaches and blood sugar volatility in sensitive individuals.',
-        severity: 'moderate',
-      },
-      {
-        name: 'Tertiary Butylhydroquinone (TBHQ)',
-        category: 'Synthetic Preservative',
-        healthImpact: 'Petroleum-derived preservative linked in animal studies to cellular oxidative damage and immune disruption.',
-        severity: 'high',
-      },
-      {
-        name: 'Refined Palm Olein',
-        category: 'Industrial Frying Oil',
-        healthImpact: 'Highly refined saturated oil prone to pro-inflammatory lipid oxidation products during industrial frying.',
+        name: 'Preservative (INS 211 / Sodium Benzoate)',
+        category: 'Chemical Preservative',
+        healthImpact: 'Forms trace benzene in presence of ascorbic acid (Vitamin C).',
         severity: 'moderate',
       },
     ],
-    allIngredients: ['Rice Flour', 'Refined Palmolein', 'Corn Meal', 'Spices & Condiments', 'Iodised Salt', 'INS 621', 'INS 319'],
   };
 }
 
-// -------------------------------------------------------------
-// Service Methods
-// -------------------------------------------------------------
-
-interface RawMealAiOutput {
-  dishName?: string;
-  estimatedWeightGrams?: number;
-  calories?: number;
-  protein?: number;
-  carbs?: number;
-  fat?: number;
-  confidenceScore?: number;
-  ingredientsDetected?: string[];
-}
-
-interface RawToxicityAiOutput {
-  productName?: string;
-  category?: SupermarketCategory;
-  overallSafetyScore?: number;
-  riskLevel?: RiskLevel;
-  indianMarketAlert?: string | null;
-  regulatoryStandard?: IndianRegulatoryStandard;
-  targetExposure?: TargetExposure;
-  hazardRating?: 'Low Hazard' | 'Moderate Hazard' | 'High Hazard' | null;
-  safeFor?: string[];
-  novaGroup?: NovaGroup | null;
-  nutriscoreGrade?: NutriscoreGrade | null;
-  harmfulIngredients?: {
-    name?: string;
-    category?: string;
-    healthImpact?: string;
-    severity?: SeverityLevel;
-  }[];
-  cleanSummary?: string;
-  allIngredients?: string[];
-}
-
 /**
- * Analyzes a meal photo using Gemini Vision to extract calorie & macro breakdown
+ * Analyzes a meal photo using Gemini Vision to extract calorie & macro breakdown.
+ * Uses structured output (responseSchema), validates with Zod, validates thermodynamic plausibility,
+ * attempts one repair retry on failure, and falls back to manual entry.
  */
 export async function analyzeMealImage(
   base64Image: string,
-  options?: { isExplicitDemo?: boolean }
+  options?: { isExplicitDemo?: boolean; localImagePath?: string }
 ): Promise<MealAnalysisResult> {
   const isDemo = options?.isExplicitDemo || base64Image === 'demo_sample';
   if (!base64Image || isDemo) {
@@ -515,6 +455,13 @@ export async function analyzeMealImage(
     throw new Error('No image data was provided for meal analysis. Please take a photo or choose from gallery.');
   }
 
+  // 1. Check Image Hash Cache (0 network requests on repeated photo analysis)
+  const imageSig = computeImageSignature(base64Image);
+  const cached = mealImageHashCache.get(imageSig);
+  if (cached && Date.now() - cached.timestamp < SCAN_CACHE_TTL_MS) {
+    return cached.result;
+  }
+
   const prompt = `You are an elite sports nutritionist and computer vision AI.
 Analyze this meal photo thoroughly.
 Estimate:
@@ -524,51 +471,100 @@ Estimate:
 4. protein: Protein in grams.
 5. carbs: Carbohydrates in grams.
 6. fat: Fat in grams.
-6. confidenceScore: Float from 0.0 to 1.0 representing your visual detection confidence.
 7. ingredientsDetected: Array of identified ingredients.
 
-Return ONLY a valid JSON object matching this exact schema:
-{
-  "dishName": string,
-  "estimatedWeightGrams": number,
-  "calories": number,
-  "protein": number,
-  "carbs": number,
-  "fat": number,
-  "confidenceScore": number,
-  "ingredientsDetected": string[]
-}`;
+Return ONLY a valid JSON object matching the requested schema.`;
+
+  let parsed: RawMealAnalysisAiOutput | null = null;
+  let usedModelName = 'gemini-3.6-flash';
 
   try {
-    const { text: rawJson, usedModel } = await callGeminiVision(prompt, base64Image);
-    const parsed = JSON.parse(rawJson) as RawMealAiOutput;
+    const { text: rawJson, usedModel } = await callGeminiVision(prompt, base64Image, {
+      responseSchema: GEMINI_MEAL_RESPONSE_SCHEMA,
+    });
+    usedModelName = usedModel;
 
-    return {
-      dishName: parsed.dishName || 'Identified Dish',
-      estimatedWeightGrams: Math.max(10, Math.round(parsed.estimatedWeightGrams || 250)),
-      calories: Math.max(0, Math.round(parsed.calories || 300)),
-      protein: Math.max(0, Math.round(parsed.protein || 15)),
-      carbs: Math.max(0, Math.round(parsed.carbs || 30)),
-      fat: Math.max(0, Math.round(parsed.fat || 10)),
-      confidenceScore: Math.min(1.0, Math.max(0.1, parsed.confidenceScore || 0.85)),
-      ingredientsDetected: Array.isArray(parsed.ingredientsDetected)
-        ? parsed.ingredientsDetected
-        : ['Assorted Ingredients'],
-      generatedBy: usedModel,
-    };
+    let jsonParsed: unknown;
+    try {
+      jsonParsed = JSON.parse(rawJson);
+    } catch {
+      jsonParsed = null;
+    }
+
+    const zodResult = MealAnalysisAiSchema.safeParse(jsonParsed);
+    if (zodResult.success) {
+      parsed = zodResult.data;
+    } else {
+      // Attempt ONE repair retry
+      const repairError = zodResult.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', ');
+      parsed = await attemptRepairRetry<RawMealAnalysisAiOutput>(
+        rawJson,
+        repairError,
+        JSON.stringify(GEMINI_MEAL_RESPONSE_SCHEMA),
+        base64Image,
+        GEMINI_MEAL_RESPONSE_SCHEMA,
+        (raw) => MealAnalysisAiSchema.safeParse(raw)
+      );
+    }
   } catch (err: unknown) {
+    // If network failure and image path available, queue for retry
+    if (options?.localImagePath) {
+      await enqueueOfflineScan('meal', options.localImagePath, err instanceof Error ? err.message : String(err)).catch(() => {});
+    }
     const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[aiVisionService] analyzeMealImage error: ${message}`);
-    throw new Error(`Meal Vision Analysis Failed (${message}). Please try taking another photo.`);
+    throw new Error(`Meal Vision Analysis Failed (${message}).`);
   }
+
+  // If validation and repair both failed, trigger manual fallback
+  if (!parsed) {
+    return {
+      dishName: 'Unrecognized Dish',
+      estimatedWeightGrams: 200,
+      calories: 0,
+      protein: 0,
+      carbs: 0,
+      fat: 0,
+      isPlausible: false,
+      plausibilityWarning: 'Vision parser could not confirm nutritional estimates. Please enter meal details manually.',
+      ingredientsDetected: [],
+      generatedBy: 'manual-fallback',
+      fallbackToManual: true,
+    };
+  }
+
+  // Thermodynamic plausibility check (4P + 4C + 9F ~= kcal within 20%)
+  const plausibility = validateMacroPlausibility(
+    parsed.calories,
+    parsed.protein,
+    parsed.carbs,
+    parsed.fat
+  );
+
+  const result: MealAnalysisResult = {
+    dishName: parsed.dishName,
+    estimatedWeightGrams: Math.round(parsed.estimatedWeightGrams),
+    calories: Math.round(parsed.calories),
+    protein: Math.round(parsed.protein * 10) / 10,
+    carbs: Math.round(parsed.carbs * 10) / 10,
+    fat: Math.round(parsed.fat * 10) / 10,
+    isPlausible: plausibility.isPlausible,
+    plausibilityDeviation: plausibility.deviationPercent,
+    plausibilityWarning: plausibility.warning,
+    ingredientsDetected: parsed.ingredientsDetected,
+    generatedBy: usedModelName,
+  };
+
+  mealImageHashCache.set(imageSig, { result, timestamp: Date.now() });
+  return result;
 }
 
 /**
- * Analyzes any product package or ingredient label photo from an Indian Supermarket via OCR + deterministic toxicological evaluation
+ * Analyzes any product package or ingredient label photo from an Indian Supermarket
+ * via OCR + structured schema + Zod validation + deterministic toxicological evaluation.
  */
 export async function analyzeIngredientsImage(
   base64Image: string,
-  options?: { isExplicitDemo?: boolean }
+  options?: { isExplicitDemo?: boolean; localImagePath?: string }
 ): Promise<ToxicityReport> {
   const isDemo = options?.isExplicitDemo || (base64Image.length > 0 && base64Image.length < 50 && !base64Image.startsWith('data:') && !base64Image.startsWith('/9j/'));
   if (!base64Image || isDemo) {
@@ -580,152 +576,158 @@ export async function analyzeIngredientsImage(
     throw new Error('No image data was provided for ingredient analysis. Please take a photo or choose from gallery.');
   }
 
-  const prompt = `You are an elite forensic toxicologist, biochemist, and Indian supermarket consumer safety expert.
-Perform exhaustive OCR on this product package or ingredient label photo. It can be ANY product found in an Indian supermarket:
-1. Food & Beverages: Namkeens, biscuits, noodles, cooking oils, dairy, sauces, packaged juices, health drinks.
-2. Personal Care & Skincare: Soaps, face washes, fairness/anti-aging creams, body lotions, sunscreens, deodorants.
-3. Hair Care: Hair oils (detect Light Liquid Paraffin traps), shampoos, conditioners, hair dyes (PPD, resorcinol).
-4. Oral Care: Toothpastes, mouthwashes (SLS mucosal irritation, sodium saccharin, titanium dioxide).
-5. Household & Cleaning: Detergents (LABS surfactants), floor cleaners (Benzalkonium Chloride/BKC pet hazards), bleaches, toilet cleaners.
-6. Pest Control: Mosquito vaporizers, coils, sprays (Transfluthrin, prallethrin neurotoxins in bedroom air).
-7. Baby Care: Baby powders (Talc inhalation hazards), baby washes, lotions, baby formula.
-8. Ayurveda & OTC: Chyawanprash (high sugar), pain relief balms (camphor, methyl salicylate), herbal syrups with parabens.
+  // 1. Check Image Hash Cache FIRST (0 network requests for identical photos)
+  const imageSig = computeImageSignature(base64Image);
+  const cachedImage = toxicityImageHashCache.get(imageSig);
+  if (cachedImage && Date.now() - cachedImage.timestamp < SCAN_CACHE_TTL_MS) {
+    return cachedImage.report;
+  }
 
-Perform exhaustive OCR on all visible text.
-Extract & Classify:
-1. productName: Descriptive brand & name of the product.
-2. category: Must be EXACTLY ONE OF:
-   "Food & Beverages" | "Personal Care & Skincare" | "Hair Care" | "Oral Care" | "Household & Cleaning" | "Pest Control" | "Baby Care" | "Ayurveda & OTC"
-3. allIngredients: Array of ALL detected ingredients, additives, E-numbers, and INS codes listed on the packaging.
-4. harmfulIngredients: Array of objects with { name, category, healthImpact, severity: "low" | "moderate" | "high" }
-5. indianMarketAlert: A 1-2 sentence contextual Indian supermarket consumer alert exposing deceptive marketing or major health hazards, or null if clean.
-6. novaGroup: If Food & Beverage, integer 1 to 4; otherwise null.
-7. nutriscoreGrade: If Food & Beverage, "a" | "b" | "c" | "d" | "e"; otherwise null.
-8. cleanSummary: 1-2 sentence plain-language clinical verdict.
+  const prompt = `You are an elite consumer chemical safety and Indian supermarket packaging expert.
+Perform thorough OCR on this product package or ingredient label photo:
+1. productName: Commercial product and brand name.
+2. category: Supermarket classification ("Food & Beverages", "Personal Care & Skincare", "Hair Care", "Oral Care", "Household & Cleaning", "Pest Control", "Baby Care", "Ayurveda & OTC").
+3. allIngredients: Array of detected ingredients, INS codes, and E-numbers.
+4. harmfulIngredients: Array of { name, category, healthImpact, severity: "low" | "moderate" | "high" }.
+5. indianMarketAlert: Contextual alert for deceptive Indian market formulations (e.g. 80% mineral oil hair oils, transfluthrin vaporizers) or null.
+6. novaGroup: 1-4 for food items or null.
+7. nutriscoreGrade: "a"|"b"|"c"|"d"|"e" for food items or null.
+8. cleanSummary: Factual summary of ingredients.
 
-Return ONLY a valid JSON object matching this exact schema:
-{
-  "productName": string,
-  "category": string,
-  "allIngredients": string[],
-  "harmfulIngredients": [
-    {
-      "name": string,
-      "category": string,
-      "healthImpact": string,
-      "severity": "low" | "moderate" | "high"
-    }
-  ],
-  "indianMarketAlert": string | null,
-  "novaGroup": number | null,
-  "nutriscoreGrade": string | null,
-  "cleanSummary": string
-}`;
+Return ONLY a valid JSON object matching the requested schema.`;
+
+  let parsed: RawToxicityAiOutput | null = null;
+  let usedModelName = 'gemini-3.6-flash';
 
   try {
-    const { text: rawJson, usedModel } = await callGeminiVision(prompt, base64Image);
-    const parsed = JSON.parse(rawJson) as RawToxicityAiOutput;
+    const { text: rawJson, usedModel } = await callGeminiVision(prompt, base64Image, {
+      responseSchema: GEMINI_TOXICITY_RESPONSE_SCHEMA,
+    });
+    usedModelName = usedModel;
 
-    const detectedName = parsed.productName?.trim() || 'Inspected Supermarket Item';
-    const detectedIngredients: string[] =
-      Array.isArray(parsed.allIngredients) && parsed.allIngredients.length > 0
-        ? parsed.allIngredients.map((s) => s.trim()).filter(Boolean)
-        : (parsed.harmfulIngredients || []).map((h) => h.name?.trim() || '').filter(Boolean);
-
-    // 1. Check Scan Cache (guarantees identical result for identical product)
-    const fingerprint = computeScanFingerprint(detectedName, detectedIngredients);
-    const cached = toxicityScanCache.get(fingerprint);
-    if (cached && Date.now() - cached.timestamp < SCAN_CACHE_TTL_MS) {
-      return cached.report;
+    let jsonParsed: unknown;
+    try {
+      jsonParsed = JSON.parse(rawJson);
+    } catch {
+      jsonParsed = null;
     }
 
-    // 2. Deterministic Scoring Grounding
-    // Instead of letting LLMs invent fluctuating random scores on each scan,
-    // we pass the OCR ingredients into our verified toxicological engine
-    let baseReport = recalculateToxicityReport(
-      detectedName,
-      detectedIngredients,
-      {
-        productName: detectedName,
-        overallSafetyScore: 50,
-        riskLevel: 'Moderate',
-        harmfulIngredients: [],
-        cleanSummary: parsed.cleanSummary || '',
-        category: parsed.category,
-        novaGroup: parsed.novaGroup ?? null,
-        nutriscoreGrade: parsed.nutriscoreGrade ?? null,
-        indianMarketAlert: parsed.indianMarketAlert ?? null,
-      }
-    );
+    const zodResult = ToxicityAnalysisAiSchema.safeParse(jsonParsed);
+    if (zodResult.success) {
+      parsed = zodResult.data;
+    } else {
+      // Attempt ONE repair retry
+      const repairError = zodResult.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', ');
+      parsed = await attemptRepairRetry<RawToxicityAiOutput>(
+        rawJson,
+        repairError,
+        JSON.stringify(GEMINI_TOXICITY_RESPONSE_SCHEMA),
+        base64Image,
+        GEMINI_TOXICITY_RESPONSE_SCHEMA,
+        (raw) => ToxicityAnalysisAiSchema.safeParse(raw)
+      );
+    }
+  } catch (err: unknown) {
+    // If network failure, enqueue for background retry
+    if (options?.localImagePath) {
+      await enqueueOfflineScan('toxicity', options.localImagePath, err instanceof Error ? err.message : String(err)).catch(() => {});
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`AI OCR Scan Unsuccessful (${message}).`);
+  }
 
-    // Merge any additional Gemini-flagged additives that have specific clinical descriptions
-    if (Array.isArray(parsed.harmfulIngredients)) {
-      const normalizeAdditiveName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const existingNames = new Set(baseReport.harmfulIngredients.map((a) => normalizeAdditiveName(a.name)));
-      for (const item of parsed.harmfulIngredients) {
-        if (item.name) {
-          const norm = normalizeAdditiveName(item.name);
-          const alreadyExists = Array.from(existingNames).some(
-            (ex) => ex.includes(norm) || norm.includes(ex)
-          );
-          if (!alreadyExists) {
-            existingNames.add(norm);
-            baseReport.harmfulIngredients.push({
-              name: item.name,
-              category: item.category || 'Consumer Chemical',
-              healthImpact: item.healthImpact || 'Potential adverse health effects with chronic exposure.',
-              severity:
-                item.severity === 'high' || item.severity === 'moderate' || item.severity === 'low'
-                  ? item.severity
-                  : 'moderate',
-            });
-          }
+  // If repair retry also failed, construct a safe fallback report capped at 50
+  if (!parsed) {
+    return {
+      productName: 'Unverified Packaging',
+      overallSafetyScore: 50,
+      riskLevel: 'Moderate',
+      category: 'Food & Beverages',
+      regulatoryStandard: 'FSSAI',
+      targetExposure: 'Ingestion',
+      hazardRating: 'Moderate Hazard',
+      cleanSummary: 'AI could not reliably parse the ingredient label. Please inspect and enter ingredients manually.',
+      harmfulIngredients: [],
+      allIngredients: [],
+      generatedBy: 'manual-fallback',
+    };
+  }
+
+  const detectedName = parsed.productName || 'Inspected Supermarket Item';
+  const detectedIngredients: string[] =
+    parsed.allIngredients.length > 0
+      ? parsed.allIngredients
+      : parsed.harmfulIngredients.map((h) => h.name).filter(Boolean);
+
+  // Check Text Fingerprint Cache
+  const fingerprint = computeScanFingerprint(detectedName, detectedIngredients);
+  const cachedFingerprint = toxicityScanCache.get(fingerprint);
+  if (cachedFingerprint && Date.now() - cachedFingerprint.timestamp < SCAN_CACHE_TTL_MS) {
+    return cachedFingerprint.report;
+  }
+
+  // Ground scoring deterministically through the rule engine
+  let baseReport = recalculateToxicityReport(
+    detectedName,
+    detectedIngredients,
+    {
+      productName: detectedName,
+      overallSafetyScore: 50,
+      riskLevel: 'Moderate',
+      harmfulIngredients: [],
+      cleanSummary: parsed.cleanSummary || '',
+      category: parsed.category,
+      novaGroup: (parsed.novaGroup as NovaGroup) ?? null,
+      nutriscoreGrade: (parsed.nutriscoreGrade as NutriscoreGrade) ?? null,
+      indianMarketAlert: parsed.indianMarketAlert ?? null,
+    }
+  );
+
+  // Merge any additional Gemini-flagged additives
+  if (Array.isArray(parsed.harmfulIngredients)) {
+    const normalizeAdditiveName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const existingNames = new Set(baseReport.harmfulIngredients.map((a) => normalizeAdditiveName(a.name)));
+    for (const item of parsed.harmfulIngredients) {
+      if (item.name) {
+        const norm = normalizeAdditiveName(item.name);
+        const alreadyExists = Array.from(existingNames).some(
+          (ex) => ex.includes(norm) || norm.includes(ex)
+        );
+        if (!alreadyExists) {
+          existingNames.add(norm);
+          baseReport.harmfulIngredients.push({
+            name: item.name,
+            category: item.category || 'Consumer Chemical',
+            healthImpact: item.healthImpact || 'Potential adverse health effects with chronic exposure.',
+            severity: item.severity,
+          });
         }
       }
-      baseReport = recomputeReportScoreAndRisk(baseReport);
     }
-
-    // Prefer LLM contextual alert if provided, otherwise keep rule-based alert
-    if (parsed.indianMarketAlert) {
-      baseReport.indianMarketAlert = parsed.indianMarketAlert;
-    }
-    if (parsed.cleanSummary) {
-      baseReport.cleanSummary = parsed.cleanSummary;
-    }
-
-    // Record provenance: which vision model generated this report
-    baseReport.generatedBy = usedModel;
-
-    // 3. Save to Cache
-    toxicityScanCache.set(fingerprint, { report: baseReport, timestamp: Date.now() });
-
-    return baseReport;
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[aiVisionService] analyzeIngredientsImage error: ${message}`);
-    throw new Error(
-      `AI OCR Scan Unsuccessful (${message}). Please ensure packaging is well-lit and ingredients are clearly visible.`
-    );
+    baseReport = recomputeReportScoreAndRisk(baseReport);
   }
+
+  if (parsed.indianMarketAlert) baseReport.indianMarketAlert = parsed.indianMarketAlert;
+  if (parsed.cleanSummary) baseReport.cleanSummary = parsed.cleanSummary;
+  baseReport.generatedBy = usedModelName;
+
+  // Save to both image hash and text fingerprint caches
+  toxicityScanCache.set(fingerprint, { report: baseReport, timestamp: Date.now() });
+  toxicityImageHashCache.set(imageSig, { report: baseReport, timestamp: Date.now() });
+
+  return baseReport;
 }
 
 /**
- * Caller for Gemini Text-only Generation:
- * Routes through secure BetterYou Proxy by default, or directly to Google AI Studio if user provides BYOK key.
- * Never logs API keys or raw auth credentials.
+ * Caller for Gemini Text-only Generation
  */
 async function callGeminiText(prompt: string): Promise<{ text: string; usedModel: string }> {
   const customKey = getEffectiveApiKey();
   const chosenModel = getEffectiveModel();
 
-  // 1. Direct BYOK Route
   if (customKey) {
     const requestBody = {
-      contents: [
-        {
-          parts: [{ text: prompt }],
-        },
-      ],
+      contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         responseMimeType: 'application/json',
         temperature: 0.1,
@@ -780,7 +782,6 @@ async function callGeminiText(prompt: string): Promise<{ text: string; usedModel
         return { text: extractJsonString(candidateText), usedModel: model };
       } catch (err: unknown) {
         lastError = err instanceof Error ? err : new Error(String(err));
-        console.warn(`[aiVisionService] BYOK Text Model ${model} failed`);
         if (lastError.message.includes('Authentication Error')) {
           break;
         }
@@ -861,10 +862,9 @@ Estimate:
 4. protein: Protein in grams.
 5. carbs: Carbohydrates in grams.
 6. fat: Fat in grams.
-7. confidenceScore: Float from 0.0 to 1.0 representing estimation confidence.
-8. ingredientsDetected: Array of identified ingredients/components.
+7. ingredientsDetected: Array of identified ingredients/components.
 
-Return ONLY a valid JSON object matching this exact schema:
+Return ONLY a valid JSON object matching this schema:
 {
   "dishName": string,
   "estimatedWeightGrams": number,
@@ -872,25 +872,36 @@ Return ONLY a valid JSON object matching this exact schema:
   "protein": number,
   "carbs": number,
   "fat": number,
-  "confidenceScore": number,
   "ingredientsDetected": string[]
 }`;
 
   try {
     const { text: rawJson } = await callGeminiText(prompt);
-    const parsed = JSON.parse(rawJson) as RawMealAiOutput;
+    const parsed = JSON.parse(rawJson) as RawMealAnalysisAiOutput;
+
+    const validated = MealAnalysisAiSchema.safeParse(parsed);
+    const data = validated.success ? validated.data : parsed;
+
+    const plausibility = validateMacroPlausibility(
+      data.calories,
+      data.protein,
+      data.carbs,
+      data.fat
+    );
 
     return {
-      dishName: parsed.dishName || trimmed,
-      estimatedWeightGrams: Math.max(10, Math.round(parsed.estimatedWeightGrams || 250)),
-      calories: Math.max(0, Math.round(parsed.calories || 300)),
-      protein: Math.max(0, Math.round(parsed.protein || 15)),
-      carbs: Math.max(0, Math.round(parsed.carbs || 30)),
-      fat: Math.max(0, Math.round(parsed.fat || 10)),
-      confidenceScore: Math.min(1.0, Math.max(0.1, parsed.confidenceScore || 0.9)),
+      dishName: data.dishName || trimmed,
+      estimatedWeightGrams: Math.max(10, Math.round(data.estimatedWeightGrams || 250)),
+      calories: Math.max(0, Math.round(data.calories || 300)),
+      protein: Math.max(0, Math.round(data.protein || 15)),
+      carbs: Math.max(0, Math.round(data.carbs || 30)),
+      fat: Math.max(0, Math.round(data.fat || 10)),
+      isPlausible: plausibility.isPlausible,
+      plausibilityDeviation: plausibility.deviationPercent,
+      plausibilityWarning: plausibility.warning,
       ingredientsDetected:
-        Array.isArray(parsed.ingredientsDetected) && parsed.ingredientsDetected.length > 0
-          ? parsed.ingredientsDetected
+        Array.isArray(data.ingredientsDetected) && data.ingredientsDetected.length > 0
+          ? data.ingredientsDetected
           : [trimmed],
     };
   } catch (err: unknown) {
@@ -932,6 +943,7 @@ Return ONLY a valid JSON object matching this exact schema:
         fat = 8;
       }
 
+      const plausibility = validateMacroPlausibility(calories, protein, carbs, fat);
       return {
         dishName: trimmed.charAt(0).toUpperCase() + trimmed.slice(1),
         estimatedWeightGrams: 300,
@@ -939,7 +951,9 @@ Return ONLY a valid JSON object matching this exact schema:
         protein,
         carbs,
         fat,
-        confidenceScore: 0.88,
+        isPlausible: plausibility.isPlausible,
+        plausibilityDeviation: plausibility.deviationPercent,
+        plausibilityWarning: plausibility.warning,
         ingredientsDetected: trimmed.split(/[,+&]+/).map((s) => s.trim()).filter(Boolean),
       };
     }
@@ -960,12 +974,10 @@ export async function analyzeProductText(
     .map((s) => s.trim())
     .filter(Boolean);
 
-  // If user supplied both name and ingredients, calculate via deterministic engine first
   if (rawIngredients.length > 0) {
     let baseReport = recalculateToxicityReport(cleanName, rawIngredients);
     baseReport.generatedBy = 'manual-input-recalculation';
 
-    // Enhance with forensic prompt via proxy or BYOK
     try {
       const prompt = `You are an elite forensic toxicologist and Indian supermarket consumer safety expert.
 Product Name: "${cleanName}"
@@ -978,20 +990,7 @@ Extract:
 3. indianMarketAlert: A 1-2 sentence contextual Indian supermarket consumer alert exposing deceptive marketing or major health hazards, or null if clean.
 4. cleanSummary: 1-2 sentence plain-language clinical verdict.
 
-Return ONLY a valid JSON object matching this exact schema:
-{
-  "category": string,
-  "harmfulIngredients": [
-    {
-      "name": string,
-      "category": string,
-      "healthImpact": string,
-      "severity": "low" | "moderate" | "high"
-    }
-  ],
-  "indianMarketAlert": string | null,
-  "cleanSummary": string
-}`;
+Return ONLY a valid JSON object matching the requested schema.`;
       const { text: rawJson, usedModel } = await callGeminiText(prompt);
       const parsed = JSON.parse(rawJson) as RawToxicityAiOutput;
 
@@ -1000,13 +999,12 @@ Return ONLY a valid JSON object matching this exact schema:
       if (parsed.category) baseReport.category = parsed.category;
       baseReport.generatedBy = usedModel;
     } catch {
-      // Fallback to deterministic report
+      // Keep deterministic report
     }
     return baseReport;
   }
 
   // If ONLY product name was provided (no ingredients typed):
-
   const prompt = `You are an elite forensic toxicologist and Indian supermarket consumer safety expert.
 The user wants to analyze this product found in Indian markets: "${cleanName}".
 
@@ -1016,29 +1014,12 @@ Identify its typical packaging formulation, brand ingredients, and chemical prof
    "Food & Beverages" | "Personal Care & Skincare" | "Hair Care" | "Oral Care" | "Household & Cleaning" | "Pest Control" | "Baby Care" | "Ayurveda & OTC"
 3. allIngredients: Array of typical ingredients, additives, E-numbers, and INS codes used in this product in India.
 4. harmfulIngredients: Array of { name, category, healthImpact, severity: "low" | "moderate" | "high" }
-5. indianMarketAlert: A 1-2 sentence contextual alert exposing deceptive marketing (e.g. mineral oil traps, hidden sugars, pyrethroid neurotoxins, SLS) or null if clean.
+5. indianMarketAlert: A 1-2 sentence contextual alert exposing deceptive marketing or null if clean.
 6. novaGroup: If Food & Beverage, integer 1 to 4; otherwise null.
 7. nutriscoreGrade: If Food & Beverage, "a" | "b" | "c" | "d" | "e"; otherwise null.
 8. cleanSummary: 1-2 sentence plain-language clinical verdict.
 
-Return ONLY a valid JSON object matching this exact schema:
-{
-  "productName": string,
-  "category": string,
-  "allIngredients": string[],
-  "harmfulIngredients": [
-    {
-      "name": string,
-      "category": string,
-      "healthImpact": string,
-      "severity": "low" | "moderate" | "high"
-    }
-  ],
-  "indianMarketAlert": string | null,
-  "novaGroup": number | null,
-  "nutriscoreGrade": string | null,
-  "cleanSummary": string
-}`;
+Return ONLY a valid JSON object matching the requested schema.`;
 
   try {
     const { text: rawJson, usedModel } = await callGeminiText(prompt);
@@ -1060,8 +1041,8 @@ Return ONLY a valid JSON object matching this exact schema:
         harmfulIngredients: [],
         cleanSummary: parsed.cleanSummary || '',
         category: parsed.category,
-        novaGroup: parsed.novaGroup ?? null,
-        nutriscoreGrade: parsed.nutriscoreGrade ?? null,
+        novaGroup: (parsed.novaGroup as NovaGroup) ?? null,
+        nutriscoreGrade: (parsed.nutriscoreGrade as NutriscoreGrade) ?? null,
         indianMarketAlert: parsed.indianMarketAlert ?? null,
       }
     );

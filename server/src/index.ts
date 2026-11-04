@@ -161,6 +161,7 @@ app.post('/v1/vision/analyze', async (c) => {
     imageBase64?: string;
     mimeType?: string;
     model?: string;
+    responseSchema?: Record<string, unknown>;
   };
 
   try {
@@ -169,7 +170,7 @@ app.post('/v1/vision/analyze', async (c) => {
     return c.json({ error: 'Invalid JSON body.' }, 400);
   }
 
-  const { prompt, imageBase64, mimeType = 'image/jpeg', model = 'gemini-3.6-flash' } = body;
+  const { prompt, imageBase64, mimeType = 'image/jpeg', model = 'gemini-3.6-flash', responseSchema } = body;
 
   if (!prompt || typeof prompt !== 'string' || prompt.length > 4096) {
     return c.json({ error: 'Invalid prompt: must be string <= 4096 chars.' }, 400);
@@ -211,8 +212,9 @@ app.post('/v1/vision/analyze', async (c) => {
     ],
     generationConfig: {
       responseMimeType: 'application/json',
+      ...(responseSchema ? { responseSchema } : {}),
       temperature: 0.0,
-      maxOutputTokens: 1024,
+      maxOutputTokens: 2048,
     },
   };
 
