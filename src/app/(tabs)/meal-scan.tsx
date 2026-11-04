@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -490,8 +491,20 @@ export default function MealScanScreen() {
           <Pressable
             style={({ pressed }) => [styles.grantPermissionBtn, pressed && styles.pressed]}
             onPress={requestPermission}
+            accessibilityRole="button"
+            accessibilityLabel="Grant camera permission"
           >
             <Text style={styles.grantPermissionText}>Grant Camera Permission</Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [styles.settingsLinkBtn, pressed && styles.pressed]}
+            onPress={() => Linking.openSettings()}
+            accessibilityRole="button"
+            accessibilityLabel="Open device settings to manage camera permissions"
+          >
+            <Ionicons name="settings-outline" size={16} color={colors.textSecondary} />
+            <Text style={styles.settingsLinkText}>Open App Settings</Text>
           </Pressable>
 
           <Pressable
@@ -1124,6 +1137,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     color: colors.textInverse,
+  },
+  settingsLinkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    width: '100%',
+    marginBottom: 10,
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+  },
+  settingsLinkText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textSecondary,
   },
   galleryFallbackBtn: {
     flexDirection: 'row',

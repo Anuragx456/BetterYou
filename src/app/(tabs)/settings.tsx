@@ -1,16 +1,23 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  generateJsonBackup,
+  generateMealsCsv,
+  generateWorkoutsCsv,
+  shareOrCopyData,
+} from '../../services/backupService';
+import { getAppLanguage, setAppLanguage, SupportedLanguage } from '../../i18n';
 import { useFitnessStore } from '../../store/useFitnessStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { colors } from '../../theme/colors';
@@ -21,14 +28,54 @@ export default function SettingsScreen() {
   // Store hooks
   const resetSettings = useSettingsStore((state) => state.resetSettings);
   const dailyGoals = useFitnessStore((state) => state.dailyGoals);
+  const workouts = useFitnessStore((state) => state.workouts);
+  const meals = useFitnessStore((state) => state.meals);
 
   const customApiKey = useSettingsStore((state) => state.customApiKey);
   const selectedModel = useSettingsStore((state) => state.selectedModel);
   const isCustomModel = useSettingsStore((state) => state.isCustomModel);
   const customModelName = useSettingsStore((state) => state.customModelName);
 
+  const [currentLang, setCurrentLangState] = useState<SupportedLanguage>(getAppLanguage());
+
   const hasCustom = Boolean(customApiKey?.trim());
   const activeModelTitle = isCustomModel && customModelName ? customModelName : selectedModel;
+
+  const handleToggleLanguage = (lang: SupportedLanguage) => {
+    setAppLanguage(lang);
+    setCurrentLangState(lang);
+    Alert.alert(
+      lang === 'hi' ? 'भाषा बदली गई' : 'Language Changed',
+      lang === 'hi' ? 'ऐप भाषा अब हिंदी में सेट है।' : 'App language is now set to English.'
+    );
+  };
+
+  const handleExportWorkoutsCsv = async () => {
+    const csv = generateWorkoutsCsv(workouts);
+    const status = await shareOrCopyData(csv, 'BetterYou_Workouts.csv');
+    Alert.alert(
+      status === 'shared' ? 'Workouts Exported' : 'CSV Copied',
+      `Exported ${workouts.length} workout sessions.`
+    );
+  };
+
+  const handleExportMealsCsv = async () => {
+    const csv = generateMealsCsv(meals);
+    const status = await shareOrCopyData(csv, 'BetterYou_Meals.csv');
+    Alert.alert(
+      status === 'shared' ? 'Meals Exported' : 'CSV Copied',
+      `Exported ${meals.length} meal logs.`
+    );
+  };
+
+  const handleExportJsonBackup = async () => {
+    const json = generateJsonBackup(workouts, meals, dailyGoals);
+    const status = await shareOrCopyData(json, 'BetterYou_Backup.json');
+    Alert.alert(
+      status === 'shared' ? 'Backup Shared' : 'Backup Copied',
+      'Complete JSON database backup exported.'
+    );
+  };
 
   // Reset all settings
   const handleResetSettings = useCallback(() => {
@@ -58,8 +105,12 @@ export default function SettingsScreen() {
         {/* Header */}
         <View style={styles.headerRow}>
           <View>
-            <Text style={styles.screenTitle}>Settings</Text>
-            <Text style={styles.screenTag}>PREFERENCES & SYSTEM</Text>
+            <Text style={styles.screenTitle} allowFontScaling>
+              Settings
+            </Text>
+            <Text style={styles.screenTag} allowFontScaling>
+              PREFERENCES & SYSTEM
+            </Text>
           </View>
           <View
             style={[
@@ -73,30 +124,88 @@ export default function SettingsScreen() {
                 hasCustom ? styles.statusDotLive : styles.statusDotEnv,
               ]}
             />
-            <Text style={styles.statusPillText}>
+            <Text style={styles.statusPillText} allowFontScaling>
               {hasCustom ? 'BYOK Mode' : 'Proxy Mode'}
             </Text>
           </View>
         </View>
 
+        {/* Section: Language Selection */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader} allowFontScaling>
+            LANGUAGE / भाषा
+          </Text>
+          <View style={styles.langRow}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.langBtn,
+                currentLang === 'en' && styles.langBtnActive,
+                pressed && styles.pressed,
+              ]}
+              onPress={() => handleToggleLanguage('en')}
+              accessibilityRole="button"
+              accessibilityLabel="Select English language"
+            >
+              <Text
+                style={[
+                  styles.langBtnText,
+                  currentLang === 'en' && styles.langBtnTextActive,
+                ]}
+                allowFontScaling
+              >
+                English
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.langBtn,
+                currentLang === 'hi' && styles.langBtnActive,
+                pressed && styles.pressed,
+              ]}
+              onPress={() => handleToggleLanguage('hi')}
+              accessibilityRole="button"
+              accessibilityLabel="हिंदी भाषा चुनें"
+            >
+              <Text
+                style={[
+                  styles.langBtnText,
+                  currentLang === 'hi' && styles.langBtnTextActive,
+                ]}
+                allowFontScaling
+              >
+                हिंदी (Hindi)
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+
         {/* Section: Nutrition & Goals */}
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>NUTRITION & GOALS</Text>
+          <Text style={styles.sectionHeader} allowFontScaling>
+            NUTRITION & GOALS
+          </Text>
           <View style={styles.cardGroup}>
             <Pressable
               style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
               onPress={() => router.push('/nutrition-target')}
+              accessibilityRole="button"
+              accessibilityLabel="Edit daily nutrition targets"
             >
               <View style={[styles.iconBadge, { backgroundColor: 'rgba(245, 158, 11, 0.12)' }]}>
                 <Ionicons name="flame" size={18} color={colors.calories} />
               </View>
               <View style={styles.navRowMeta}>
-                <Text style={styles.navRowTitle}>Daily Nutrition Target</Text>
-                <Text style={styles.navRowSubtitle}>Calorie and macronutrient goals</Text>
+                <Text style={styles.navRowTitle} allowFontScaling>
+                  Daily Nutrition Target
+                </Text>
+                <Text style={styles.navRowSubtitle} allowFontScaling>
+                  Calorie and macronutrient goals
+                </Text>
               </View>
               <View style={styles.navRight}>
                 <View style={styles.valueBadge}>
-                  <Text style={[styles.valueBadgeText, { color: colors.calories }]}>
+                  <Text style={[styles.valueBadgeText, { color: colors.calories }]} allowFontScaling>
                     {dailyGoals?.calorieTarget?.toLocaleString() ?? 2200} kcal
                   </Text>
                 </View>
@@ -108,22 +217,32 @@ export default function SettingsScreen() {
 
         {/* Section: AI Intelligence */}
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>AI & INTELLIGENCE</Text>
+          <Text style={styles.sectionHeader} allowFontScaling>
+            AI & INTELLIGENCE
+          </Text>
           <View style={styles.cardGroup}>
             <Pressable
               style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
               onPress={() => router.push('/ai-settings')}
+              accessibilityRole="button"
+              accessibilityLabel="Configure Gemini API settings and model"
             >
               <View style={[styles.iconBadge, { backgroundColor: 'rgba(16, 185, 129, 0.12)' }]}>
                 <Ionicons name="sparkles" size={18} color={colors.primary} />
               </View>
               <View style={styles.navRowMeta}>
-                <Text style={styles.navRowTitle}>AI Settings</Text>
-                <Text style={styles.navRowSubtitle}>Gemini API key & active model</Text>
+                <Text style={styles.navRowTitle} allowFontScaling>
+                  AI Settings
+                </Text>
+                <Text style={styles.navRowSubtitle} allowFontScaling>
+                  Gemini API key & active model
+                </Text>
               </View>
               <View style={styles.navRight}>
                 <View style={styles.valueBadge}>
-                  <Text style={styles.valueBadgeText}>{activeModelTitle}</Text>
+                  <Text style={styles.valueBadgeText} allowFontScaling>
+                    {activeModelTitle}
+                  </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </View>
@@ -131,20 +250,96 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Section: Data Backup & Export */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader} allowFontScaling>
+            DATA BACKUP & EXPORT
+          </Text>
+          <View style={styles.cardGroup}>
+            <Pressable
+              style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
+              onPress={handleExportWorkoutsCsv}
+              accessibilityRole="button"
+              accessibilityLabel="Export workouts data to CSV spreadsheet"
+            >
+              <View style={[styles.iconBadge, { backgroundColor: 'rgba(0, 229, 255, 0.12)' }]}>
+                <Ionicons name="barbell-outline" size={18} color={colors.primary} />
+              </View>
+              <View style={styles.navRowMeta}>
+                <Text style={styles.navRowTitle} allowFontScaling>
+                  Export Workouts (CSV)
+                </Text>
+                <Text style={styles.navRowSubtitle} allowFontScaling>
+                  Excel / Sheets compatible log ({workouts.length} sessions)
+                </Text>
+              </View>
+              <Ionicons name="download-outline" size={18} color={colors.primary} />
+            </Pressable>
+
+            <Pressable
+              style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
+              onPress={handleExportMealsCsv}
+              accessibilityRole="button"
+              accessibilityLabel="Export meals data to CSV spreadsheet"
+            >
+              <View style={[styles.iconBadge, { backgroundColor: 'rgba(245, 158, 11, 0.12)' }]}>
+                <Ionicons name="restaurant-outline" size={18} color={colors.calories} />
+              </View>
+              <View style={styles.navRowMeta}>
+                <Text style={styles.navRowTitle} allowFontScaling>
+                  Export Meals (CSV)
+                </Text>
+                <Text style={styles.navRowSubtitle} allowFontScaling>
+                  Nutrition & macro history ({meals.length} meals)
+                </Text>
+              </View>
+              <Ionicons name="download-outline" size={18} color={colors.calories} />
+            </Pressable>
+
+            <Pressable
+              style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
+              onPress={handleExportJsonBackup}
+              accessibilityRole="button"
+              accessibilityLabel="Export complete JSON database backup"
+            >
+              <View style={[styles.iconBadge, { backgroundColor: 'rgba(168, 85, 247, 0.12)' }]}>
+                <Ionicons name="server-outline" size={18} color="#A855F7" />
+              </View>
+              <View style={styles.navRowMeta}>
+                <Text style={styles.navRowTitle} allowFontScaling>
+                  Full Database Backup (JSON)
+                </Text>
+                <Text style={styles.navRowSubtitle} allowFontScaling>
+                  Export workouts, meals, and goals for backup
+                </Text>
+              </View>
+              <Ionicons name="download-outline" size={18} color="#A855F7" />
+            </Pressable>
+          </View>
+        </View>
+
         {/* Section: Diagnostics & System */}
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>SYSTEM HEALTH</Text>
+          <Text style={styles.sectionHeader} allowFontScaling>
+            SYSTEM HEALTH
+          </Text>
           <View style={styles.cardGroup}>
             <Pressable
               style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
               onPress={() => router.push('/diagnostics')}
+              accessibilityRole="button"
+              accessibilityLabel="Open diagnostics and system health screen"
             >
               <View style={[styles.iconBadge, { backgroundColor: 'rgba(99, 102, 241, 0.12)' }]}>
                 <Ionicons name="pulse" size={18} color={colors.secondary} />
               </View>
               <View style={styles.navRowMeta}>
-                <Text style={styles.navRowTitle}>Diagnostics</Text>
-                <Text style={styles.navRowSubtitle}>API latency test & connection ping</Text>
+                <Text style={styles.navRowTitle} allowFontScaling>
+                  Diagnostics
+                </Text>
+                <Text style={styles.navRowSubtitle} allowFontScaling>
+                  API latency test & connection ping
+                </Text>
               </View>
               <View style={styles.navRight}>
                 <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
@@ -158,16 +353,24 @@ export default function SettingsScreen() {
           <Pressable
             style={({ pressed }) => [styles.resetBtn, pressed && styles.pressed]}
             onPress={handleResetSettings}
+            accessibilityRole="button"
+            accessibilityLabel="Reset all settings to defaults"
           >
             <Ionicons name="refresh-outline" size={16} color={colors.danger} />
-            <Text style={styles.resetBtnText}>Reset to Default Settings</Text>
+            <Text style={styles.resetBtnText} allowFontScaling>
+              Reset to Default Settings
+            </Text>
           </Pressable>
         </View>
 
         {/* Footer */}
         <View style={styles.footerContainer}>
-          <Text style={styles.footerVersion}>BetterYou v1.0.0 • Obsidian Theme</Text>
-          <Text style={styles.footerSub}>Powered by {activeModelTitle}</Text>
+          <Text style={styles.footerVersion} allowFontScaling>
+            BetterYou v1.0.0 • Obsidian Theme
+          </Text>
+          <Text style={styles.footerSub} allowFontScaling>
+            Powered by {activeModelTitle}
+          </Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -247,6 +450,33 @@ const styles = StyleSheet.create({
   },
   section: {
     marginBottom: 20,
+  },
+  langRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  langBtn: {
+    flex: 1,
+    backgroundColor: colors.card,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    minHeight: 48,
+  },
+  langBtnActive: {
+    borderColor: colors.primary,
+    backgroundColor: 'rgba(0, 229, 255, 0.08)',
+  },
+  langBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  langBtnTextActive: {
+    color: colors.primary,
   },
   sectionHeader: {
     fontSize: 11,

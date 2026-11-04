@@ -61,7 +61,7 @@ export default function TabsLayout() {
         name="toxicity-scan"
         options={{
           title: 'Ingredient Lab',
-          tabBarLabel: 'Toxicity',
+          tabBarLabel: 'Screening',
           tabBarIcon: ({ focused }) => (
             <Ionicons
               name={focused ? 'shield-checkmark' : 'shield-checkmark-outline'}

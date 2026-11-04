@@ -4,7 +4,6 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
-  FlatList,
   Modal,
   Pressable,
   ScrollView,
@@ -12,7 +11,10 @@ import {
   Text,
   View,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { AnimatedCalorieRing } from '../../components/AnimatedCalorieRing';
+import { AnimatedMacroBar } from '../../components/AnimatedMacroBar';
 import { ToxicityReportModal } from '../../components/ToxicityReportModal';
 import {
   addLocalDays,
@@ -108,27 +110,9 @@ export default function DashboardScreen() {
 
   // Calorie calculations with positive non-zero fallbacks to avoid NaN
   const calorieTarget = Math.max(1, dailyGoals?.calorieTarget || 2200);
-  const proteinTarget = Math.max(1, dailyGoals?.proteinTargetGrams || 160);
-  const carbsTarget = Math.max(1, dailyGoals?.carbsTargetGrams || 220);
-  const fatTarget = Math.max(1, dailyGoals?.fatTargetGrams || 65);
 
   const consumedCalories = todayTotals.calories;
   const remainingCalories = Math.max(0, calorieTarget - consumedCalories + todayCaloriesBurned);
-  const calorieProgressPct = Math.min(100, Math.max(0, Math.round((consumedCalories / calorieTarget) * 100)));
-
-  // Macro progress percentages guarded against NaN
-  const proteinPct = Math.min(
-    100,
-    Math.max(0, Math.round((todayTotals.protein / proteinTarget) * 100))
-  );
-  const carbsPct = Math.min(
-    100,
-    Math.max(0, Math.round((todayTotals.carbs / carbsTarget) * 100))
-  );
-  const fatPct = Math.min(
-    100,
-    Math.max(0, Math.round((todayTotals.fat / fatTarget) * 100))
-  );
 
   const formattedDate = useMemo(() => {
     if (isViewingToday) {
@@ -365,94 +349,44 @@ export default function DashboardScreen() {
           </View>
         )}
 
-        {/* Daily Calorie & Macro Hero Card */}
+        {/* Daily Calorie & Macro Hero Card (Reanimated Native Rings) */}
         <View style={styles.heroCard}>
-          {/* Circular Calorie Ring Indicator (Tap to edit goal in settings) */}
           <Pressable
             style={({ pressed }) => [styles.ringContainer, pressed && styles.pressed]}
             onPress={() => router.push('/nutrition-target')}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="View and edit daily calorie and macro goals"
           >
-            <View style={styles.ringOuter}>
-              <View
-                style={[
-                  styles.ringProgressArc,
-                  {
-                    borderTopColor: colors.primary,
-                    borderRightColor: calorieProgressPct >= 30 ? colors.primary : 'transparent',
-                    borderBottomColor: calorieProgressPct >= 65 ? colors.primary : 'transparent',
-                    borderLeftColor: calorieProgressPct >= 90 ? colors.primary : 'transparent',
-                    transform: [{ rotate: '-45deg' }],
-                  },
-                ]}
-              />
-              <View style={styles.ringInner}>
-                <Text style={styles.ringLabel}>Remaining</Text>
-                <Text style={styles.ringNumber}>{remainingCalories.toLocaleString()}</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                  <Text style={styles.ringTarget}>/ {calorieTarget.toLocaleString()} kcal</Text>
-                  <Ionicons name="pencil" size={10} color={colors.textMuted} />
-                </View>
-                <Text style={styles.ringSub}>{consumedCalories} consumed</Text>
-              </View>
-            </View>
+            <AnimatedCalorieRing
+              consumed={consumedCalories}
+              target={calorieTarget}
+              remaining={remainingCalories}
+              size={176}
+              strokeWidth={12}
+            />
           </Pressable>
 
-          {/* Minimal Inline Macro Bars */}
+          {/* Minimal Inline Macro Bars (Reanimated) */}
           <View style={styles.macroRow}>
-            {/* Protein */}
-            <View style={styles.macroCol}>
-              <View style={styles.macroHeader}>
-                <Text style={styles.macroTitle}>Protein</Text>
-              </View>
-              <View style={styles.macroBarTrack}>
-                <View
-                  style={[
-                    styles.macroBarFill,
-                    { width: `${proteinPct}%`, backgroundColor: colors.protein },
-                  ]}
-                />
-              </View>
-              <Text style={styles.macroGramText}>
-                {todayTotals.protein}g <Text style={styles.macroTargetText}>/ {dailyGoals.proteinTargetGrams}g</Text>
-              </Text>
-            </View>
-
-            {/* Carbs */}
-            <View style={styles.macroCol}>
-              <View style={styles.macroHeader}>
-                <Text style={styles.macroTitle}>Carbs</Text>
-              </View>
-              <View style={styles.macroBarTrack}>
-                <View
-                  style={[
-                    styles.macroBarFill,
-                    { width: `${carbsPct}%`, backgroundColor: colors.carbs },
-                  ]}
-                />
-              </View>
-              <Text style={styles.macroGramText}>
-                {todayTotals.carbs}g <Text style={styles.macroTargetText}>/ {dailyGoals.carbsTargetGrams}g</Text>
-              </Text>
-            </View>
-
-            {/* Fats */}
-            <View style={styles.macroCol}>
-              <View style={styles.macroHeader}>
-                <Text style={styles.macroTitle}>Fats</Text>
-              </View>
-              <View style={styles.macroBarTrack}>
-                <View
-                  style={[
-                    styles.macroBarFill,
-                    { width: `${fatPct}%`, backgroundColor: colors.fat },
-                  ]}
-                />
-              </View>
-              <Text style={styles.macroGramText}>
-                {todayTotals.fat}g <Text style={styles.macroTargetText}>/ {dailyGoals.fatTargetGrams}g</Text>
-              </Text>
-            </View>
+            <AnimatedMacroBar
+              label="Protein"
+              consumedGrams={todayTotals.protein}
+              targetGrams={dailyGoals.proteinTargetGrams}
+              barColor={colors.protein}
+            />
+            <AnimatedMacroBar
+              label="Carbs"
+              consumedGrams={todayTotals.carbs}
+              targetGrams={dailyGoals.carbsTargetGrams}
+              barColor={colors.carbs}
+            />
+            <AnimatedMacroBar
+              label="Fats"
+              consumedGrams={todayTotals.fat}
+              targetGrams={dailyGoals.fatTargetGrams}
+              barColor={colors.fat}
+            />
           </View>
 
           {/* Unified Action Capsule */}
@@ -614,7 +548,7 @@ export default function DashboardScreen() {
                   size={18}
                   color={colors.primary}
                 />
-                <Text style={styles.cardTitle}>Recent Toxicity Checks</Text>
+                <Text style={styles.cardTitle}>Recent Ingredient Checks</Text>
               </View>
               <Pressable
                 style={({ pressed }) => [styles.cleanLinkBtn, pressed && styles.pressed]}
@@ -718,14 +652,11 @@ export default function DashboardScreen() {
             <View style={{ width: 40 }} />
           </View>
 
-          <FlatList
+          <FlashList
             data={scannedProducts}
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.allScansList}
             showsVerticalScrollIndicator={false}
-            initialNumToRender={10}
-            maxToRenderPerBatch={10}
-            windowSize={5}
             renderItem={renderScannedItem}
           />
         </SafeAreaView>

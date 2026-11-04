@@ -1,8 +1,8 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { FlashList } from '@shopify/flash-list';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  FlatList,
   Modal,
   Platform,
   Pressable,
@@ -12,14 +12,37 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { EditWorkoutModal } from '../../components/EditWorkoutModal';
+import { ExerciseHistoryModal } from '../../components/ExerciseHistoryModal';
+import {
+  generateJsonBackup,
+  generateWorkoutsCsv,
+  shareOrCopyData,
+} from '../../services/backupService';
+import {
+  cancelRestTimerNotification,
+  scheduleRestTimerNotification,
+  subscribeToForegroundRestSync,
+} from '../../services/restTimerNotification';
 import {
   calculateWorkoutVolume,
   useFitnessStore,
 } from '../../store/useFitnessStore';
-import { safeHaptics } from '../../utils/haptics';
 import { colors } from '../../theme/colors';
 import { ExerciseItem, ExerciseSet, WorkoutSession } from '../../types';
+import { safeHaptics } from '../../utils/haptics';
+import {
+  detectPersonalRecord,
+  getPreviousSessionExerciseValues,
+} from '../../utils/workoutAnalytics';
 
 const REST_PRESETS = [60, 90, 120];
 
@@ -45,7 +68,7 @@ const POPULAR_EXERCISES = [
 ];
 
 export default function WorkoutsScreen() {
-  // Store subscriptions
+  // Store subscriptions (granular selectors)
   const activeWorkout = useFitnessStore((state) => state.activeWorkout);
   const workouts = useFitnessStore((state) => state.workouts);
   const startWorkout = useFitnessStore((state) => state.startWorkout);
@@ -67,79 +90,30 @@ export default function WorkoutsScreen() {
   );
   const finishActiveWorkout = useFitnessStore((state) => state.finishActiveWorkout);
   const cancelActiveWorkout = useFitnessStore((state) => state.cancelActiveWorkout);
+  const updateWorkout = useFitnessStore((state) => state.updateWorkout);
   const removeWorkout = useFitnessStore((state) => state.removeWorkout);
 
-  // Auto-Rest Timer State (1-Hz countdown is isolated within FloatingRestTimer)
+  // Auto-Rest Timer State
   const [restTimerSeconds, setRestTimerSeconds] = useState<number>(0);
   const [restTimerTotal, setRestTimerTotal] = useState<number>(90);
   const [isRestTimerActive, setIsRestTimerActive] = useState<boolean>(false);
 
-  // Add Exercise Modal State
+  // Modals
   const [isAddExerciseModalVisible, setIsAddExerciseModalVisible] =
     useState<boolean>(false);
   const [customExerciseName, setCustomExerciseName] = useState<string>('');
-  const pendingUpdatesRef = useRef<Record<string, { exerciseId: string; setId: string; updates: Partial<ExerciseSet> }>>({});
-  const debounceTimerRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const [selectedHistoryExercise, setSelectedHistoryExercise] = useState<string | null>(null);
+  const [editingWorkout, setEditingWorkout] = useState<WorkoutSession | null>(null);
 
-  const flushPendingUpdates = useCallback(() => {
-    Object.keys(debounceTimerRef.current).forEach((key) => {
-      clearTimeout(debounceTimerRef.current[key]);
-      delete debounceTimerRef.current[key];
-    });
-    Object.keys(pendingUpdatesRef.current).forEach((key) => {
-      const item = pendingUpdatesRef.current[key];
-      if (item) {
-        updateSetInActiveExercise(item.exerciseId, item.setId, item.updates);
-      }
-      delete pendingUpdatesRef.current[key];
-    });
-  }, [updateSetInActiveExercise]);
-
-  const debouncedUpdateSet = useCallback(
-    (exerciseId: string, setId: string, updates: Partial<ExerciseSet>) => {
-      const key = `${exerciseId}_${setId}`;
-      if (debounceTimerRef.current[key]) {
-        clearTimeout(debounceTimerRef.current[key]);
-      }
-      pendingUpdatesRef.current[key] = {
-        exerciseId,
-        setId,
-        updates: { ...(pendingUpdatesRef.current[key]?.updates || {}), ...updates },
-      };
-      debounceTimerRef.current[key] = setTimeout(() => {
-        const item = pendingUpdatesRef.current[key];
-        if (item) {
-          updateSetInActiveExercise(item.exerciseId, item.setId, item.updates);
-          delete pendingUpdatesRef.current[key];
-        }
-        delete debounceTimerRef.current[key];
-      }, 300);
-    },
-    [updateSetInActiveExercise]
-  );
-
+  // Direct set update handler (fired onEndEditing, not per keystroke)
   const handleEndEditingUpdate = useCallback(
     (exerciseId: string, setId: string, updates: Partial<ExerciseSet>) => {
-      const key = `${exerciseId}_${setId}`;
-      if (debounceTimerRef.current[key]) {
-        clearTimeout(debounceTimerRef.current[key]);
-        delete debounceTimerRef.current[key];
-      }
-      delete pendingUpdatesRef.current[key];
       updateSetInActiveExercise(exerciseId, setId, updates);
     },
     [updateSetInActiveExercise]
   );
 
-  // Clear debounce timers on unmount
-  useEffect(() => {
-    const timers = debounceTimerRef.current;
-    return () => {
-      Object.values(timers).forEach(clearTimeout);
-    };
-  }, []);
-
-  // Rest Timer Controls (isolated within FloatingRestTimer)
+  // Rest Timer Controls
   const triggerRestTimer = useCallback((seconds: number = 90) => {
     setRestTimerTotal(seconds);
     setRestTimerSeconds(seconds);
@@ -159,25 +133,14 @@ export default function WorkoutsScreen() {
   }, []);
 
   const handleDismissRestTimer = useCallback(() => {
+    cancelRestTimerNotification();
     setIsRestTimerActive(false);
     setRestTimerSeconds(0);
   }, []);
 
-  // Toggle Set Complete (triggers auto-rest on completion)
+  // Toggle Set Complete (triggers auto-rest on completion + PR detection)
   const handleToggleSetComplete = useCallback(
     (exerciseId: string, set: ExerciseSet) => {
-      // Flush any pending typed updates for this set first
-      const key = `${exerciseId}_${set.id}`;
-      if (debounceTimerRef.current[key]) {
-        clearTimeout(debounceTimerRef.current[key]);
-        delete debounceTimerRef.current[key];
-        const item = pendingUpdatesRef.current[key];
-        if (item) {
-          updateSetInActiveExercise(exerciseId, set.id, item.updates);
-          delete pendingUpdatesRef.current[key];
-        }
-      }
-
       const nextCompleted = !set.completed;
       updateSetInActiveExercise(exerciseId, set.id, { completed: nextCompleted });
 
@@ -191,12 +154,35 @@ export default function WorkoutsScreen() {
     [updateSetInActiveExercise, triggerRestTimer, restTimerTotal]
   );
 
+  // Add Set with previous-session value pre-filling
   const handleAddSet = useCallback(
     (exerciseId: string) => {
       safeHaptics.selection();
+      const currentWorkout = useFitnessStore.getState().activeWorkout;
+      const ex = currentWorkout?.exercises.find((e) => e.id === exerciseId);
       addSetToActiveExercise(exerciseId);
+
+      // If user had previous values for this set number, prefill it!
+      if (ex) {
+        const prev = getPreviousSessionExerciseValues(ex.name, workouts);
+        const nextSetIdx = ex.sets.length; // index for the new set
+        if (prev && prev.sets[nextSetIdx]) {
+          const pastSet = prev.sets[nextSetIdx];
+          setTimeout(() => {
+            const updatedWorkout = useFitnessStore.getState().activeWorkout;
+            const updatedEx = updatedWorkout?.exercises.find((e) => e.id === exerciseId);
+            const newlyAddedSet = updatedEx?.sets[updatedEx.sets.length - 1];
+            if (newlyAddedSet) {
+              updateSetInActiveExercise(exerciseId, newlyAddedSet.id, {
+                weightKg: pastSet.weightKg,
+                reps: pastSet.reps,
+              });
+            }
+          }, 40);
+        }
+      }
     },
-    [addSetToActiveExercise]
+    [addSetToActiveExercise, workouts, updateSetInActiveExercise]
   );
 
   const handleRemoveSet = useCallback(
@@ -217,9 +203,6 @@ export default function WorkoutsScreen() {
 
   // Finish Workout with Confirmation
   const handleConfirmFinishWorkout = useCallback(() => {
-    // Flush all pending inputs before computing volume or finishing
-    flushPendingUpdates();
-
     const currentWorkout = useFitnessStore.getState().activeWorkout;
     if (!currentWorkout) return;
 
@@ -242,7 +225,6 @@ export default function WorkoutsScreen() {
           text: 'Finish & Save',
           style: 'default',
           onPress: () => {
-            // Update duration before finalizing
             updateActiveWorkout({
               ...currentWorkout,
               durationSeconds: finalElapsedSeconds,
@@ -258,7 +240,7 @@ export default function WorkoutsScreen() {
         },
       ]
     );
-  }, [flushPendingUpdates, updateActiveWorkout, finishActiveWorkout, handleDismissRestTimer]);
+  }, [updateActiveWorkout, finishActiveWorkout, handleDismissRestTimer]);
 
   // Cancel Workout with Confirmation
   const handleConfirmCancelWorkout = () => {
@@ -283,6 +265,22 @@ export default function WorkoutsScreen() {
   const handleSelectAddExercise = (name: string) => {
     if (!name.trim()) return;
     addExerciseToActiveWorkout(name.trim());
+
+    // If user has past values for this exercise, prefill the first set
+    const prev = getPreviousSessionExerciseValues(name.trim(), workouts);
+    if (prev && prev.sets.length > 0) {
+      setTimeout(() => {
+        const currentWorkout = useFitnessStore.getState().activeWorkout;
+        const newlyAddedEx = currentWorkout?.exercises[currentWorkout.exercises.length - 1];
+        if (newlyAddedEx && newlyAddedEx.sets[0]) {
+          updateSetInActiveExercise(newlyAddedEx.id, newlyAddedEx.sets[0].id, {
+            weightKg: prev.sets[0].weightKg,
+            reps: prev.sets[0].reps,
+          });
+        }
+      }, 40);
+    }
+
     setCustomExerciseName('');
     setIsAddExerciseModalVisible(false);
   };
@@ -306,18 +304,54 @@ export default function WorkoutsScreen() {
     [removeWorkout]
   );
 
+  // Export Workouts to CSV or JSON
+  const handleExportWorkouts = useCallback(async () => {
+    Alert.alert(
+      'Export Workout Data',
+      'Choose export format for your workout records:',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Export CSV',
+          onPress: async () => {
+            const csv = generateWorkoutsCsv(workouts);
+            const status = await shareOrCopyData(csv, 'BetterYou_Workouts.csv');
+            Alert.alert(
+              status === 'shared' ? 'Workouts Exported' : 'CSV Copied to Clipboard',
+              `Exported ${workouts.length} workout sessions.`
+            );
+          },
+        },
+        {
+          text: 'Full JSON Backup',
+          onPress: async () => {
+            const meals = useFitnessStore.getState().meals;
+            const goals = useFitnessStore.getState().dailyGoals;
+            const json = generateJsonBackup(workouts, meals, goals);
+            const status = await shareOrCopyData(json, 'BetterYou_Backup.json');
+            Alert.alert(
+              status === 'shared' ? 'Backup Shared' : 'Backup Copied to Clipboard',
+              'Full JSON database backup generated.'
+            );
+          },
+        },
+      ]
+    );
+  }, [workouts]);
+
   // Compute live active workout volume
   const liveActiveVolume = useMemo(() => {
     if (!activeWorkout) return 0;
     return calculateWorkoutVolume(activeWorkout.exercises);
   }, [activeWorkout]);
 
-  // Virtualized Workout History Renderer & List Header
+  // Virtualized Workout History Renderer
   const renderWorkoutHistoryItem = useCallback(
     ({ item }: { item: WorkoutSession }) => (
       <WorkoutHistoryCard
         session={item}
         onDelete={handleConfirmDeleteHistory}
+        onEdit={(w) => setEditingWorkout(w)}
       />
     ),
     [handleConfirmDeleteHistory]
@@ -329,25 +363,47 @@ export default function WorkoutsScreen() {
         {/* Header */}
         <View style={styles.inactiveHeaderRow}>
           <View>
-            <Text style={styles.inactiveHeaderTitle}>Workouts</Text>
-            <Text style={styles.inactiveHeaderSubtitle}>TRAINING & LOGS</Text>
+            <Text style={styles.inactiveHeaderTitle} allowFontScaling>
+              Workouts
+            </Text>
+            <Text style={styles.inactiveHeaderSubtitle} allowFontScaling>
+              TRAINING & PROGRESSION
+            </Text>
           </View>
-          <Pressable
-            style={({ pressed }) => [styles.startEmptyBtn, pressed && styles.pressed]}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            onPress={() => {
-              safeHaptics.impactLight();
-              startWorkout('Custom Workout');
-            }}
-          >
-            <Ionicons name="add" size={16} color={colors.textInverse} />
-            <Text style={styles.startEmptyBtnText}>Start Empty</Text>
-          </Pressable>
+          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+            <Pressable
+              style={({ pressed }) => [styles.exportBtn, pressed && styles.pressed]}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              onPress={handleExportWorkouts}
+              accessibilityRole="button"
+              accessibilityLabel="Export workouts data to CSV or JSON"
+            >
+              <Ionicons name="download-outline" size={16} color={colors.primary} />
+            </Pressable>
+
+            <Pressable
+              style={({ pressed }) => [styles.startEmptyBtn, pressed && styles.pressed]}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              onPress={() => {
+                safeHaptics.impactLight();
+                startWorkout('Custom Workout');
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Start an empty custom workout"
+            >
+              <Ionicons name="add" size={16} color={colors.textInverse} />
+              <Text style={styles.startEmptyBtnText} allowFontScaling>
+                Start Empty
+              </Text>
+            </Pressable>
+          </View>
         </View>
 
         {/* 3 Built-In Workout Templates */}
         <View style={styles.templatesSection}>
-          <Text style={styles.sectionHeaderTitle}>Routine Templates</Text>
+          <Text style={styles.sectionHeaderTitle} allowFontScaling>
+            Routine Templates
+          </Text>
 
           <View style={styles.templatesGrid}>
             {/* Push Day */}
@@ -357,6 +413,8 @@ export default function WorkoutsScreen() {
                 safeHaptics.impactLight();
                 startWorkout('Push Day');
               }}
+              accessibilityRole="button"
+              accessibilityLabel="Start Push Day routine template"
             >
               <View style={[styles.templateIconBox, { backgroundColor: 'rgba(244, 63, 94, 0.1)' }]}>
                 <Ionicons name="flame-outline" size={20} color="#F43F5E" />
@@ -378,6 +436,8 @@ export default function WorkoutsScreen() {
                 safeHaptics.impactLight();
                 startWorkout('Pull Day');
               }}
+              accessibilityRole="button"
+              accessibilityLabel="Start Pull Day routine template"
             >
               <View style={[styles.templateIconBox, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }]}>
                 <Ionicons name="barbell-outline" size={20} color="#38BDF8" />
@@ -399,6 +459,8 @@ export default function WorkoutsScreen() {
                 safeHaptics.impactLight();
                 startWorkout('Leg Day');
               }}
+              accessibilityRole="button"
+              accessibilityLabel="Start Leg Day routine template"
             >
               <View style={[styles.templateIconBox, { backgroundColor: 'rgba(16, 185, 129, 0.1)' }]}>
                 <Ionicons name="fitness-outline" size={20} color="#10B981" />
@@ -417,13 +479,13 @@ export default function WorkoutsScreen() {
 
         {/* Workout History Section Title */}
         <View style={styles.historySection}>
-          <Text style={styles.sectionHeaderTitle}>
+          <Text style={styles.sectionHeaderTitle} allowFontScaling>
             History ({workouts.length})
           </Text>
         </View>
       </View>
     ),
-    [workouts.length, startWorkout]
+    [workouts.length, startWorkout, handleExportWorkouts]
   );
 
   // -------------------------------------------------------------
@@ -442,7 +504,7 @@ export default function WorkoutsScreen() {
           <View style={styles.activeWorkoutTitleCol}>
             <View style={styles.liveIndicatorRow}>
               <View style={styles.livePulseDot} />
-              <Text style={styles.activeWorkoutTitle} numberOfLines={1}>
+              <Text style={styles.activeWorkoutTitle} numberOfLines={1} allowFontScaling>
                 {activeWorkout.title}
               </Text>
             </View>
@@ -458,8 +520,12 @@ export default function WorkoutsScreen() {
               ]}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               onPress={handleConfirmFinishWorkout}
+              accessibilityRole="button"
+              accessibilityLabel="Finish and save active workout"
             >
-              <Text style={styles.finishWorkoutButtonText}>Finish</Text>
+              <Text style={styles.finishWorkoutButtonText} allowFontScaling>
+                Finish
+              </Text>
             </Pressable>
           </View>
         </View>
@@ -467,18 +533,30 @@ export default function WorkoutsScreen() {
         {/* Live Volume & Stats Ribbon */}
         <View style={styles.statsRibbon}>
           <View style={styles.ribbonItem}>
-            <Text style={styles.ribbonValue}>{liveActiveVolume.toLocaleString()}</Text>
-            <Text style={styles.ribbonLabel}>Volume (kg)</Text>
+            <Text style={styles.ribbonValue} allowFontScaling>
+              {liveActiveVolume.toLocaleString()}
+            </Text>
+            <Text style={styles.ribbonLabel} allowFontScaling>
+              Volume (kg)
+            </Text>
           </View>
           <View style={styles.ribbonDivider} />
           <View style={styles.ribbonItem}>
-            <Text style={styles.ribbonValue}>{activeWorkout.exercises.length}</Text>
-            <Text style={styles.ribbonLabel}>Exercises</Text>
+            <Text style={styles.ribbonValue} allowFontScaling>
+              {activeWorkout.exercises.length}
+            </Text>
+            <Text style={styles.ribbonLabel} allowFontScaling>
+              Exercises
+            </Text>
           </View>
           <View style={styles.ribbonDivider} />
           <View style={styles.ribbonItem}>
-            <Text style={styles.ribbonValue}>{completedSetsCount}</Text>
-            <Text style={styles.ribbonLabel}>Completed Sets</Text>
+            <Text style={styles.ribbonValue} allowFontScaling>
+              {completedSetsCount}
+            </Text>
+            <Text style={styles.ribbonLabel} allowFontScaling>
+              Completed Sets
+            </Text>
           </View>
         </View>
 
@@ -486,17 +564,19 @@ export default function WorkoutsScreen() {
         <ScrollView
           contentContainerStyle={styles.exerciseScrollList}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
           {activeWorkout.exercises.map((exercise: ExerciseItem) => (
             <ActiveExerciseCard
               key={exercise.id}
               exercise={exercise}
+              workouts={workouts}
               onRemoveExercise={handleRemoveExercise}
               onAddSet={handleAddSet}
               onToggleComplete={handleToggleSetComplete}
-              onDebouncedUpdate={debouncedUpdateSet}
               onEndEditingUpdate={handleEndEditingUpdate}
               onDeleteSet={handleRemoveSet}
+              onOpenExerciseHistory={(name) => setSelectedHistoryExercise(name)}
             />
           ))}
 
@@ -507,9 +587,13 @@ export default function WorkoutsScreen() {
               pressed && styles.pressed,
             ]}
             onPress={() => setIsAddExerciseModalVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Add an exercise to this session"
           >
             <Ionicons name="add" size={18} color={colors.text} />
-            <Text style={styles.addExerciseMainBtnText}>Add Exercise</Text>
+            <Text style={styles.addExerciseMainBtnText} allowFontScaling>
+              Add Exercise
+            </Text>
           </Pressable>
 
           {/* Cancel Workout Button */}
@@ -520,13 +604,17 @@ export default function WorkoutsScreen() {
             ]}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             onPress={handleConfirmCancelWorkout}
+            accessibilityRole="button"
+            accessibilityLabel="Discard active workout"
           >
             <Ionicons name="close-circle-outline" size={15} color={colors.danger} />
-            <Text style={styles.cancelWorkoutBtnText}>Discard Workout</Text>
+            <Text style={styles.cancelWorkoutBtnText} allowFontScaling>
+              Discard Workout
+            </Text>
           </Pressable>
         </ScrollView>
 
-        {/* Floating Auto-Rest Countdown Timer (Pill capsule) */}
+        {/* Floating Auto-Rest Countdown Timer */}
         {isRestTimerActive && (
           <FloatingRestTimer
             key={`${restTimerSeconds}_${restTimerTotal}`}
@@ -538,7 +626,7 @@ export default function WorkoutsScreen() {
           />
         )}
 
-        {/* Add Exercise Modal */}
+        {/* Add Exercise Modal (FlashList powered) */}
         <Modal
           visible={isAddExerciseModalVisible}
           animationType="slide"
@@ -548,10 +636,14 @@ export default function WorkoutsScreen() {
           <View style={styles.modalBackdrop}>
             <View style={styles.modalSheet}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Add Exercise</Text>
+                <Text style={styles.modalTitle} allowFontScaling>
+                  Add Exercise
+                </Text>
                 <Pressable
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                   onPress={() => setIsAddExerciseModalVisible(false)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close add exercise modal"
                 >
                   <Ionicons name="close" size={20} color={colors.textSecondary} />
                 </Pressable>
@@ -565,6 +657,8 @@ export default function WorkoutsScreen() {
                   placeholderTextColor={colors.textMuted}
                   value={customExerciseName}
                   onChangeText={setCustomExerciseName}
+                  selectionColor={colors.primary}
+                  accessibilityLabel="Custom exercise name input"
                 />
                 <Pressable
                   style={[
@@ -573,35 +667,59 @@ export default function WorkoutsScreen() {
                   ]}
                   disabled={!customExerciseName.trim()}
                   onPress={() => handleSelectAddExercise(customExerciseName)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add custom exercise"
                 >
                   <Text style={styles.customExerciseSubmitText}>Add</Text>
                 </Pressable>
               </View>
 
-              <Text style={styles.modalSuggestionsHeader}>POPULAR EXERCISES</Text>
+              <Text style={styles.modalSuggestionsHeader} allowFontScaling>
+                POPULAR EXERCISES
+              </Text>
 
-              <ScrollView style={styles.suggestionsScroll}>
-                {POPULAR_EXERCISES.map((item, idx) => (
-                  <Pressable
-                    key={idx}
-                    style={styles.suggestionRow}
-                    onPress={() => handleSelectAddExercise(item)}
-                  >
-                    <Text style={styles.suggestionText}>{item}</Text>
-                    <Ionicons name="add" size={18} color={colors.textSecondary} />
-                  </Pressable>
-                ))}
-              </ScrollView>
+              <View style={{ height: 260 }}>
+                <FlashList
+                  data={POPULAR_EXERCISES}
+                  keyExtractor={(item) => item}
+                  renderItem={({ item }) => (
+                    <Pressable
+                      style={styles.suggestionRow}
+                      onPress={() => handleSelectAddExercise(item)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Add ${item}`}
+                    >
+                      <Text style={styles.suggestionText} allowFontScaling>
+                        {item}
+                      </Text>
+                      <Ionicons name="add" size={18} color={colors.textSecondary} />
+                    </Pressable>
+                  )}
+                />
+              </View>
             </View>
           </View>
         </Modal>
+
+        {/* Per-Exercise Progression History Modal */}
+        {selectedHistoryExercise && (
+          <ExerciseHistoryModal
+            visible={!!selectedHistoryExercise}
+            exerciseName={selectedHistoryExercise}
+            workouts={workouts}
+            onClose={() => setSelectedHistoryExercise(null)}
+          />
+        )}
       </SafeAreaView>
     );
   }
 
+  // -------------------------------------------------------------
+  // INACTIVE WORKOUT VIEW (FlashList of Workout History)
+  // -------------------------------------------------------------
   return (
     <SafeAreaView style={styles.safeArea}>
-      <FlatList
+      <FlashList
         data={workouts}
         keyExtractor={(item) => item.id}
         renderItem={renderWorkoutHistoryItem}
@@ -611,19 +729,38 @@ export default function WorkoutsScreen() {
             <View style={styles.emptyHistoryIcon}>
               <Ionicons name="barbell-outline" size={28} color={colors.textMuted} />
             </View>
-            <Text style={styles.emptyHistoryTitle}>No workouts logged yet</Text>
-            <Text style={styles.emptyHistorySub}>
+            <Text style={styles.emptyHistoryTitle} allowFontScaling>
+              No workouts logged yet
+            </Text>
+            <Text style={styles.emptyHistorySub} allowFontScaling>
               Start a Push, Pull, or Legs session above. Completed sets and total volume will be recorded automatically.
             </Text>
           </View>
         }
         contentContainerStyle={styles.inactiveScrollContent}
         showsVerticalScrollIndicator={false}
-        initialNumToRender={8}
-        maxToRenderPerBatch={8}
-        windowSize={5}
-        removeClippedSubviews={Platform.OS === 'android'}
       />
+
+      {/* Edit Past Workout Modal */}
+      {editingWorkout && (
+        <EditWorkoutModal
+          visible={!!editingWorkout}
+          workout={editingWorkout}
+          onClose={() => setEditingWorkout(null)}
+          onSave={(id, updates) => updateWorkout(id, updates)}
+          onDelete={(w) => handleConfirmDeleteHistory(w)}
+        />
+      )}
+
+      {/* Per-Exercise Progression History Modal */}
+      {selectedHistoryExercise && (
+        <ExerciseHistoryModal
+          visible={!!selectedHistoryExercise}
+          exerciseName={selectedHistoryExercise}
+          workouts={workouts}
+          onClose={() => setSelectedHistoryExercise(null)}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -680,6 +817,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.hairline,
+    minHeight: 36,
   },
   timerBadgeText: {
     fontSize: 13,
@@ -689,10 +827,11 @@ const styles = StyleSheet.create({
   },
   finishWorkoutButton: {
     backgroundColor: colors.primary,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 12,
     justifyContent: 'center',
+    minHeight: 40,
   },
   finishWorkoutButtonText: {
     fontSize: 13,
@@ -735,7 +874,7 @@ const styles = StyleSheet.create({
   exerciseScrollList: {
     paddingHorizontal: 16,
     paddingTop: 16,
-    paddingBottom: 130, // space for floating rest timer
+    paddingBottom: 140, // space for floating rest timer
     gap: 14,
   },
   exerciseCard: {
@@ -748,23 +887,43 @@ const styles = StyleSheet.create({
   exerciseCardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 14,
   },
   exerciseNameRow: {
     flex: 1,
     marginRight: 8,
   },
+  exerciseTitleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   exerciseNameText: {
     fontSize: 16,
     fontWeight: '700',
     color: colors.text,
   },
+  exerciseSubtitleRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 3,
+  },
   exerciseSetCountSub: {
     fontSize: 11,
     color: colors.textMuted,
-    marginTop: 2,
     fontWeight: '500',
+  },
+  exercisePrevPill: {
+    fontSize: 10,
+    color: colors.primary,
+    backgroundColor: 'rgba(0, 229, 255, 0.08)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    fontWeight: '600',
   },
   setColumnsHeader: {
     flexDirection: 'row',
@@ -789,6 +948,7 @@ const styles = StyleSheet.create({
     padding: 6,
     borderWidth: 1,
     borderColor: colors.hairline,
+    minHeight: 48,
   },
   setRowCompleted: {
     borderColor: 'rgba(16, 185, 129, 0.25)',
@@ -823,38 +983,64 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.hairline,
     fontVariant: ['tabular-nums'],
-    minHeight: 38,
+    minHeight: 40,
   },
   numericInputCompleted: {
     color: colors.primary,
     borderColor: 'rgba(16, 185, 129, 0.3)',
   },
   setCheckCircle: {
-    width: 38,
-    height: 38,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
   deleteSetBtn: {
-    width: 24,
-    height: 38,
+    width: 32,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
   deleteSetPlaceholder: {
-    width: 24,
+    width: 32,
+  },
+  prBadgeSmall: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginLeft: 2,
+  },
+  prBadgeSmallVol: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginLeft: 2,
+  },
+  prBadgeSmallText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#F59E0B',
   },
   addSetButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 9,
+    paddingVertical: 10,
     borderRadius: 10,
     backgroundColor: colors.surfaceSubtle,
     marginTop: 6,
     gap: 4,
     borderWidth: 1,
     borderColor: colors.hairline,
+    minHeight: 44,
   },
   addSetButtonText: {
     fontSize: 12,
@@ -882,9 +1068,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 10,
+    paddingVertical: 12,
     gap: 6,
     marginTop: 4,
+    minHeight: 44,
   },
   cancelWorkoutBtnText: {
     fontSize: 12,
@@ -892,7 +1079,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  // Floating Rest Timer (Clean Pill Capsule)
+  // Floating Rest Timer (Clean Capsule with Reanimated Pulse)
   floatingRestTimer: {
     position: 'absolute',
     bottom: Platform.OS === 'ios' ? 24 : 16,
@@ -950,9 +1137,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   restTimerPulseDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     backgroundColor: colors.primary,
   },
   restTimerTitle: {
@@ -975,10 +1162,14 @@ const styles = StyleSheet.create({
   restTimerAdjustBtn: {
     backgroundColor: colors.surfaceSubtle,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 7,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: colors.hairline,
+    minHeight: 36,
+    minWidth: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   restTimerAdjustText: {
     fontSize: 11,
@@ -986,10 +1177,13 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   restTimerSkipBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     borderRadius: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    minHeight: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   restTimerSkipText: {
     fontSize: 11,
@@ -1004,11 +1198,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.surfaceSubtle,
     borderRadius: 8,
-    paddingVertical: 6,
+    paddingVertical: 8,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: colors.hairline,
+    minHeight: 36,
   },
   restPresetBtnActive: {
     backgroundColor: 'rgba(16, 185, 129, 0.15)',
@@ -1064,13 +1259,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.hairline,
     fontSize: 14,
+    minHeight: 48,
   },
   customExerciseSubmitBtn: {
     backgroundColor: colors.primary,
-    paddingHorizontal: 16,
+    paddingHorizontal: 18,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 48,
   },
   customExerciseSubmitText: {
     fontSize: 13,
@@ -1084,16 +1281,14 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     marginBottom: 8,
   },
-  suggestionsScroll: {
-    maxHeight: 280,
-  },
   suggestionRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: colors.hairline,
+    minHeight: 48,
   },
   suggestionText: {
     fontSize: 14,
@@ -1126,14 +1321,25 @@ const styles = StyleSheet.create({
     color: colors.text,
     letterSpacing: -0.4,
   },
+  exportBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   startEmptyBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
     backgroundColor: colors.primary,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: 12,
+    minHeight: 38,
   },
   startEmptyBtnText: {
     fontSize: 12,
@@ -1164,6 +1370,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.cardBorder,
     gap: 12,
+    minHeight: 48,
   },
   templateIconBox: {
     width: 40,
@@ -1193,7 +1400,7 @@ const styles = StyleSheet.create({
 
   // History Section
   historySection: {
-    marginBottom: 20,
+    marginBottom: 12,
   },
   emptyHistoryCard: {
     backgroundColor: colors.card,
@@ -1226,15 +1433,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 18,
   },
-  historyList: {
-    gap: 10,
-  },
   historyCard: {
     backgroundColor: colors.card,
     borderRadius: 16,
     padding: 14,
     borderWidth: 1,
     borderColor: colors.cardBorder,
+    marginBottom: 10,
   },
   historyTopRow: {
     flexDirection: 'row',
@@ -1310,14 +1515,20 @@ const styles = StyleSheet.create({
   },
 });
 
+/* -------------------------------------------------------------
+ * MEMOIZED SUBCOMPONENTS FOR ISOLATED ACTIVE WORKOUT RENDERING
+ * ------------------------------------------------------------- */
+
 interface WorkoutHistoryCardProps {
   session: WorkoutSession;
   onDelete: (workout: WorkoutSession) => void;
+  onEdit: (workout: WorkoutSession) => void;
 }
 
 const WorkoutHistoryCard = React.memo(function WorkoutHistoryCard({
   session,
   onDelete,
+  onEdit,
 }: WorkoutHistoryCardProps) {
   const dateStr = new Date(
     session.completedAt || session.startedAt
@@ -1330,23 +1541,44 @@ const WorkoutHistoryCard = React.memo(function WorkoutHistoryCard({
   const durationMin = Math.round(session.durationSeconds / 60);
 
   return (
-    <View style={styles.historyCard}>
+    <Pressable
+      style={({ pressed }) => [styles.historyCard, pressed && styles.pressed]}
+      onPress={() => onEdit(session)}
+      accessibilityRole="button"
+      accessibilityLabel={`Workout: ${session.title}, ${dateStr}`}
+    >
       <View style={styles.historyTopRow}>
         <View>
-          <Text style={styles.historySessionTitle}>{session.title}</Text>
-          <Text style={styles.historyDateText}>{dateStr}</Text>
+          <Text style={styles.historySessionTitle} allowFontScaling>
+            {session.title}
+          </Text>
+          <Text style={styles.historyDateText} allowFontScaling>
+            {dateStr}
+          </Text>
         </View>
-        <Pressable
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          onPress={() => onDelete(session)}
-        >
-          <Ionicons name="trash-outline" size={15} color={colors.textMuted} />
-        </Pressable>
+        <View style={{ flexDirection: 'row', gap: 6 }}>
+          <Pressable
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            onPress={() => onEdit(session)}
+            accessibilityRole="button"
+            accessibilityLabel={`Edit ${session.title}`}
+          >
+            <Ionicons name="pencil-outline" size={15} color={colors.primary} />
+          </Pressable>
+          <Pressable
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            onPress={() => onDelete(session)}
+            accessibilityRole="button"
+            accessibilityLabel={`Delete ${session.title}`}
+          >
+            <Ionicons name="trash-outline" size={15} color={colors.textMuted} />
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.historyMetricsRow}>
         <View style={styles.historyMetric}>
-          <Text style={styles.historyMetricVal}>
+          <Text style={styles.historyMetricVal} allowFontScaling>
             {session.totalVolumeKg.toLocaleString()} kg
           </Text>
           <Text style={styles.historyMetricLabel}>Volume</Text>
@@ -1355,7 +1587,7 @@ const WorkoutHistoryCard = React.memo(function WorkoutHistoryCard({
         <View style={styles.historyMetricDivider} />
 
         <View style={styles.historyMetric}>
-          <Text style={styles.historyMetricVal}>
+          <Text style={styles.historyMetricVal} allowFontScaling>
             {durationMin > 0 ? `${durationMin}m` : '<1m'}
           </Text>
           <Text style={styles.historyMetricLabel}>Duration</Text>
@@ -1364,7 +1596,7 @@ const WorkoutHistoryCard = React.memo(function WorkoutHistoryCard({
         <View style={styles.historyMetricDivider} />
 
         <View style={styles.historyMetric}>
-          <Text style={styles.historyMetricVal}>
+          <Text style={styles.historyMetricVal} allowFontScaling>
             {session.exercises.length}
           </Text>
           <Text style={styles.historyMetricLabel}>Exercises</Text>
@@ -1375,23 +1607,19 @@ const WorkoutHistoryCard = React.memo(function WorkoutHistoryCard({
       <View style={styles.historyExercisesWrap}>
         {session.exercises.map((ex, i) => (
           <View key={ex.id || i} style={styles.historyExercisePill}>
-            <Text style={styles.historyExercisePillText}>
+            <Text style={styles.historyExercisePillText} allowFontScaling>
               {ex.name} • {ex.sets.filter((s) => s.completed).length} sets
             </Text>
           </View>
         ))}
       </View>
-    </View>
+    </Pressable>
   );
 });
 
-/* -------------------------------------------------------------
- * MEMOIZED SUBCOMPONENTS FOR ISOLATED ACTIVE WORKOUT RENDERING
- * ------------------------------------------------------------- */
-
 /**
  * Isolated Workout Timer Badge:
- * Runs its own 1-Hz timer so the 1,500-line WorkoutsScreen is NOT re-rendered every second.
+ * Runs its own 1-Hz timer so the WorkoutsScreen is NOT re-rendered every second.
  */
 const WorkoutTimerBadge = React.memo(function WorkoutTimerBadge({
   startedAt,
@@ -1413,21 +1641,23 @@ const WorkoutTimerBadge = React.memo(function WorkoutTimerBadge({
   return (
     <View style={styles.timerBadge}>
       <Ionicons name="time-outline" size={14} color={colors.primary} />
-      <Text style={styles.timerBadgeText}>{formatTime(seconds)}</Text>
+      <Text style={styles.timerBadgeText} allowFontScaling>
+        {formatTime(seconds)}
+      </Text>
     </View>
   );
 });
 
 /**
- * Isolated Floating Auto-Rest Timer:
- * Runs its own 1-Hz countdown without triggering re-renders of exercises and inputs.
+ * Reanimated Floating Rest Countdown Timer:
+ * Survives backgrounding via wall-clock timestamps + schedules OS local notification.
  */
 interface FloatingRestTimerProps {
   initialSeconds: number;
   totalSeconds: number;
   onDismiss: () => void;
   onAdjust: (delta: number) => void;
-  onPreset: (seconds: number) => void;
+  onPreset: (sec: number) => void;
 }
 
 const FloatingRestTimer = React.memo(function FloatingRestTimer({
@@ -1441,6 +1671,20 @@ const FloatingRestTimer = React.memo(function FloatingRestTimer({
   const [isFinished, setIsFinished] = useState<boolean>(false);
   const onDismissRef = useRef(onDismiss);
 
+  // Pulse animation using Reanimated on the native UI thread
+  const pulseOpacity = useSharedValue(0.4);
+  useEffect(() => {
+    pulseOpacity.value = withRepeat(
+      withTiming(1, { duration: 600, easing: Easing.inOut(Easing.ease) }),
+      -1,
+      true
+    );
+  }, [pulseOpacity]);
+
+  const animatedPulseStyle = useAnimatedStyle(() => ({
+    opacity: pulseOpacity.value,
+  }));
+
   useEffect(() => {
     onDismissRef.current = onDismiss;
   }, [onDismiss]);
@@ -1450,6 +1694,17 @@ const FloatingRestTimer = React.memo(function FloatingRestTimer({
       onDismissRef.current();
       return;
     }
+
+    // Schedule background OS notification and listen to foreground returns
+    scheduleRestTimerNotification(initialSeconds);
+    const unsubscribeSync = subscribeToForegroundRestSync((remaining) => {
+      setSeconds(remaining);
+      if (remaining <= 0) {
+        setIsFinished(true);
+        safeHaptics.timerFinished();
+      }
+    });
+
     const interval = setInterval(() => {
       setSeconds((prev) => {
         if (prev <= 1) {
@@ -1464,8 +1719,17 @@ const FloatingRestTimer = React.memo(function FloatingRestTimer({
         return prev - 1;
       });
     }, 1000);
-    return () => clearInterval(interval);
+
+    return () => {
+      clearInterval(interval);
+      unsubscribeSync();
+    };
   }, [initialSeconds]);
+
+  const handleDismissTimer = () => {
+    cancelRestTimerNotification();
+    onDismissRef.current();
+  };
 
   if (isFinished) {
     return (
@@ -1475,15 +1739,21 @@ const FloatingRestTimer = React.memo(function FloatingRestTimer({
           styles.floatingRestTimerFinished,
           pressed && styles.pressed,
         ]}
-        onPress={() => onDismissRef.current()}
+        onPress={handleDismissTimer}
+        accessibilityRole="button"
+        accessibilityLabel="Rest complete! Tap to dismiss timer."
       >
         <View style={styles.restFinishedRow}>
           <View style={styles.restFinishedIconBox}>
             <Ionicons name="checkmark-circle" size={24} color="#10B981" />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.restFinishedTitle}>REST COMPLETE!</Text>
-            <Text style={styles.restFinishedSub}>Ready for your next set • Tap to dismiss</Text>
+            <Text style={styles.restFinishedTitle} allowFontScaling>
+              REST COMPLETE!
+            </Text>
+            <Text style={styles.restFinishedSub} allowFontScaling>
+              Ready for your next set • Tap to dismiss
+            </Text>
           </View>
           <Ionicons name="close" size={18} color={colors.textSecondary} />
         </View>
@@ -1495,10 +1765,14 @@ const FloatingRestTimer = React.memo(function FloatingRestTimer({
     <View style={styles.floatingRestTimer}>
       <View style={styles.restTimerContentRow}>
         <View style={styles.restTimerLeft}>
-          <View style={styles.restTimerPulseDot} />
+          <Animated.View style={[styles.restTimerPulseDot, animatedPulseStyle]} />
           <View>
-            <Text style={styles.restTimerTitle}>REST TIMER</Text>
-            <Text style={styles.restTimerTimeText}>{formatTime(seconds)}</Text>
+            <Text style={styles.restTimerTitle} allowFontScaling>
+              REST TIMER
+            </Text>
+            <Text style={styles.restTimerTimeText} allowFontScaling>
+              {formatTime(seconds)}
+            </Text>
           </View>
         </View>
 
@@ -1511,6 +1785,8 @@ const FloatingRestTimer = React.memo(function FloatingRestTimer({
               safeHaptics.selection();
               onAdjust(-15);
             }}
+            accessibilityRole="button"
+            accessibilityLabel="Subtract 15 seconds from rest timer"
           >
             <Text style={styles.restTimerAdjustText}>-15s</Text>
           </Pressable>
@@ -1522,6 +1798,8 @@ const FloatingRestTimer = React.memo(function FloatingRestTimer({
               safeHaptics.selection();
               onAdjust(30);
             }}
+            accessibilityRole="button"
+            accessibilityLabel="Add 30 seconds to rest timer"
           >
             <Text style={styles.restTimerAdjustText}>+30s</Text>
           </Pressable>
@@ -1529,10 +1807,9 @@ const FloatingRestTimer = React.memo(function FloatingRestTimer({
           <Pressable
             style={({ pressed }) => [styles.restTimerSkipBtn, pressed && styles.pressed]}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            onPress={() => {
-              safeHaptics.selection();
-              onDismiss();
-            }}
+            onPress={handleDismissTimer}
+            accessibilityRole="button"
+            accessibilityLabel="Skip rest timer"
           >
             <Text style={styles.restTimerSkipText}>Skip</Text>
           </Pressable>
@@ -1554,12 +1831,15 @@ const FloatingRestTimer = React.memo(function FloatingRestTimer({
               safeHaptics.selection();
               onPreset(sec);
             }}
+            accessibilityRole="button"
+            accessibilityLabel={`Set rest timer to ${sec} seconds`}
           >
             <Text
               style={[
                 styles.restPresetBtnText,
                 totalSeconds === sec && styles.restPresetBtnTextActive,
               ]}
+              allowFontScaling
             >
               {sec}s
             </Text>
@@ -1572,81 +1852,123 @@ const FloatingRestTimer = React.memo(function FloatingRestTimer({
 
 /**
  * Isolated Active Set Row:
- * Memoized so editing weight or reps in one set doesn't re-render other sets or exercises.
+ * Keeps local string draft state so typing in numeric inputs triggers ZERO parent/screen re-renders!
+ * Commits onEndEditing / onBlur.
  */
 interface ActiveSetRowProps {
   exerciseId: string;
+  exerciseName: string;
   set: ExerciseSet;
   canDelete: boolean;
+  workouts: WorkoutSession[];
   onToggleComplete: (exerciseId: string, set: ExerciseSet) => void;
-  onDebouncedUpdate: (exerciseId: string, setId: string, updates: Partial<ExerciseSet>) => void;
   onEndEditingUpdate: (exerciseId: string, setId: string, updates: Partial<ExerciseSet>) => void;
   onDeleteSet: (exerciseId: string, setId: string) => void;
 }
 
 const ActiveSetRow = React.memo(function ActiveSetRow({
   exerciseId,
+  exerciseName,
   set,
   canDelete,
+  workouts,
   onToggleComplete,
-  onDebouncedUpdate,
   onEndEditingUpdate,
   onDeleteSet,
 }: ActiveSetRowProps) {
+  const [prevSetValues, setPrevSetValues] = useState({ weight: set.weightKg, reps: set.reps });
+  const [weightText, setWeightText] = useState<string>(
+    set.weightKg ? set.weightKg.toString() : ''
+  );
+  const [repsText, setRepsText] = useState<string>(
+    set.reps ? set.reps.toString() : ''
+  );
+
+  // Synchronize state during render if set prop changes from external prefill
+  if (set.weightKg !== prevSetValues.weight || set.reps !== prevSetValues.reps) {
+    setPrevSetValues({ weight: set.weightKg, reps: set.reps });
+    setWeightText(set.weightKg ? set.weightKg.toString() : '');
+    setRepsText(set.reps ? set.reps.toString() : '');
+  }
+
+  const prInfo = useMemo(() => {
+    if (!set.completed) return null;
+    return detectPersonalRecord(exerciseName, set.weightKg, set.reps, workouts);
+  }, [set.completed, set.weightKg, set.reps, exerciseName, workouts]);
+
+  const commitChanges = () => {
+    const w = Math.max(0, parseFloat(weightText) || 0);
+    const r = Math.max(0, parseInt(repsText, 10) || 0);
+    if (w !== set.weightKg || r !== set.reps) {
+      onEndEditingUpdate(exerciseId, set.id, { weightKg: w, reps: r });
+    }
+  };
+
+  const handleCheck = () => {
+    commitChanges();
+    onToggleComplete(exerciseId, set);
+  };
+
   return (
     <View style={[styles.setRow, set.completed && styles.setRowCompleted]}>
       {/* Set Number */}
       <View style={styles.setNumberBadge}>
-        <Text style={[styles.setNumberText, set.completed && styles.setNumberTextCompleted]}>
+        <Text style={[styles.setNumberText, set.completed && styles.setNumberTextCompleted]} allowFontScaling>
           {set.setNumber}
         </Text>
       </View>
 
-      {/* Weight Input */}
+      {/* Weight Input (isolated local state) */}
       <View style={styles.setInputWrapper}>
         <TextInput
           style={[styles.numericInput, set.completed && styles.numericInputCompleted]}
           keyboardType="decimal-pad"
           selectTextOnFocus
-          defaultValue={set.weightKg ? set.weightKg.toString() : ''}
+          value={weightText}
           placeholder="0"
           placeholderTextColor={colors.textMuted}
-          onChangeText={(val) => {
-            const parsed = Math.max(0, parseFloat(val) || 0);
-            onDebouncedUpdate(exerciseId, set.id, { weightKg: parsed });
-          }}
-          onEndEditing={(e) => {
-            const parsed = Math.max(0, parseFloat(e.nativeEvent.text) || 0);
-            onEndEditingUpdate(exerciseId, set.id, { weightKg: parsed });
-          }}
+          onChangeText={setWeightText}
+          onEndEditing={commitChanges}
+          accessibilityLabel={`Set ${set.setNumber} weight in kilograms`}
         />
       </View>
 
-      {/* Reps Input */}
+      {/* Reps Input (isolated local state) */}
       <View style={styles.setInputWrapper}>
         <TextInput
           style={[styles.numericInput, set.completed && styles.numericInputCompleted]}
           keyboardType="number-pad"
           selectTextOnFocus
-          defaultValue={set.reps ? set.reps.toString() : ''}
+          value={repsText}
           placeholder="0"
           placeholderTextColor={colors.textMuted}
-          onChangeText={(val) => {
-            const parsed = Math.max(0, parseInt(val, 10) || 0);
-            onDebouncedUpdate(exerciseId, set.id, { reps: parsed });
-          }}
-          onEndEditing={(e) => {
-            const parsed = Math.max(0, parseInt(e.nativeEvent.text, 10) || 0);
-            onEndEditingUpdate(exerciseId, set.id, { reps: parsed });
-          }}
+          onChangeText={setRepsText}
+          onEndEditing={commitChanges}
+          accessibilityLabel={`Set ${set.setNumber} reps`}
         />
       </View>
+
+      {/* PR Badge if achieved */}
+      {prInfo?.isWeightPr ? (
+        <View style={styles.prBadgeSmall}>
+          <Ionicons name="trophy" size={10} color="#F59E0B" />
+          <Text style={styles.prBadgeSmallText}>PR</Text>
+        </View>
+      ) : prInfo?.isVolumePr ? (
+        <View style={styles.prBadgeSmallVol}>
+          <Ionicons name="flame" size={10} color="#EF4444" />
+          <Text style={styles.prBadgeSmallText}>VOL</Text>
+        </View>
+      ) : null}
 
       {/* Completed Checkbox */}
       <Pressable
         style={({ pressed }) => [styles.setCheckCircle, pressed && styles.pressed]}
         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-        onPress={() => onToggleComplete(exerciseId, set)}
+        onPress={handleCheck}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: set.completed }}
+        accessibilityLabel={`Mark set ${set.setNumber} as ${set.completed ? 'incomplete' : 'complete'}`}
       >
         <Ionicons
           name={set.completed ? 'checkmark-circle' : 'ellipse-outline'}
@@ -1661,6 +1983,7 @@ const ActiveSetRow = React.memo(function ActiveSetRow({
           style={({ pressed }) => [styles.deleteSetBtn, pressed && styles.pressed]}
           hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
           onPress={() => onDeleteSet(exerciseId, set.id)}
+          accessibilityRole="button"
           accessibilityLabel={`Delete set ${set.setNumber}`}
         >
           <Ionicons name="trash-outline" size={14} color={colors.textMuted} />
@@ -1674,41 +1997,69 @@ const ActiveSetRow = React.memo(function ActiveSetRow({
 
 /**
  * Isolated Active Exercise Card:
- * Renders exercise header, column titles, memoized sets, and add set action.
+ * Renders exercise header with progression link, previous-session values preview, column titles, and sets.
  */
 interface ActiveExerciseCardProps {
   exercise: ExerciseItem;
+  workouts: WorkoutSession[];
   onRemoveExercise: (exerciseId: string) => void;
   onAddSet: (exerciseId: string) => void;
   onToggleComplete: (exerciseId: string, set: ExerciseSet) => void;
-  onDebouncedUpdate: (exerciseId: string, setId: string, updates: Partial<ExerciseSet>) => void;
   onEndEditingUpdate: (exerciseId: string, setId: string, updates: Partial<ExerciseSet>) => void;
   onDeleteSet: (exerciseId: string, setId: string) => void;
+  onOpenExerciseHistory: (exerciseName: string) => void;
 }
 
 const ActiveExerciseCard = React.memo(function ActiveExerciseCard({
   exercise,
+  workouts,
   onRemoveExercise,
   onAddSet,
   onToggleComplete,
-  onDebouncedUpdate,
   onEndEditingUpdate,
   onDeleteSet,
+  onOpenExerciseHistory,
 }: ActiveExerciseCardProps) {
   const completedSetsCount = exercise.sets.filter((s) => s.completed).length;
+
+  const previousValues = useMemo(() => {
+    return getPreviousSessionExerciseValues(exercise.name, workouts);
+  }, [exercise.name, workouts]);
 
   return (
     <View style={styles.exerciseCard}>
       <View style={styles.exerciseCardHeader}>
         <View style={styles.exerciseNameRow}>
-          <Text style={styles.exerciseNameText}>{exercise.name}</Text>
-          <Text style={styles.exerciseSetCountSub}>
-            {completedSetsCount}/{exercise.sets.length} sets completed
-          </Text>
+          <Pressable
+            style={styles.exerciseTitleBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+            onPress={() => onOpenExerciseHistory(exercise.name)}
+            accessibilityRole="button"
+            accessibilityLabel={`View progression history for ${exercise.name}`}
+          >
+            <Text style={styles.exerciseNameText} allowFontScaling>
+              {exercise.name}
+            </Text>
+            <Ionicons name="stats-chart" size={14} color={colors.primary} />
+          </Pressable>
+
+          <View style={styles.exerciseSubtitleRow}>
+            <Text style={styles.exerciseSetCountSub} allowFontScaling>
+              {completedSetsCount}/{exercise.sets.length} sets completed
+            </Text>
+            {previousValues && (
+              <Text style={styles.exercisePrevPill} numberOfLines={1} allowFontScaling>
+                Prev: {previousValues.summaryText}
+              </Text>
+            )}
+          </View>
         </View>
+
         <Pressable
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           onPress={() => onRemoveExercise(exercise.id)}
+          accessibilityRole="button"
+          accessibilityLabel={`Remove ${exercise.name} from workout`}
         >
           <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
         </Pressable>
@@ -1720,7 +2071,7 @@ const ActiveExerciseCard = React.memo(function ActiveExerciseCard({
         <Text style={[styles.colHeader, { flex: 1 }]}>WEIGHT (KG)</Text>
         <Text style={[styles.colHeader, { flex: 1 }]}>REPS</Text>
         <Text style={[styles.colHeader, { width: 44, textAlign: 'center' }]}>DONE</Text>
-        <View style={{ width: 24 }} />
+        <View style={{ width: 32 }} />
       </View>
 
       {/* Set Rows */}
@@ -1728,10 +2079,11 @@ const ActiveExerciseCard = React.memo(function ActiveExerciseCard({
         <ActiveSetRow
           key={set.id}
           exerciseId={exercise.id}
+          exerciseName={exercise.name}
           set={set}
           canDelete={exercise.sets.length > 1}
+          workouts={workouts}
           onToggleComplete={onToggleComplete}
-          onDebouncedUpdate={onDebouncedUpdate}
           onEndEditingUpdate={onEndEditingUpdate}
           onDeleteSet={onDeleteSet}
         />
@@ -1742,9 +2094,13 @@ const ActiveExerciseCard = React.memo(function ActiveExerciseCard({
         style={({ pressed }) => [styles.addSetButton, pressed && styles.pressed]}
         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
         onPress={() => onAddSet(exercise.id)}
+        accessibilityRole="button"
+        accessibilityLabel={`Add set to ${exercise.name}`}
       >
         <Ionicons name="add" size={15} color={colors.textSecondary} />
-        <Text style={styles.addSetButtonText}>Add Set</Text>
+        <Text style={styles.addSetButtonText} allowFontScaling>
+          Add Set
+        </Text>
       </Pressable>
     </View>
   );
