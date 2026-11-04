@@ -1,0 +1,382 @@
+{
+  "version": "1.0.0",
+  "updatedAt": "2026-11-04",
+  "classCaps": {
+    "synthetic_antioxidant": 18,
+    "artificial_color": 12,
+    "flavor_enhancer": 14,
+    "preservative": 20,
+    "artificial_sweetener": 16,
+    "surfactant": 16,
+    "petroleum_filler": 20,
+    "synthetic_pyrethroid": 35,
+    "industrial_disinfectant": 25,
+    "pulmonary_inhalant": 25,
+    "nano_whitener": 18
+  },
+  "rules": [
+    {
+      "id": "tbhq",
+      "canonicalName": "TBHQ (Tertiary Butylhydroquinone / INS 319)",
+      "additiveClass": "synthetic_antioxidant",
+      "severity": "high",
+      "aliases": ["tbhq", "e319", "ins 319", "ins319", "tertiary butylhydroquinone", "tert-butylhydroquinone"],
+      "rationale": "Synthetic phenolic antioxidant used to prolong oil shelf-life. EFSA and FSSAI permit strictly limited doses; high chronic exposure has been scrutinized for cellular oxidative stress.",
+      "source": "EFSA / FSSAI",
+      "sourceUrl": "https://www.efsa.europa.eu/en/efsajournal/pub/3794"
+    },
+    {
+      "id": "bht",
+      "canonicalName": "BHT (Butylated Hydroxytoluene / INS 321)",
+      "additiveClass": "synthetic_antioxidant",
+      "severity": "moderate",
+      "aliases": ["bht", "e321", "ins 321", "butylated hydroxytoluene"],
+      "rationale": "Fat-soluble preservative antioxidant with ongoing European scientific review regarding potential endocrine and metabolic disruption.",
+      "source": "EFSA",
+      "sourceUrl": "https://www.efsa.europa.eu/en/efsajournal/pub/2587"
+    },
+    {
+      "id": "bha",
+      "canonicalName": "BHA (Butylated Hydroxyanisole / INS 320)",
+      "additiveClass": "synthetic_antioxidant",
+      "severity": "high",
+      "aliases": ["bha", "e320", "ins 320", "butylated hydroxyanisole"],
+      "rationale": "IARC Group 2B possibly carcinogenic synthetic antioxidant; restricted in multiple global jurisdictions.",
+      "source": "IARC / EFSA",
+      "sourceUrl": "https://monographs.iarc.who.int/wp-content/uploads/2018/06/mono40-10.pdf"
+    },
+    {
+      "id": "sodium_nitrite",
+      "canonicalName": "Sodium Nitrite (INS 250)",
+      "additiveClass": "preservative",
+      "severity": "high",
+      "aliases": ["sodium nitrite", "e250", "ins 250", "ins250"],
+      "rationale": "Curing agent and preservative. Interacts with dietary amines in acidic gastric environments to form nitrosamines, classified as carcinogenic by IARC.",
+      "source": "IARC / EFSA",
+      "sourceUrl": "https://monographs.iarc.who.int/wp-content/uploads/2018/06/mono94-8.pdf"
+    },
+    {
+      "id": "potassium_nitrate",
+      "canonicalName": "Potassium Nitrate (INS 252)",
+      "additiveClass": "preservative",
+      "severity": "high",
+      "aliases": ["potassium nitrate", "e252", "ins 252"],
+      "rationale": "Curing preservative that reduces to nitrite in the digestive tract, carrying potential nitrosamine formation risk.",
+      "source": "EFSA",
+      "sourceUrl": "https://www.efsa.europa.eu/en/efsajournal/pub/4787"
+    },
+    {
+      "id": "sodium_benzoate",
+      "canonicalName": "Sodium Benzoate (INS 211)",
+      "additiveClass": "preservative",
+      "severity": "moderate",
+      "aliases": ["sodium benzoate", "e211", "ins 211", "ins211", "benzoate of soda"],
+      "rationale": "Antimicrobial preservative common in packaged beverages and Ayurvedic tonics. Can react with ascorbic acid (Vitamin C) to form trace benzene.",
+      "source": "FSSAI / FDA",
+      "sourceUrl": "https://www.fda.gov/food/chemicals/questions-and-answers-occurrence-benzene-beverages"
+    },
+    {
+      "id": "potassium_sorbate",
+      "canonicalName": "Potassium Sorbate (INS 202)",
+      "additiveClass": "preservative",
+      "severity": "low",
+      "aliases": ["potassium sorbate", "e202", "ins 202"],
+      "rationale": "Widely permitted anti-fungal preservative. Generally recognized as safe by FSSAI/EFSA with low allergenicity at permitted doses.",
+      "source": "EFSA / FSSAI",
+      "sourceUrl": "https://www.efsa.europa.eu/en/efsajournal/pub/5625"
+    },
+    {
+      "id": "msg",
+      "canonicalName": "Monosodium Glutamate (MSG / INS 621)",
+      "additiveClass": "flavor_enhancer",
+      "severity": "moderate",
+      "aliases": ["msg", "e621", "ins 621", "ins621", "monosodium glutamate", "ajinomoto", "monosodium l-glutamate"],
+      "rationale": "Purified sodium salt of glutamic acid. Approved flavor enhancer that stimulates umami taste receptors; may provoke transient headache or flushing in sensitive subsets.",
+      "source": "FSSAI / EFSA",
+      "sourceUrl": "https://www.efsa.europa.eu/en/efsajournal/pub/4910"
+    },
+    {
+      "id": "disodium_guanylate",
+      "canonicalName": "Disodium Guanylate (INS 627)",
+      "additiveClass": "flavor_enhancer",
+      "severity": "moderate",
+      "aliases": ["disodium guanylate", "e627", "ins 627", "ins627"],
+      "rationale": "Ribonucleotide flavor enhancer commonly combined with MSG to amplify savory palatability. Metabolizes into purines, of note for hyperuricemic individuals.",
+      "source": "EFSA / FSSAI",
+      "sourceUrl": "https://www.efsa.europa.eu/en/efsajournal/pub/4910"
+    },
+    {
+      "id": "disodium_inosinate",
+      "canonicalName": "Disodium Inosinate (INS 631)",
+      "additiveClass": "flavor_enhancer",
+      "severity": "moderate",
+      "aliases": ["disodium inosinate", "e631", "ins 631", "ins631"],
+      "rationale": "Synergistic nucleotide flavor enhancer paired with glutamates in savory snack formulations.",
+      "source": "EFSA / FSSAI",
+      "sourceUrl": "https://www.efsa.europa.eu/en/efsajournal/pub/4910"
+    },
+    {
+      "id": "disodium_ribonucleotides",
+      "canonicalName": "Disodium 5'-Ribonucleotides (INS 635)",
+      "additiveClass": "flavor_enhancer",
+      "severity": "moderate",
+      "aliases": ["disodium 5'-ribonucleotides", "disodium 5 ribonucleotides", "e635", "ins 635", "ins635"],
+      "rationale": "Potent 50/50 blend of disodium inosinate and guanylate producing intense umami amplification.",
+      "source": "FSSAI",
+      "sourceUrl": "https://fssai.gov.in/upload/uploadfiles/files/Compendium_Food_Additives_Regulations_08_09_2020.pdf"
+    },
+    {
+      "id": "titanium_dioxide",
+      "canonicalName": "Titanium Dioxide (INS 171 / CI 77891)",
+      "additiveClass": "nano_whitener",
+      "severity": "high",
+      "aliases": ["titanium dioxide", "e171", "ins 171", "ins171", "ci 77891", "ci77891"],
+      "rationale": "Whitening agent banned in the European Union for food use (EFSA 2021) due to particle accumulation and concern regarding potential genotoxicity.",
+      "source": "EFSA / IARC",
+      "sourceUrl": "https://www.efsa.europa.eu/en/efsajournal/pub/6585"
+    },
+    {
+      "id": "ammonia_caramel",
+      "canonicalName": "Caramel Color IV (Sulfite Ammonia Caramel / INS 150d)",
+      "additiveClass": "artificial_color",
+      "severity": "high",
+      "aliases": ["caramel color iv", "ammonia caramel", "e150d", "ins 150d", "ins150d", "caramel iv"],
+      "rationale": "Manufactured using ammonia and sulfites; can generate 4-methylimidazole (4-MEI), an IARC Group 2B possible human carcinogen.",
+      "source": "IARC / EFSA",
+      "sourceUrl": "https://monographs.iarc.who.int/wp-content/uploads/2018/06/mono101-015.pdf"
+    },
+    {
+      "id": "tartrazine",
+      "canonicalName": "Tartrazine (Synthetic Yellow 5 / INS 102)",
+      "additiveClass": "artificial_color",
+      "severity": "moderate",
+      "aliases": ["tartrazine", "e102", "ins 102", "ins102", "yellow 5", "fd&c yellow no. 5", "ci 19140"],
+      "rationale": "Synthetic azo dye requiring mandatory child hyperactivity warning labels in the European Union under Regulation (EC) No 1333/2008.",
+      "source": "EFSA / FSSAI",
+      "sourceUrl": "https://www.efsa.europa.eu/en/efsajournal/pub/1331"
+    },
+    {
+      "id": "sunset_yellow",
+      "canonicalName": "Sunset Yellow FCF (Yellow 6 / INS 110)",
+      "additiveClass": "artificial_color",
+      "severity": "moderate",
+      "aliases": ["sunset yellow", "e110", "ins 110", "ins110", "yellow 6", "fd&c yellow no. 6", "ci 15985"],
+      "rationale": "Petroleum-derived synthetic azo dye subject to EU Southampton warning requirements for pediatric attention and hyperactivity.",
+      "source": "EFSA",
+      "sourceUrl": "https://www.efsa.europa.eu/en/efsajournal/pub/3943"
+    },
+    {
+      "id": "allura_red",
+      "canonicalName": "Allura Red AC (Red 40 / INS 129)",
+      "additiveClass": "artificial_color",
+      "severity": "moderate",
+      "aliases": ["allura red", "e129", "ins 129", "ins129", "red 40", "fd&c red no. 40", "ci 16035"],
+      "rationale": "Synthetic azo colorant linked in animal literature to gut barrier disruption and mild hypersensitivity reactions.",
+      "source": "EFSA",
+      "sourceUrl": "https://www.efsa.europa.eu/en/efsajournal/pub/1327"
+    },
+    {
+      "id": "ponceau_4r",
+      "canonicalName": "Ponceau 4R (Cochineal Red A / INS 124)",
+      "additiveClass": "artificial_color",
+      "severity": "high",
+      "aliases": ["ponceau 4r", "e124", "ins 124", "ins124", "ci 16255"],
+      "rationale": "Synthetic azo dye banned in the United States and Canada; permitted in India under strict FSSAI limits.",
+      "source": "FSSAI / EFSA",
+      "sourceUrl": "https://www.efsa.europa.eu/en/efsajournal/pub/1328"
+    },
+    {
+      "id": "brilliant_blue",
+      "canonicalName": "Brilliant Blue FCF (Blue 1 / INS 133)",
+      "additiveClass": "artificial_color",
+      "severity": "low",
+      "aliases": ["brilliant blue", "e133", "ins 133", "ins133", "blue 1", "ci 42090"],
+      "rationale": "Triarylmethane synthetic dye approved with acceptable daily intake limits by JECFA and EFSA.",
+      "source": "EFSA / WHO JECFA",
+      "sourceUrl": "https://www.efsa.europa.eu/en/efsajournal/pub/1853"
+    },
+    {
+      "id": "aspartame",
+      "canonicalName": "Aspartame (INS 951)",
+      "additiveClass": "artificial_sweetener",
+      "severity": "high",
+      "aliases": ["aspartame", "e951", "ins 951", "ins951", "nutrasweet", "equal"],
+      "rationale": "Classified as possibly carcinogenic to humans (IARC Group 2B in 2023); JECFA reaffirmed acceptable daily intake of 0-40 mg/kg bw.",
+      "source": "IARC / WHO JECFA",
+      "sourceUrl": "https://www.who.int/news/item/14-07-2023-aspartame-hazard-and-risk-assessment-results-released"
+    },
+    {
+      "id": "acesulfame_k",
+      "canonicalName": "Acesulfame Potassium (Ace-K / INS 950)",
+      "additiveClass": "artificial_sweetener",
+      "severity": "moderate",
+      "aliases": ["acesulfame potassium", "acesulfame k", "ace-k", "e950", "ins 950", "ins950"],
+      "rationale": "High-intensity artificial sweetener often blended with aspartame or sucralose to mask bitter aftertastes.",
+      "source": "EFSA",
+      "sourceUrl": "https://www.efsa.europa.eu/en/efsajournal/pub/4447"
+    },
+    {
+      "id": "sucralose",
+      "canonicalName": "Sucralose (INS 955)",
+      "additiveClass": "artificial_sweetener",
+      "severity": "moderate",
+      "aliases": ["sucralose", "e955", "ins 955", "ins955", "splenda"],
+      "rationale": "Chlorinated sucrose derivative; stable at neutral pH but subject to ongoing studies regarding gut microbiome modulation.",
+      "source": "EFSA / WHO",
+      "sourceUrl": "https://www.efsa.europa.eu/en/efsajournal/pub/4678"
+    },
+    {
+      "id": "sodium_saccharin",
+      "canonicalName": "Sodium Saccharin (INS 954)",
+      "additiveClass": "artificial_sweetener",
+      "severity": "moderate",
+      "aliases": ["sodium saccharin", "saccharin", "e954", "ins 954", "ins954"],
+      "rationale": "Petroleum-derived non-nutritive sweetener common in oral care and diet beverages.",
+      "source": "FSSAI / EFSA",
+      "sourceUrl": "https://www.efsa.europa.eu/en/efsajournal/pub/4580"
+    },
+    {
+      "id": "mineral_oil_hair",
+      "canonicalName": "Light Liquid Paraffin (Mineral Oil / Petroleum Hydrocarbon)",
+      "additiveClass": "petroleum_filler",
+      "severity": "high",
+      "aliases": [
+        "light liquid paraffin", "mineral oil", "paraffinum liquidum", "liquid paraffin",
+        "petroleum jelly", "petrolatum", "white mineral oil", "mineral oil filler"
+      ],
+      "rationale": "Cosmetic-grade refined petroleum distillate. Permitted by CDSCO; heavily used in Indian commercial hair oils (75-85%) where it serves as a low-cost hydrophobic occlusive rather than providing bioavailable lipid nourishment.",
+      "source": "CDSCO / BIS",
+      "sourceUrl": "https://cdsco.gov.in/opencms/opencms/en/Cosmetics/Cosmetics/"
+    },
+    {
+      "id": "methylparaben",
+      "canonicalName": "Methylparaben (Preservative)",
+      "additiveClass": "preservative",
+      "severity": "moderate",
+      "aliases": ["methylparaben", "methyl paraben", "e218", "ins 218", "methyl 4-hydroxybenzoate"],
+      "rationale": "Alkyl parahydroxybenzoate preservative permitted under strict concentration limits by CDSCO and EU cosmetics regulation due to weak estrogenic affinity.",
+      "source": "EU SCCS / CDSCO",
+      "sourceUrl": "https://ec.europa.eu/health/scientific_committees/consumer_safety/docs/sccs_o_132.pdf"
+    },
+    {
+      "id": "propylparaben",
+      "canonicalName": "Propylparaben (Preservative)",
+      "additiveClass": "preservative",
+      "severity": "high",
+      "aliases": ["propylparaben", "propyl paraben", "e216", "ins 216", "propyl 4-hydroxybenzoate"],
+      "rationale": "Longer-chain paraben preservative with stricter global regulatory limits due to higher relative endocrine activity.",
+      "source": "EU SCCS / CDSCO",
+      "sourceUrl": "https://ec.europa.eu/health/scientific_committees/consumer_safety/docs/sccs_o_132.pdf"
+    },
+    {
+      "id": "sls",
+      "canonicalName": "Sodium Lauryl Sulfate (SLS)",
+      "additiveClass": "surfactant",
+      "severity": "moderate",
+      "aliases": ["sodium lauryl sulfate", "sls", "sodium dodecyl sulfate", "sds"],
+      "rationale": "Anionic detergent surfactant common in toothpastes and cleansers; clinical trials document irritation of oral mucosa and increased incidence of recurrent aphthous ulcers (canker sores).",
+      "source": "CDSCO / CIR",
+      "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/10518866/"
+    },
+    {
+      "id": "sles",
+      "canonicalName": "Sodium Laureth Sulfate (SLES)",
+      "additiveClass": "surfactant",
+      "severity": "low",
+      "aliases": ["sodium laureth sulfate", "sles", "sodium lauryl ether sulfate"],
+      "rationale": "Ethoxylated anionic surfactant providing milder foaming than SLS; process must be strictly controlled for 1,4-dioxane byproduct limits.",
+      "source": "CIR / FDA",
+      "sourceUrl": "https://www.cir-safety.org/ingredients"
+    },
+    {
+      "id": "bkc",
+      "canonicalName": "Benzalkonium Chloride (BKC / Quaternary Ammonium)",
+      "additiveClass": "industrial_disinfectant",
+      "severity": "high",
+      "aliases": ["benzalkonium chloride", "bkc", "alquildimetilbencilamonio", "quats", "quaternary ammonium"],
+      "rationale": "Cationic antimicrobial surfactant registered under BIS standards for hard surface sanitization. Veterinary toxicology reports document severe oral and dermal ulceration in domestic cats and crawling infants touching wet residue.",
+      "source": "BIS / US EPA",
+      "sourceUrl": "https://standardsbis.bsbedge.com/"
+    },
+    {
+      "id": "transfluthrin",
+      "canonicalName": "Transfluthrin (Synthetic Neurotoxic Pyrethroid)",
+      "additiveClass": "synthetic_pyrethroid",
+      "severity": "high",
+      "aliases": ["transfluthrin", "transfluthrin 1.6%", "transfluthrin a.i."],
+      "rationale": "Fast-acting volatile synthetic pyrethroid insecticide regulated by the Central Insecticides Board & Registration Committee (CIBRC). Intended for spatial insect knockdown; continuous inhalation in poorly ventilated bedrooms can induce sensory nerve irritation.",
+      "source": "CIBRC / WHO",
+      "sourceUrl": "http://cibrc.nic.in/"
+    },
+    {
+      "id": "prallethrin",
+      "canonicalName": "Prallethrin (Synthetic Pyrethroid)",
+      "additiveClass": "synthetic_pyrethroid",
+      "severity": "high",
+      "aliases": ["prallethrin", "prallethrin a.i."],
+      "rationale": "Pyrethroid active ingredient used in liquid vaporizers and mosquito mats; regulated under Insecticides Act by CIBRC.",
+      "source": "CIBRC",
+      "sourceUrl": "http://cibrc.nic.in/"
+    },
+    {
+      "id": "talc_powder",
+      "canonicalName": "Purified Talc (Hydrated Magnesium Silicate)",
+      "additiveClass": "pulmonary_inhalant",
+      "severity": "high",
+      "aliases": ["purified talc", "talc", "magnesium silicate", "talcum powder"],
+      "rationale": "Mineral powder. Pediatric regulatory bodies advise against loose dusting powder around infants due to acute pulmonary aspiration and chemical pneumonitis hazards.",
+      "source": "CDSCO / AAP",
+      "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/2237092/"
+    },
+    {
+      "id": "chloroxylenol",
+      "canonicalName": "Chloroxylenol (PCMX Disinfectant)",
+      "additiveClass": "industrial_disinfectant",
+      "severity": "moderate",
+      "aliases": ["chloroxylenol", "pcmx", "4-chloro-3,5-dimethylphenol"],
+      "rationale": "Broad-spectrum chlorinated phenolic antimicrobial used in bar soaps and household antiseptics. Can cause contact skin sensitization.",
+      "source": "CDSCO / US EPA",
+      "sourceUrl": "https://cdsco.gov.in/"
+    },
+    {
+      "id": "hydrochloric_acid",
+      "canonicalName": "Hydrochloric Acid (Industrial Mineral Acid 10.5%)",
+      "additiveClass": "industrial_disinfectant",
+      "severity": "high",
+      "aliases": ["hydrochloric acid", "hcl", "hydrogen chloride", "muriatic acid"],
+      "rationale": "Corrosive mineral acid formulated in heavy toilet bowl cleaners under BIS standards; produces irritating fumes and severe chemical burns upon tissue contact.",
+      "source": "BIS / OSHA",
+      "sourceUrl": "https://standardsbis.bsbedge.com/"
+    },
+    {
+      "id": "palmolein_oil",
+      "canonicalName": "Palmolein / Refined Palm Oil",
+      "additiveClass": "refined_tropical_fat",
+      "severity": "moderate",
+      "aliases": ["palmolein", "palm oil", "edible vegetable oil (palmolein)", "fractionated palm oil", "taad ka tel"],
+      "rationale": "High-saturated tropical oil (~50% saturated palmitic acid). Extensively used in Indian ultra-processed namkeens and instant noodles for thermal fry stability.",
+      "source": "FSSAI / WHO",
+      "sourceUrl": "https://www.who.int/news-room/fact-sheets/detail/healthy-diet"
+    },
+    {
+      "id": "cottonseed_oil",
+      "canonicalName": "Refined Cottonseed Oil",
+      "additiveClass": "refined_tropical_fat",
+      "severity": "moderate",
+      "aliases": ["cottonseed oil", "edible cottonseed oil", "kapasiya tel"],
+      "rationale": "Industrial commodity cooking oil high in omega-6 linoleic acid, commonly blended into commercial fried namkeens.",
+      "source": "FSSAI",
+      "sourceUrl": "https://fssai.gov.in/"
+    },
+    {
+      "id": "hydrogenated_vegetable_oil",
+      "canonicalName": "Hydrogenated Vegetable Fat (Vanaspati)",
+      "additiveClass": "refined_tropical_fat",
+      "severity": "high",
+      "aliases": ["hydrogenated vegetable oil", "vanaspati", "dalda", "partially hydrogenated oil", "vegetable shortening"],
+      "rationale": "Industrial semi-solid fat. FSSAI mandates trans-fatty acid levels below 2%; historically a major dietary source of industrial trans-fats.",
+      "source": "FSSAI / WHO",
+      "sourceUrl": "https://fssai.gov.in/upload/press_release/2021/01/60000bc1b9134Press_Release_Trans_Fat_01_01_2021.pdf"
+    }
+  ]
+}
