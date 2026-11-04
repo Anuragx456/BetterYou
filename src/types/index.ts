@@ -13,9 +13,13 @@ export interface MacroBreakdown {
 export interface MealAnalysisResult extends MacroBreakdown {
   dishName: string;
   estimatedWeightGrams: number;
-  confidenceScore: number; // 0.0 to 1.0
+  confidenceScore?: number; // Deprecated trust signal
+  isPlausible: boolean; // Thermodynamic macro consistency check (4P + 4C + 9F ~= kcal within 20%)
+  plausibilityDeviation?: number; // Percentage deviation from calculated kcal
+  plausibilityWarning?: string | null;
   ingredientsDetected: string[];
   generatedBy?: string;
+  fallbackToManual?: boolean; // Set if schema validation or parsing failed and manual entry is needed
 }
 
 export interface MealLog {
