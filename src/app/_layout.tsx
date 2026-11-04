@@ -6,6 +6,10 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import { colors } from '../theme/colors';
 import { useFitnessStore } from '../store/useFitnessStore';
 import { initNetInfoQueueListener, stopNetInfoQueueListener } from '../services/scanQueueService';
+import { initTelemetry } from '../services/telemetryService';
+
+// Initialize privacy-safe telemetry early in lifecycle
+initTelemetry();
 
 export default function RootLayout() {
   useEffect(() => {

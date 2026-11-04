@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../theme/colors';
+import { captureException } from '../services/telemetryService';
 
 interface Props {
   children: ReactNode;
@@ -37,6 +38,9 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('[ErrorBoundary caught an unhandled error]:', error, errorInfo);
+    captureException(error, {
+      componentStack: errorInfo.componentStack,
+    });
     this.setState({ errorInfo });
   }
 
