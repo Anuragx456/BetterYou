@@ -5,11 +5,18 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { colors } from '../theme/colors';
 import { useFitnessStore } from '../store/useFitnessStore';
+import { initNetInfoQueueListener, stopNetInfoQueueListener } from '../services/scanQueueService';
 
 export default function RootLayout() {
   useEffect(() => {
     // Initialize normalized SQLite database and verify migrations
     useFitnessStore.getState().loadDataFromDb().catch(() => {});
+    // Listen for connectivity to retry pending offline scans
+    initNetInfoQueueListener().catch(() => {});
+
+    return () => {
+      stopNetInfoQueueListener();
+    };
   }, []);
 
   return (
