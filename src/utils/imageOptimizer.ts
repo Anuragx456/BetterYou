@@ -1,5 +1,3 @@
-import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
-
 /**
  * Downscales and compresses camera captures and gallery selections before
  * sending to Gemini Vision API.
@@ -16,6 +14,7 @@ export async function optimizeImageForAiVision(
     throw new Error('No image URI provided to image optimizer.');
   }
 
+  const { ImageManipulator, SaveFormat } = await import('expo-image-manipulator');
   const context = ImageManipulator.manipulate(uri);
   context.resize({ width: maxWidth });
   const imageRef = await context.renderAsync();

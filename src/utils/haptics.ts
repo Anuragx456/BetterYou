@@ -1,70 +1,94 @@
-import * as Haptics from 'expo-haptics';
-import { Platform } from 'react-native';
+let HapticsModule: any = null;
+
+async function getHaptics() {
+  if (HapticsModule) return HapticsModule;
+  if (typeof window !== 'undefined' || (globalThis as any).nativeCallSyncHook) {
+    try {
+      HapticsModule = await import('expo-haptics');
+    } catch {
+      HapticsModule = null;
+    }
+  }
+  return HapticsModule;
+}
 
 /**
  * Safe, platform-guarded haptics utility.
- * Silently catches errors in unsupported environments (e.g. web, simulators).
+ * Silently catches errors in unsupported environments (e.g. web, simulators, headless tests).
  */
-
 export const safeHaptics = {
-  impactLight: async () => {
-    if (Platform.OS === 'web') return;
+  impactLight: async (): Promise<void> => {
     try {
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const Haptics = await getHaptics();
+      if (Haptics?.impactAsync) {
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle?.Light ?? 'light');
+      }
     } catch {
       // Ignore unsupported devices
     }
   },
 
-  impactMedium: async () => {
-    if (Platform.OS === 'web') return;
+  impactMedium: async (): Promise<void> => {
     try {
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      const Haptics = await getHaptics();
+      if (Haptics?.impactAsync) {
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle?.Medium ?? 'medium');
+      }
     } catch {
       // Ignore unsupported devices
     }
   },
 
-  impactHeavy: async () => {
-    if (Platform.OS === 'web') return;
+  impactHeavy: async (): Promise<void> => {
     try {
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      const Haptics = await getHaptics();
+      if (Haptics?.impactAsync) {
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle?.Heavy ?? 'heavy');
+      }
     } catch {
       // Ignore unsupported devices
     }
   },
 
-  selection: async () => {
-    if (Platform.OS === 'web') return;
+  selection: async (): Promise<void> => {
     try {
-      await Haptics.selectionAsync();
+      const Haptics = await getHaptics();
+      if (Haptics?.selectionAsync) {
+        await Haptics.selectionAsync();
+      }
     } catch {
       // Ignore unsupported devices
     }
   },
 
-  success: async () => {
-    if (Platform.OS === 'web') return;
+  success: async (): Promise<void> => {
     try {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      const Haptics = await getHaptics();
+      if (Haptics?.notificationAsync) {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType?.Success ?? 'success');
+      }
     } catch {
       // Ignore unsupported devices
     }
   },
 
-  warning: async () => {
-    if (Platform.OS === 'web') return;
+  warning: async (): Promise<void> => {
     try {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      const Haptics = await getHaptics();
+      if (Haptics?.notificationAsync) {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType?.Warning ?? 'warning');
+      }
     } catch {
       // Ignore unsupported devices
     }
   },
 
-  error: async () => {
-    if (Platform.OS === 'web') return;
+  error: async (): Promise<void> => {
     try {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      const Haptics = await getHaptics();
+      if (Haptics?.notificationAsync) {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType?.Error ?? 'error');
+      }
     } catch {
       // Ignore unsupported devices
     }
@@ -73,17 +97,19 @@ export const safeHaptics = {
   /**
    * Double-pulse celebration or timer finished alert
    */
-  timerFinished: async () => {
-    if (Platform.OS === 'web') return;
+  timerFinished: async (): Promise<void> => {
     try {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setTimeout(async () => {
-        try {
-          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-        } catch {
-          // Ignore
-        }
-      }, 250);
+      const Haptics = await getHaptics();
+      if (Haptics?.notificationAsync) {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType?.Success ?? 'success');
+        setTimeout(async () => {
+          try {
+            await Haptics.impactAsync(Haptics.ImpactFeedbackStyle?.Heavy ?? 'heavy');
+          } catch {
+            // Ignore
+          }
+        }, 250);
+      }
     } catch {
       // Ignore
     }

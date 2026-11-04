@@ -1,5 +1,3 @@
-import { AppState, AppStateStatus, Platform } from 'react-native';
-
 let NotificationsModule: any = null;
 
 // Lazy load expo-notifications to prevent errors in headless Node/Bun test environments
@@ -21,6 +19,17 @@ async function getNotifications() {
     }
   }
   return NotificationsModule;
+}
+
+async function getReactNative() {
+  if (typeof window !== 'undefined' || (globalThis as any).nativeCallSyncHook) {
+    try {
+      return await import('react-native');
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 export interface RestTimerSession {
@@ -45,7 +54,8 @@ export async function scheduleRestTimerNotification(
 
   try {
     const Notifications = await getNotifications();
-    if (Notifications && Platform.OS !== 'web') {
+    const rn = await getReactNative();
+    if (Notifications && rn?.Platform?.OS !== 'web') {
       const { status } = await Notifications.getPermissionsAsync();
       let hasPermission = status === 'granted';
       if (!hasPermission) {
@@ -87,7 +97,8 @@ export async function cancelRestTimerNotification(): Promise<void> {
   if (activeRestSession?.notificationId) {
     try {
       const Notifications = await getNotifications();
-      if (Notifications && Platform.OS !== 'web') {
+      const rn = await getReactNative();
+      if (Notifications && rn?.Platform?.OS !== 'web') {
         await Notifications.cancelScheduledNotificationAsync(activeRestSession.notificationId);
       }
     } catch {
@@ -111,14 +122,21 @@ export function getRemainingRestSeconds(): number {
  * Subscribes to AppState changes so the app resyncs remaining seconds when foregrounded.
  */
 export function subscribeToForegroundRestSync(onForegroundSync: (remainingSec: number) => void): () => void {
-  const subscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
-    if (nextState === 'active') {
-      const remaining = getRemainingRestSeconds();
-      onForegroundSync(remaining);
+  let removeListener: (() => void) | null = null;
+
+  getReactNative().then((rn) => {
+    if (rn?.AppState) {
+      const subscription = rn.AppState.addEventListener('change', (nextState: string) => {
+        if (nextState === 'active') {
+          const remaining = getRemainingRestSeconds();
+          onForegroundSync(remaining);
+        }
+      });
+      removeListener = () => subscription.remove();
     }
-  });
+  }).catch(() => {});
 
   return () => {
-    subscription.remove();
+    if (removeListener) removeListener();
   };
 }
