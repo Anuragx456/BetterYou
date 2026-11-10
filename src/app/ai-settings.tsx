@@ -321,6 +321,29 @@ export default function AiSettingsScreen() {
           </View>
         </View>
 
+        {/* Navigation Card to Detailed Usage & Quota */}
+        <View style={styles.section}>
+          <Pressable
+            style={({ pressed }) => [styles.usageNavCard, pressed && styles.pressed]}
+            onPress={() => router.push('/api-usage')}
+            accessibilityRole="button"
+            accessibilityLabel="View detailed Gemini API usage and token metrics"
+          >
+            <View style={styles.usageNavCardLeft}>
+              <View style={styles.usageNavIconCircle}>
+                <Ionicons name="speedometer-outline" size={20} color={colors.primary} />
+              </View>
+              <View style={styles.usageNavMeta}>
+                <Text style={styles.usageNavTitle}>Detailed API Usage & Quota</Text>
+                <Text style={styles.usageNavSubtitle}>
+                  View scans, token consumption, and rate limits
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+          </Pressable>
+        </View>
+
         {/* Section: Gemini Model */}
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
@@ -762,5 +785,44 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: colors.textInverse,
+  },
+  usageNavCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.card,
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+  },
+  usageNavCardLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  usageNavIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.primaryMuted,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  usageNavMeta: {
+    flex: 1,
+  },
+  usageNavTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  usageNavSubtitle: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 2,
   },
 });

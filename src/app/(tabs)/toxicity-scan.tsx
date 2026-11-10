@@ -20,7 +20,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { EditProductModal } from '../../components/EditProductModal';
 import { ManualProductModal } from '../../components/ManualProductModal';
-import { analyzeIngredientsImage } from '../../services/aiVisionService';
+import { RetryProductModal } from '../../components/RetryProductModal';
+import { VoiceInputModal } from '../../components/VoiceInputModal';
+import { analyzeIngredientsImage, analyzeProductText } from '../../services/aiVisionService';
 import { optimizeImageForAiVision } from '../../utils/imageOptimizer';
 import { fetchProductByBarcode, recalculateToxicityReport } from '../../services/barcodeService';
 import { useFitnessStore } from '../../store/useFitnessStore';
@@ -138,9 +140,11 @@ export default function ToxicityScanScreen() {
   const [capturedImageUri, setCapturedImageUri] = useState<string | null>(null);
   const [isSaved, setIsSaved] = useState<boolean>(false);
   const [isEditModalVisible, setIsEditModalVisible] = useState<boolean>(false);
+  const [isRetryModalVisible, setIsRetryModalVisible] = useState<boolean>(false);
   const [isProcessingBarcode, setIsProcessingBarcode] = useState<boolean>(false);
   const [barcodeSearchPill, setBarcodeSearchPill] = useState<string | null>(null);
   const [isTypeProductModalVisible, setIsTypeProductModalVisible] = useState<boolean>(false);
+  const [isVoiceModalVisible, setIsVoiceModalVisible] = useState<boolean>(false);
 
   // Handle Edit Save
   const handleSaveEdit = (newName: string, newIngredients: string[]) => {
@@ -157,7 +161,52 @@ export default function ToxicityScanScreen() {
     setIsSaved(false);
     setIsProcessingBarcode(false);
     setBarcodeSearchPill(null);
+    setIsRetryModalVisible(false);
     setScreenState('scanning');
+  };
+
+  // -------------------------------------------------------------
+  // RETRY WITH DIFFERENT PRODUCT NAME HANDLER
+  // -------------------------------------------------------------
+  const handleRetryWithProductName = async (newProductName: string) => {
+    const cleanName = newProductName.trim();
+    if (!cleanName) return;
+
+    setScreenState('loading');
+    safeHaptics.impactMedium();
+
+    try {
+      let updatedReport: ToxicityReport;
+
+      if (capturedImageUri) {
+        // Re-analyze existing captured photo with the new product name hint
+        try {
+          const optimized = await optimizeImageForAiVision(capturedImageUri, 1024);
+          updatedReport = await analyzeIngredientsImage(optimized.base64 || '', {
+            productNameHint: cleanName,
+          });
+        } catch {
+          // If image re-analysis encounters issues, fall back to product formulation database
+          updatedReport = await analyzeProductText(cleanName);
+        }
+      } else {
+        // Barcode or manual scan: query Indian chemical & formulation database
+        updatedReport = await analyzeProductText(cleanName);
+      }
+
+      setReport(updatedReport);
+      setIsSaved(false);
+      setScreenState('report');
+      safeHaptics.success();
+      Alert.alert(
+        'Product Re-screened',
+        `Screening updated for "${updatedReport.productName || cleanName}". Safety score, chemical additives, and regulatory standards re-calculated.`
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      Alert.alert('Retry Incomplete', `Could not re-analyze "${cleanName}": ${msg}`);
+      setScreenState('report');
+    }
   };
 
   // -------------------------------------------------------------
@@ -207,9 +256,9 @@ export default function ToxicityScanScreen() {
       });
 
       if (photo?.uri) {
-        setCapturedImageUri(photo.uri);
         setScreenState('loading');
         const optimized = await optimizeImageForAiVision(photo.uri, 1024);
+        setCapturedImageUri(optimized.uri || photo.uri);
         const toxReport = await analyzeIngredientsImage(optimized.base64 || '');
         setReport(toxReport);
         setScreenState('report');
@@ -240,9 +289,9 @@ export default function ToxicityScanScreen() {
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
-        setCapturedImageUri(asset.uri);
         setScreenState('loading');
         const optimized = await optimizeImageForAiVision(asset.uri, 1024);
+        setCapturedImageUri(optimized.uri || asset.uri);
         const toxReport = await analyzeIngredientsImage(optimized.base64 || '');
         setReport(toxReport);
         setScreenState('report');
@@ -458,6 +507,23 @@ export default function ToxicityScanScreen() {
                 <Ionicons name="pencil" size={12} color={colors.textSecondary} />
               </Pressable>
             </View>
+
+            {/* Feature: Retry with Different Product Name */}
+            <Pressable
+              style={({ pressed }) => [styles.retryProductBtnClean, pressed && styles.pressed]}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              onPress={() => {
+                safeHaptics.selection();
+                setIsRetryModalVisible(true);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Wrong product detected? Retry with actual product name"
+            >
+              <Ionicons name="swap-horizontal" size={13} color={colors.primary} />
+              <Text style={styles.retryProductBtnTextClean} allowFontScaling>
+                Wrong product? Retry with actual name
+              </Text>
+            </Pressable>
           </View>
 
           {/* Plain-English Verdict Card */}
@@ -627,6 +693,17 @@ export default function ToxicityScanScreen() {
             onSave={handleSaveEdit}
           />
         )}
+
+        {/* Retry with Different Product Name Modal */}
+        {isRetryModalVisible && (
+          <RetryProductModal
+            visible={isRetryModalVisible}
+            currentProductName={report.productName || ''}
+            hasCapturedImage={Boolean(capturedImageUri)}
+            onClose={() => setIsRetryModalVisible(false)}
+            onRetry={handleRetryWithProductName}
+          />
+        )}
       </SafeAreaView>
     );
   }
@@ -688,6 +765,22 @@ export default function ToxicityScanScreen() {
           </Pressable>
 
           <Pressable
+            style={({ pressed }) => [
+              styles.grantPermissionBtn,
+              { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.cardBorder, marginTop: 10 },
+              pressed && styles.pressed,
+            ]}
+            onPress={() => setIsVoiceModalVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Speak product name"
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Ionicons name="mic-outline" size={18} color={colors.primary} />
+              <Text style={[styles.grantPermissionText, { color: colors.text }]}>Speak Product Name</Text>
+            </View>
+          </Pressable>
+
+          <Pressable
             style={({ pressed }) => [styles.demoBtn, pressed && styles.pressed]}
             onPress={() => handleSimulateDemoOCR('hair_oil')}
           >
@@ -699,6 +792,19 @@ export default function ToxicityScanScreen() {
             visible={isTypeProductModalVisible}
             onClose={() => setIsTypeProductModalVisible(false)}
             onSubmitResult={(newReport) => {
+              setReport(newReport);
+              setCapturedImageUri(null);
+              setIsSaved(false);
+              setScreenState('report');
+            }}
+          />
+        )}
+        {isVoiceModalVisible && (
+          <VoiceInputModal
+            visible={isVoiceModalVisible}
+            mode="product"
+            onClose={() => setIsVoiceModalVisible(false)}
+            onSubmitProductResult={(newReport) => {
               setReport(newReport);
               setCapturedImageUri(null);
               setIsSaved(false);
@@ -838,20 +944,41 @@ export default function ToxicityScanScreen() {
           </View>
 
           <Text style={styles.privacyCaptionClean}>{AI_PRIVACY_NOTICE}</Text>
-          {/* Shutter & Gallery Action Row */}
+          {/* Shutter, Gallery, Speak & Type Action Row */}
           <View style={styles.shutterRow}>
             <Pressable
               style={({ pressed }) => [styles.sideBarBtn, pressed && styles.pressed]}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               onPress={handlePickLabelFromGallery}
+              accessibilityRole="button"
+              accessibilityLabel="Pick ingredient label photo from gallery"
             >
-              <Ionicons name="images" size={26} color={colors.white} />
+              <Ionicons name="images" size={24} color={colors.white} />
               <Text style={styles.sideBarBtnLabel}>Gallery</Text>
+            </Pressable>
+
+            {/* Voice Product Button */}
+            <Pressable
+              style={({ pressed }) => [styles.sideBarBtn, pressed && styles.pressed]}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              onPress={() => {
+                safeHaptics.impactLight();
+                setIsVoiceModalVisible(true);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Add product by speaking"
+            >
+              <View style={styles.voiceBtnCircle}>
+                <Ionicons name="mic" size={18} color={colors.primary} />
+              </View>
+              <Text style={[styles.sideBarBtnLabel, { color: colors.primaryLight }]}>Speak</Text>
             </Pressable>
 
             <Pressable
               style={({ pressed }) => [styles.shutterRing, pressed && styles.pressed]}
               onPress={handleCaptureLabelPhoto}
+              accessibilityRole="button"
+              accessibilityLabel="Capture photo of ingredient label"
             >
               <View style={styles.shutterCore} />
             </Pressable>
@@ -860,8 +987,10 @@ export default function ToxicityScanScreen() {
               style={({ pressed }) => [styles.sideBarBtn, pressed && styles.pressed]}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               onPress={() => setIsTypeProductModalVisible(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Type product name manually"
             >
-              <Ionicons name="create-outline" size={26} color={colors.primary} />
+              <Ionicons name="create-outline" size={24} color={colors.white} />
               <Text style={styles.sideBarBtnLabel}>Type Product</Text>
             </Pressable>
           </View>
@@ -872,6 +1001,19 @@ export default function ToxicityScanScreen() {
             visible={isTypeProductModalVisible}
             onClose={() => setIsTypeProductModalVisible(false)}
             onSubmitResult={(newReport) => {
+              setReport(newReport);
+              setCapturedImageUri(null);
+              setIsSaved(false);
+              setScreenState('report');
+            }}
+          />
+        )}
+        {isVoiceModalVisible && (
+          <VoiceInputModal
+            visible={isVoiceModalVisible}
+            mode="product"
+            onClose={() => setIsVoiceModalVisible(false)}
+            onSubmitProductResult={(newReport) => {
               setReport(newReport);
               setCapturedImageUri(null);
               setIsSaved(false);
@@ -1115,7 +1257,17 @@ const styles = StyleSheet.create({
   sideBarBtn: {
     alignItems: 'center',
     gap: 4,
-    minWidth: 60,
+    minWidth: 54,
+  },
+  voiceBtnCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.primaryMuted,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sideBarBtnLabel: {
     color: colors.white,
@@ -1270,7 +1422,7 @@ const styles = StyleSheet.create({
     borderRadius: 80,
     backgroundColor: colors.surfaceSubtle,
     borderWidth: 6,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
+    borderColor: colors.cardBorder,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
@@ -1332,6 +1484,24 @@ const styles = StyleSheet.create({
   },
   inlineEditBtnClean: {
     padding: 4,
+  },
+  retryProductBtnClean: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.primaryMuted,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.25)',
+    alignSelf: 'center',
+  },
+  retryProductBtnTextClean: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primary,
   },
 
   // Verdict Card
@@ -1513,7 +1683,7 @@ const styles = StyleSheet.create({
     color: colors.danger,
   },
   rationaleBox: {
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    backgroundColor: colors.surfaceSubtle,
     borderRadius: 8,
     padding: 8,
     marginTop: 8,

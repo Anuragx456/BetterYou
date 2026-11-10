@@ -92,6 +92,10 @@ export async function saveImageToDocuments(
       from: tempUri,
       to: destinationUri,
     });
+    // Clean up temporary capture/manipulated file from cache immediately
+    if (tempUri.includes('cache') || tempUri.includes('ImageManipulator')) {
+      fs.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
+    }
     return relativePath;
   } catch (err: unknown) {
     console.warn(`[imageManager] Failed to copy image to documentDirectory: ${err}`);

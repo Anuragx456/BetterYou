@@ -1,35 +1,58 @@
 /**
- * Centralized Theme Tokens - Dark Mode First
- * High-contrast, fitness & nutrition optimized design system
+ * Centralized Theme Tokens - Modern Soft Fitness & Wellness Design System
+ * Clean light palette inspired by Scandinavian health & fitness interfaces
  */
 
 export const colors = {
-  // Base Backgrounds - Obsidian & Soft Charcoal
-  background: '#0A0C10',
-  backgroundSecondary: '#12151D',
-  card: '#161922',
-  cardElevated: '#1D222E',
-  cardBorder: 'rgba(255, 255, 255, 0.08)',
+  // Base Canvas & Surfaces - Light, Clean & Soft
+  background: '#F7F8FA',
+  backgroundSecondary: '#FFFFFF',
+  card: '#FFFFFF',
+  cardElevated: '#FFFFFF',
+  cardBorder: '#ECEEF2',
+  cardHover: '#F1F3F6',
 
-  // Brand / Action Accents - Refined Emerald
-  primary: '#10B981',
-  primaryLight: '#34D399',
-  primaryDark: '#059669',
-  primaryMuted: 'rgba(16, 185, 129, 0.12)',
+  // Brand / Action Accents - Signature Peach / Coral Salmon
+  primary: '#FF7A59',
+  primaryLight: '#FFA085',
+  primaryDark: '#E05E3D',
+  primaryMuted: '#FFEDE8',
+  primaryActive: '#E05E3D',
 
-  secondary: '#6366F1',
-  secondaryLight: '#818CF8',
-  secondaryMuted: 'rgba(99, 102, 241, 0.12)',
+  // Secondary Accents - Sky Blue
+  secondary: '#0284C7',
+  secondaryLight: '#38BDF8',
+  secondaryMuted: '#E0F2FE',
 
-  // Nutrition Macro Tokens - Minimalist, Restrained Tones
-  calories: '#F59E0B',
-  caloriesMuted: 'rgba(245, 158, 11, 0.12)',
-  protein: '#38BDF8',
-  proteinMuted: 'rgba(56, 189, 248, 0.12)',
-  carbs: '#34D399',
-  carbsMuted: 'rgba(52, 211, 153, 0.12)',
-  fat: '#F472B6',
-  fatMuted: 'rgba(244, 114, 182, 0.12)',
+  // Soft Bento & Pastel Surfaces
+  softBlue: '#E0F2FE',
+  softBlueText: '#0369A1',
+  softBlueBorder: '#BAE6FD',
+
+  softGreen: '#D8F3DC',
+  softGreenText: '#1B4332',
+  softGreenBorder: '#B7E4C7',
+
+  softOrange: '#FFE8D6',
+  softOrangeText: '#9C4221',
+  softOrangeBorder: '#FFD7BA',
+
+  heroBlue: '#DCEEFF',
+  heroBlueDark: '#1E40AF',
+
+  // High-contrast Dark Widgets (e.g., Interval Timer)
+  charcoalWidget: '#181A20',
+  charcoalWidgetCard: '#242730',
+
+  // Nutrition Macro Tokens
+  calories: '#FF7A59',
+  caloriesMuted: '#FFEDE8',
+  protein: '#0284C7',
+  proteinMuted: '#E0F2FE',
+  carbs: '#10B981',
+  carbsMuted: '#D8F3DC',
+  fat: '#F43F5E',
+  fatMuted: '#FFE4E6',
 
   // Toxicity & Risk Scale
   safetyClean: '#10B981',   // 71-100 Score
@@ -42,24 +65,22 @@ export const colors = {
   nova3: '#F59E0B',
   nova4: '#EF4444',
 
-  // Typography & Content - Clean, Crisp
-  text: '#F9FAFB',
-  textSecondary: '#9CA3AF',
-  textMuted: '#94A3B8',     // Subtle supporting text
-  textInverse: '#0A0C10',
+  // Typography & Content - Clean, High Contrast
+  text: '#181A20',
+  textSecondary: '#717684',
+  textMuted: '#9CA3AF',
+  textInverse: '#FFFFFF',
 
   // Interactive & Surfaces
-  borderSubtle: 'rgba(255, 255, 255, 0.06)',
-  cardHover: '#1A1E29',
-  primaryActive: '#059669',
-  surfaceSubtle: 'rgba(255, 255, 255, 0.03)',
-  hairline: 'rgba(255, 255, 255, 0.07)',
+  borderSubtle: '#ECEEF2',
+  surfaceSubtle: '#F3F4F6',
+  hairline: '#E5E7EB',
 
   // Status & Utility
   success: '#10B981',
   warning: '#F59E0B',
   danger: '#EF4444',
-  info: '#38BDF8',
+  info: '#0284C7',
 
   white: '#FFFFFF',
   black: '#000000',
@@ -67,4 +88,3 @@ export const colors = {
 } as const;
 
 export type ThemeColors = typeof colors;
-

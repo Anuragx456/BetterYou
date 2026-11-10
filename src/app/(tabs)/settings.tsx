@@ -20,6 +20,7 @@ import {
 import { getAppLanguage, setAppLanguage, SupportedLanguage } from '../../i18n';
 import { useFitnessStore } from '../../store/useFitnessStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
+import { useGeminiUsageStore } from '../../store/useGeminiUsageStore';
 import { colors } from '../../theme/colors';
 
 export default function SettingsScreen() {
@@ -35,6 +36,7 @@ export default function SettingsScreen() {
   const selectedModel = useSettingsStore((state) => state.selectedModel);
   const isCustomModel = useSettingsStore((state) => state.isCustomModel);
   const customModelName = useSettingsStore((state) => state.customModelName);
+  const totalCalls = useGeminiUsageStore((state) => state.totalCalls);
 
   const [currentLang, setCurrentLangState] = useState<SupportedLanguage>(getAppLanguage());
 
@@ -232,16 +234,43 @@ export default function SettingsScreen() {
               </View>
               <View style={styles.navRowMeta}>
                 <Text style={styles.navRowTitle} allowFontScaling>
-                  AI Settings
+                  AI Model & Key Settings
                 </Text>
                 <Text style={styles.navRowSubtitle} allowFontScaling>
-                  Gemini API key & active model
+                  Gemini API key & model selection
                 </Text>
               </View>
               <View style={styles.navRight}>
                 <View style={styles.valueBadge}>
                   <Text style={styles.valueBadgeText} allowFontScaling>
                     {activeModelTitle}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+              </View>
+            </Pressable>
+
+            <Pressable
+              style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
+              onPress={() => router.push('/api-usage')}
+              accessibilityRole="button"
+              accessibilityLabel="View detailed Gemini API usage and quota"
+            >
+              <View style={[styles.iconBadge, { backgroundColor: 'rgba(56, 189, 248, 0.12)' }]}>
+                <Ionicons name="speedometer-outline" size={18} color={colors.protein} />
+              </View>
+              <View style={styles.navRowMeta}>
+                <Text style={styles.navRowTitle} allowFontScaling>
+                  API Key Usage & Quota
+                </Text>
+                <Text style={styles.navRowSubtitle} allowFontScaling>
+                  Scans, tokens, costs & rate limits
+                </Text>
+              </View>
+              <View style={styles.navRight}>
+                <View style={styles.valueBadge}>
+                  <Text style={[styles.valueBadgeText, { color: colors.protein }]} allowFontScaling>
+                    {totalCalls > 0 ? `${totalCalls} scans` : 'Free Tier'}
                   </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />

@@ -15,6 +15,7 @@ export interface PreviousExerciseValues {
 
 /**
  * Retrieves values and sets from the user's most recent completed session for this exercise.
+ * Optimized single-pass search without array allocation or sorting overhead.
  */
 export function getPreviousSessionExerciseValues(
   exerciseName: string,
@@ -23,19 +24,26 @@ export function getPreviousSessionExerciseValues(
   if (!exerciseName || !workouts || workouts.length === 0) return null;
 
   const cleanName = exerciseName.toLowerCase().trim();
+  let latestSession: WorkoutSession | null = null;
+  let latestTime = -1;
 
-  // Search past workouts in reverse chronological order
-  const sorted = [...workouts].sort((a, b) => {
-    const da = new Date(a.completedAt || a.startedAt || 0).getTime();
-    const db = new Date(b.completedAt || b.startedAt || 0).getTime();
-    return db - da;
-  });
-
-  for (const session of sorted) {
+  for (let i = 0; i < workouts.length; i++) {
+    const session = workouts[i];
     const ex = session.exercises?.find((e) => e.name.toLowerCase().trim() === cleanName);
     if (ex && ex.sets.some((s) => s.completed && s.weightKg > 0)) {
+      const time = new Date(session.completedAt || session.startedAt || 0).getTime();
+      if (time > latestTime) {
+        latestTime = time;
+        latestSession = session;
+      }
+    }
+  }
+
+  if (latestSession) {
+    const ex = latestSession.exercises?.find((e) => e.name.toLowerCase().trim() === cleanName);
+    if (ex) {
       const completedSets = ex.sets.filter((s) => s.completed && s.weightKg > 0);
-      const dateStr = (session.completedAt || session.startedAt || '').split('T')[0] || '';
+      const dateStr = (latestSession.completedAt || latestSession.startedAt || '').split('T')[0] || '';
       const summaryText = completedSets.map((s) => `${s.weightKg}kg×${s.reps}`).join(', ');
 
       return {

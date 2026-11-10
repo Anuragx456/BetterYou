@@ -104,6 +104,7 @@ export default function WorkoutsScreen() {
   const [customExerciseName, setCustomExerciseName] = useState<string>('');
   const [selectedHistoryExercise, setSelectedHistoryExercise] = useState<string | null>(null);
   const [editingWorkout, setEditingWorkout] = useState<WorkoutSession | null>(null);
+  const [workoutTab, setWorkoutTab] = useState<'practise' | 'timer' | 'checkin'>('practise');
 
   // Direct set update handler (fired onEndEditing, not per keystroke)
   const handleEndEditingUpdate = useCallback(
@@ -360,11 +361,11 @@ export default function WorkoutsScreen() {
   const listHeader = useMemo(
     () => (
       <View>
-        {/* Header */}
+        {/* Header - Matching Reference Screen 4 */}
         <View style={styles.inactiveHeaderRow}>
           <View>
             <Text style={styles.inactiveHeaderTitle} allowFontScaling>
-              Workouts
+              Workout Diary
             </Text>
             <Text style={styles.inactiveHeaderSubtitle} allowFontScaling>
               TRAINING & PROGRESSION
@@ -378,7 +379,7 @@ export default function WorkoutsScreen() {
               accessibilityRole="button"
               accessibilityLabel="Export workouts data to CSV or JSON"
             >
-              <Ionicons name="download-outline" size={16} color={colors.primary} />
+              <Ionicons name="create-outline" size={17} color={colors.text} />
             </Pressable>
 
             <Pressable
@@ -393,10 +394,114 @@ export default function WorkoutsScreen() {
             >
               <Ionicons name="add" size={16} color={colors.textInverse} />
               <Text style={styles.startEmptyBtnText} allowFontScaling>
-                Start Empty
+                Start
               </Text>
             </Pressable>
           </View>
+        </View>
+
+        {/* Segmented Pill Tabs: Practise, Timer, Check in */}
+        <View style={styles.segmentedTabsRow}>
+          <Pressable
+            style={[
+              styles.segmentedTab,
+              workoutTab === 'practise' && styles.segmentedTabActive,
+            ]}
+            onPress={() => {
+              safeHaptics.selection();
+              setWorkoutTab('practise');
+            }}
+          >
+            <Text
+              style={[
+                styles.segmentedTabText,
+                workoutTab === 'practise' && styles.segmentedTabTextActive,
+              ]}
+            >
+              Practise
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={[
+              styles.segmentedTab,
+              workoutTab === 'timer' && styles.segmentedTabActive,
+            ]}
+            onPress={() => {
+              safeHaptics.selection();
+              setWorkoutTab('timer');
+            }}
+          >
+            <Text
+              style={[
+                styles.segmentedTabText,
+                workoutTab === 'timer' && styles.segmentedTabTextActive,
+              ]}
+            >
+              Timer
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={[
+              styles.segmentedTab,
+              workoutTab === 'checkin' && styles.segmentedTabActive,
+            ]}
+            onPress={() => {
+              safeHaptics.selection();
+              setWorkoutTab('checkin');
+            }}
+          >
+            <Text
+              style={[
+                styles.segmentedTabText,
+                workoutTab === 'checkin' && styles.segmentedTabTextActive,
+              ]}
+            >
+              Check in
+            </Text>
+          </Pressable>
+        </View>
+
+        {/* Interval Timer Widget Card (Dark Charcoal #181A20 from Reference Screen 4) */}
+        <View style={styles.intervalTimerCard}>
+          <View style={styles.timerCardLeft}>
+            <View style={styles.timerIconBadge}>
+              <Ionicons name="stopwatch" size={16} color="#FFFFFF" />
+            </View>
+            <View style={styles.timerTitleCol}>
+              <Text style={styles.timerTitle}>Timer</Text>
+              <Text style={styles.timerSubtitle}>
+                Manage your exercise with Interval Timer
+              </Text>
+              <Text style={styles.timerDurationBig}>
+                {isRestTimerActive ? formatTime(restTimerSeconds) : '120m'}
+              </Text>
+            </View>
+          </View>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.timerPlayButton,
+              pressed && styles.pressed,
+            ]}
+            onPress={() => {
+              safeHaptics.impactMedium();
+              if (isRestTimerActive) {
+                handleDismissRestTimer();
+              } else {
+                triggerRestTimer(120);
+              }
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={isRestTimerActive ? 'Pause timer' : 'Start interval timer'}
+          >
+            <Ionicons
+              name={isRestTimerActive ? 'pause' : 'play'}
+              size={18}
+              color="#FFFFFF"
+            />
+          </Pressable>
         </View>
 
         {/* 3 Built-In Workout Templates */}
@@ -485,7 +590,16 @@ export default function WorkoutsScreen() {
         </View>
       </View>
     ),
-    [workouts.length, startWorkout, handleExportWorkouts]
+    [
+      workouts.length,
+      startWorkout,
+      handleExportWorkouts,
+      workoutTab,
+      isRestTimerActive,
+      restTimerSeconds,
+      triggerRestTimer,
+      handleDismissRestTimer,
+    ]
   );
 
   // -------------------------------------------------------------
@@ -1306,7 +1420,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   inactiveHeaderSubtitle: {
     fontSize: 10,
@@ -1324,27 +1438,145 @@ const styles = StyleSheet.create({
   exportBtn: {
     width: 38,
     height: 38,
-    borderRadius: 12,
+    borderRadius: 19,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.cardBorder,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#181A20',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+    elevation: 1,
   },
   startEmptyBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
     backgroundColor: colors.primary,
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 12,
+    borderRadius: 20,
     minHeight: 38,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 2,
   },
   startEmptyBtnText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
     color: colors.textInverse,
+  },
+
+  // Segmented Pill Tabs
+  segmentedTabsRow: {
+    flexDirection: 'row',
+    backgroundColor: colors.card,
+    borderRadius: 999,
+    padding: 4,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    gap: 4,
+    shadowColor: '#181A20',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  segmentedTab: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  segmentedTabActive: {
+    backgroundColor: '#FF7A59',
+    shadowColor: '#FF7A59',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  segmentedTabText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  segmentedTabTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+
+  // Interval Timer Dark Widget
+  intervalTimerCard: {
+    backgroundColor: colors.charcoalWidget,
+    borderRadius: 24,
+    padding: 18,
+    marginBottom: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    shadowColor: '#181A20',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    elevation: 4,
+  },
+  timerCardLeft: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    flex: 1,
+  },
+  timerIconBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#2A2E39',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  timerTitleCol: {
+    flex: 1,
+  },
+  timerTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginBottom: 2,
+  },
+  timerSubtitle: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    marginBottom: 8,
+  },
+  timerDurationBig: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: -0.5,
+    fontVariant: ['tabular-nums'],
+  },
+  timerPlayButton: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    borderWidth: 2,
+    borderColor: '#52B788',
+    backgroundColor: '#242730',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#52B788',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 2,
   },
 
   // Templates Section
@@ -1365,12 +1597,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 14,
+    borderRadius: 22,
+    padding: 16,
     borderWidth: 1,
     borderColor: colors.cardBorder,
     gap: 12,
-    minHeight: 48,
+    minHeight: 52,
+    shadowColor: '#181A20',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    elevation: 1,
   },
   templateIconBox: {
     width: 40,

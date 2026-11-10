@@ -48,7 +48,14 @@
       "expo-secure-store",
       "expo-sqlite",
       "expo-localization",
-      "@sentry/react-native"
+      "@sentry/react-native",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "BetterYou uses speech recognition to let you dictate meals and search product ingredients by voice.",
+          "speechRecognitionPermission": "BetterYou uses speech recognition to transcribe your spoken meals and products."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

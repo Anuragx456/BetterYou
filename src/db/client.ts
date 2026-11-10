@@ -1,4 +1,4 @@
-import { DailyGoals, ExerciseItem, MealLog, ScannedProduct, ToxicityReport, WorkoutSession } from '../types';
+import { DailyGoals, ExerciseItem, ExerciseSet, MealLog, ScannedProduct, ToxicityReport, WorkoutSession } from '../types';
 import { getLocalDateString } from '../utils/date';
 
 export interface DatabaseAdapter {
@@ -24,11 +24,14 @@ class MemoryDatabaseAdapter implements DatabaseAdapter {
   };
 
   async execAsync(sql: string): Promise<void> {
-    // Basic DDL no-op for memory mock
+    // Basic DDL and transaction no-op for memory mock
   }
 
   async runAsync(sql: string, params: unknown[] = []): Promise<{ rowsAffected: number; lastInsertRowId: number }> {
     const trimmed = sql.trim().toLowerCase();
+    if (trimmed.startsWith('begin') || trimmed.startsWith('commit') || trimmed.startsWith('rollback')) {
+      return { rowsAffected: 0, lastInsertRowId: 0 };
+    }
     if (trimmed.startsWith('delete from meals where id =')) {
       const id = params[0];
       const prev = this.tables.meals.length;
@@ -66,6 +69,42 @@ class MemoryDatabaseAdapter implements DatabaseAdapter {
       return this.tables.workout_sessions as unknown as T[];
     }
     if (trimmed.includes('from exercises')) {
+      if (trimmed.includes('where e.workout_id in')) {
+        const workoutIds = params as string[];
+        const matchedExercises = this.tables.exercises.filter((e) => workoutIds.includes(e.workout_id as string));
+        const joined: Record<string, unknown>[] = [];
+        for (const ex of matchedExercises) {
+          const sets = this.tables.sets.filter((s) => s.exercise_id === ex.id);
+          if (sets.length === 0) {
+            joined.push({
+              workout_id: ex.workout_id,
+              ex_id: ex.id,
+              ex_name: ex.name,
+              ex_order_index: ex.order_index,
+              set_id: null,
+              set_number: null,
+              weight_kg: null,
+              reps: null,
+              completed: null,
+            });
+          } else {
+            for (const st of sets) {
+              joined.push({
+                workout_id: ex.workout_id,
+                ex_id: ex.id,
+                ex_name: ex.name,
+                ex_order_index: ex.order_index,
+                set_id: st.id,
+                set_number: st.set_number,
+                weight_kg: st.weight_kg,
+                reps: st.reps,
+                completed: st.completed,
+              });
+            }
+          }
+        }
+        return joined as unknown as T[];
+      }
       const workoutId = params[0];
       return this.tables.exercises.filter((e) => e.workout_id === workoutId) as unknown as T[];
     }
@@ -151,6 +190,8 @@ export async function getDatabase(): Promise<DatabaseAdapter> {
 
   // Create Schema with proper Foreign Keys and Date Indexes
   await dbInstance.execAsync(`
+    PRAGMA journal_mode = WAL;
+    PRAGMA synchronous = NORMAL;
     PRAGMA foreign_keys = ON;
 
     CREATE TABLE IF NOT EXISTS meals (
@@ -382,43 +423,163 @@ export async function dbGetAllMealImagePaths(): Promise<string[]> {
 // WORKOUT REPOSITORY
 // -------------------------------------------------------------
 
+async function hydrateWorkoutsWithExercisesAndSets(
+  db: DatabaseAdapter,
+  sessionRows: {
+    id: string;
+    title: string;
+    started_at: string;
+    completed_at: string | null;
+    total_volume_kg: number;
+    notes: string | null;
+  }[]
+): Promise<WorkoutSession[]> {
+  if (sessionRows.length === 0) return [];
+
+  const workoutIds = sessionRows.map((s) => s.id);
+  const placeholders = workoutIds.map(() => '?').join(', ');
+
+  interface JoinedExerciseSetRow {
+    workout_id: string;
+    ex_id: string;
+    ex_name: string;
+    ex_order_index: number;
+    set_id: string | null;
+    set_number: number | null;
+    weight_kg: number | null;
+    reps: number | null;
+    completed: number | null;
+  }
+
+  const joinedRows = await db.getAllAsync<JoinedExerciseSetRow>(
+    `SELECT 
+      e.workout_id, e.id AS ex_id, e.name AS ex_name, e.order_index AS ex_order_index,
+      s.id AS set_id, s.set_number, s.weight_kg, s.reps, s.completed
+    FROM exercises e
+    LEFT JOIN sets s ON s.exercise_id = e.id
+    WHERE e.workout_id IN (${placeholders})
+    ORDER BY e.order_index ASC, s.set_number ASC`,
+    workoutIds
+  );
+
+  // Group exercises and sets by workout_id preserving order
+  const workoutExercisesMap = new Map<string, Map<string, { exercise: ExerciseItem; sets: ExerciseSet[] }>>();
+
+  for (const row of joinedRows) {
+    let exMap = workoutExercisesMap.get(row.workout_id);
+    if (!exMap) {
+      exMap = new Map();
+      workoutExercisesMap.set(row.workout_id, exMap);
+    }
+
+    let exEntry = exMap.get(row.ex_id);
+    if (!exEntry) {
+      exEntry = {
+        exercise: {
+          id: row.ex_id,
+          name: row.ex_name,
+          sets: [],
+        },
+        sets: [],
+      };
+      exMap.set(row.ex_id, exEntry);
+    }
+
+    if (row.set_id) {
+      exEntry.sets.push({
+        id: row.set_id,
+        setNumber: row.set_number ?? 1,
+        weightKg: row.weight_kg ?? 0,
+        reps: row.reps ?? 0,
+        completed: Boolean(row.completed),
+      });
+    }
+  }
+
+  return sessionRows.map((s) => {
+    const exMap = workoutExercisesMap.get(s.id);
+    const exercises: ExerciseItem[] = exMap
+      ? Array.from(exMap.values()).map(({ exercise, sets }) => ({
+          ...exercise,
+          sets,
+        }))
+      : [];
+
+    const durationSeconds = s.completed_at
+      ? Math.max(0, Math.round((new Date(s.completed_at).getTime() - new Date(s.started_at).getTime()) / 1000))
+      : 0;
+
+    return {
+      id: s.id,
+      title: s.title,
+      startedAt: s.started_at,
+      completedAt: s.completed_at ?? undefined,
+      durationSeconds,
+      totalVolumeKg: s.total_volume_kg,
+      notes: s.notes ?? undefined,
+      exercises,
+    };
+  });
+}
+
 export async function dbInsertWorkout(workout: WorkoutSession): Promise<void> {
   const db = await getDatabase();
   const date = getLocalDateString(workout.completedAt || workout.startedAt);
   const now = Date.now();
 
-  await db.runAsync(
-    `INSERT OR REPLACE INTO workout_sessions (
-      id, date, title, started_at, completed_at, total_volume_kg, notes, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      workout.id,
-      date,
-      workout.title,
-      workout.startedAt,
-      workout.completedAt ?? null,
-      workout.totalVolumeKg ?? 0,
-      workout.notes ?? null,
-      now,
-    ]
-  );
+  try {
+    await db.execAsync('BEGIN TRANSACTION;');
+  } catch {
+    // Non-fatal if transactions unsupported by adapter
+  }
 
-  // Clean and insert exercises and sets
-  await db.runAsync('DELETE FROM exercises WHERE workout_id = ?', [workout.id]);
-
-  for (let eIdx = 0; eIdx < (workout.exercises || []).length; eIdx++) {
-    const ex = workout.exercises[eIdx];
+  try {
     await db.runAsync(
-      'INSERT INTO exercises (id, workout_id, name, order_index, created_at) VALUES (?, ?, ?, ?, ?)',
-      [ex.id, workout.id, ex.name, eIdx, now]
+      `INSERT OR REPLACE INTO workout_sessions (
+        id, date, title, started_at, completed_at, total_volume_kg, notes, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        workout.id,
+        date,
+        workout.title,
+        workout.startedAt,
+        workout.completedAt ?? null,
+        workout.totalVolumeKg ?? 0,
+        workout.notes ?? null,
+        now,
+      ]
     );
 
-    for (const s of ex.sets || []) {
+    // Clean and insert exercises and sets
+    await db.runAsync('DELETE FROM exercises WHERE workout_id = ?', [workout.id]);
+
+    for (let eIdx = 0; eIdx < (workout.exercises || []).length; eIdx++) {
+      const ex = workout.exercises[eIdx];
       await db.runAsync(
-        'INSERT INTO sets (id, exercise_id, set_number, weight_kg, reps, completed, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [s.id, ex.id, s.setNumber, s.weightKg, s.reps, s.completed ? 1 : 0, now]
+        'INSERT INTO exercises (id, workout_id, name, order_index, created_at) VALUES (?, ?, ?, ?, ?)',
+        [ex.id, workout.id, ex.name, eIdx, now]
       );
+
+      for (const s of ex.sets || []) {
+        await db.runAsync(
+          'INSERT INTO sets (id, exercise_id, set_number, weight_kg, reps, completed, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [s.id, ex.id, s.setNumber, s.weightKg, s.reps, s.completed ? 1 : 0, now]
+        );
+      }
     }
+
+    try {
+      await db.execAsync('COMMIT;');
+    } catch {
+      // Non-fatal
+    }
+  } catch (err) {
+    try {
+      await db.execAsync('ROLLBACK;');
+    } catch {
+      // Ignore
+    }
+    throw err;
   }
 }
 
@@ -433,55 +594,7 @@ export async function dbGetWorkoutsByDate(date: string): Promise<WorkoutSession[
     notes: string | null;
   }>('SELECT * FROM workout_sessions WHERE date = ? ORDER BY started_at DESC', [date]);
 
-  const results: WorkoutSession[] = [];
-
-  for (const s of sessionRows) {
-    const exRows = await db.getAllAsync<{
-      id: string;
-      name: string;
-      order_index: number;
-    }>('SELECT * FROM exercises WHERE workout_id = ? ORDER BY order_index ASC', [s.id]);
-
-    const exercises: ExerciseItem[] = [];
-    for (const ex of exRows) {
-      const setRows = await db.getAllAsync<{
-        id: string;
-        set_number: number;
-        weight_kg: number;
-        reps: number;
-        completed: number;
-      }>('SELECT * FROM sets WHERE exercise_id = ? ORDER BY set_number ASC', [ex.id]);
-
-      exercises.push({
-        id: ex.id,
-        name: ex.name,
-        sets: setRows.map((st) => ({
-          id: st.id,
-          setNumber: st.set_number,
-          weightKg: st.weight_kg,
-          reps: st.reps,
-          completed: Boolean(st.completed),
-        })),
-      });
-    }
-
-    const durationSeconds = s.completed_at
-      ? Math.max(0, Math.round((new Date(s.completed_at).getTime() - new Date(s.started_at).getTime()) / 1000))
-      : 0;
-
-    results.push({
-      id: s.id,
-      title: s.title,
-      startedAt: s.started_at,
-      completedAt: s.completed_at ?? undefined,
-      durationSeconds,
-      totalVolumeKg: s.total_volume_kg,
-      notes: s.notes ?? undefined,
-      exercises,
-    });
-  }
-
-  return results;
+  return hydrateWorkoutsWithExercisesAndSets(db, sessionRows);
 }
 
 export async function dbGetAllWorkouts(): Promise<WorkoutSession[]> {
@@ -495,54 +608,7 @@ export async function dbGetAllWorkouts(): Promise<WorkoutSession[]> {
     notes: string | null;
   }>('SELECT * FROM workout_sessions ORDER BY started_at DESC LIMIT 150');
 
-  const results: WorkoutSession[] = [];
-  for (const s of sessionRows) {
-    const exRows = await db.getAllAsync<{
-      id: string;
-      name: string;
-      order_index: number;
-    }>('SELECT * FROM exercises WHERE workout_id = ? ORDER BY order_index ASC', [s.id]);
-
-    const exercises: ExerciseItem[] = [];
-    for (const ex of exRows) {
-      const setRows = await db.getAllAsync<{
-        id: string;
-        set_number: number;
-        weight_kg: number;
-        reps: number;
-        completed: number;
-      }>('SELECT * FROM sets WHERE exercise_id = ? ORDER BY set_number ASC', [ex.id]);
-
-      exercises.push({
-        id: ex.id,
-        name: ex.name,
-        sets: setRows.map((st) => ({
-          id: st.id,
-          setNumber: st.set_number,
-          weightKg: st.weight_kg,
-          reps: st.reps,
-          completed: Boolean(st.completed),
-        })),
-      });
-    }
-
-    const durationSeconds = s.completed_at
-      ? Math.max(0, Math.round((new Date(s.completed_at).getTime() - new Date(s.started_at).getTime()) / 1000))
-      : 0;
-
-    results.push({
-      id: s.id,
-      title: s.title,
-      startedAt: s.started_at,
-      completedAt: s.completed_at ?? undefined,
-      durationSeconds,
-      totalVolumeKg: s.total_volume_kg,
-      notes: s.notes ?? undefined,
-      exercises,
-    });
-  }
-
-  return results;
+  return hydrateWorkoutsWithExercisesAndSets(db, sessionRows);
 }
 
 export async function dbDeleteWorkout(id: string): Promise<void> {

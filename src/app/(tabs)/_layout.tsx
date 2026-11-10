@@ -108,11 +108,14 @@ export default function TabsLayout() {
 const styles = StyleSheet.create({
   tabBar: {
     backgroundColor: colors.backgroundSecondary,
-    borderTopColor: colors.hairline,
+    borderTopColor: colors.borderSubtle,
     borderTopWidth: 1,
     paddingTop: 6,
-    elevation: 0,
-    shadowOpacity: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.03,
+    shadowRadius: 10,
+    elevation: 8,
   },
   tabBarItem: {
     paddingVertical: 2,

@@ -15,7 +15,7 @@ interface AnimatedMacroBarProps {
   barColor: string;
 }
 
-export function AnimatedMacroBar({
+export const AnimatedMacroBar = React.memo(function AnimatedMacroBar({
   label,
   consumedGrams,
   targetGrams,
@@ -65,7 +65,7 @@ export function AnimatedMacroBar({
       </Text>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {

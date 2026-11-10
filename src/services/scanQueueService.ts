@@ -198,6 +198,16 @@ export async function processOfflineScanQueue(): Promise<{
     isProcessingQueue = false;
   }
 
+  // If any scans succeeded and wrote to SQLite, refresh in-memory Zustand store
+  if (succeededCount > 0) {
+    try {
+      const { useFitnessStore } = await import('../store/useFitnessStore');
+      useFitnessStore.getState().loadDataFromDb().catch(() => {});
+    } catch {
+      // Safe fallback in isolated environments
+    }
+  }
+
   return { processedCount, succeededCount, failedCount };
 }
 

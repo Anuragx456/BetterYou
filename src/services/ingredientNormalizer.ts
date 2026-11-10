@@ -130,8 +130,22 @@ export function getConcentrationMetrics(
   return { multiplier: 0.7, rankLabel: `Minor / Trace Additive (Rank #${index + 1})` };
 }
 
+interface PrecompiledRuleEntry {
+  rule: AdditiveRule;
+  normId: string;
+  normalizedAliases: string[];
+}
+
+// Pre-compiled once at module load to eliminate redundant regex evaluation in matching loops
+const PRECOMPILED_RULES: PrecompiledRuleEntry[] = (additiveRulesData.rules as AdditiveRule[]).map((rule) => ({
+  rule,
+  normId: rule.id,
+  normalizedAliases: rule.aliases.map((alias) => normalizeIngredientString(alias)),
+}));
+
 /**
  * Matches an ingredient against the versioned additive rules database.
+ * Optimized with pre-compiled normalized aliases for sub-millisecond execution.
  */
 export function matchAdditiveRule(
   rawIngredient: string,
@@ -141,11 +155,12 @@ export function matchAdditiveRule(
   const normalized = normalizeIngredientString(rawIngredient);
   if (!normalized || normalized.length < 2) return null;
 
-  const rules = additiveRulesData.rules as AdditiveRule[];
+  for (let i = 0; i < PRECOMPILED_RULES.length; i++) {
+    const entry = PRECOMPILED_RULES[i];
+    const rule = entry.rule;
 
-  for (const rule of rules) {
     // Check if ID matches
-    if (normalized === rule.id || normalized.includes(rule.id)) {
+    if (normalized === entry.normId || normalized.includes(entry.normId)) {
       const { multiplier, rankLabel } = getConcentrationMetrics(index, totalIngredients);
       return {
         rule,
@@ -158,9 +173,10 @@ export function matchAdditiveRule(
       };
     }
 
-    // Check all rule aliases
-    for (const alias of rule.aliases) {
-      const normAlias = normalizeIngredientString(alias);
+    // Check pre-normalized aliases with zero runtime regex overhead
+    const aliases = entry.normalizedAliases;
+    for (let a = 0; a < aliases.length; a++) {
+      const normAlias = aliases[a];
       if (
         normalized === normAlias ||
         normalized.includes(normAlias) ||

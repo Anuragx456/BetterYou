@@ -20,6 +20,16 @@ export function checkRateLimit(deviceId: string, now: number = Date.now()): {
   retryAfterSeconds?: number;
   reason?: string;
 } {
+  // Periodic cleanup of stale devices older than 24h to prevent memory leaks
+  if (rateLimitStore.size > 1000) {
+    const expiredCutoff = now - 24 * 60 * 60 * 1000;
+    for (const [id, e] of rateLimitStore.entries()) {
+      if (e.dailyWindowStart < expiredCutoff) {
+        rateLimitStore.delete(id);
+      }
+    }
+  }
+
   let entry = rateLimitStore.get(deviceId);
   if (!entry) {
     entry = {

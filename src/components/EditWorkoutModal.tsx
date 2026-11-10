@@ -29,11 +29,19 @@ export function EditWorkoutModal({
   onSave,
   onDelete,
 }: EditWorkoutModalProps) {
+  const [prevWorkoutId, setPrevWorkoutId] = useState<string | undefined>(workout?.id);
   const [title, setTitle] = useState<string>(workout?.title || '');
   const [notes, setNotes] = useState<string>(workout?.notes || '');
   const [durationMin, setDurationMin] = useState<string>(
     workout ? Math.round(workout.durationSeconds / 60).toString() : '45'
   );
+
+  if (workout?.id !== prevWorkoutId) {
+    setPrevWorkoutId(workout?.id);
+    setTitle(workout?.title || '');
+    setNotes(workout?.notes || '');
+    setDurationMin(workout ? Math.round(workout.durationSeconds / 60).toString() : '45');
+  }
 
   if (!workout) return null;
 

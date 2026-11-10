@@ -1,4 +1,5 @@
 import { safeAsyncStorage } from '../utils/storage';
+import { useGeminiUsageStore } from './useGeminiUsageStore';
 import {
   deleteSecureItem,
   getSecureItem,
@@ -363,6 +364,7 @@ export async function validateGeminiApiKey(apiKeyToTest: string): Promise<{
     };
   }
 
+  const startTime = Date.now();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10000);
 
@@ -387,6 +389,14 @@ export async function validateGeminiApiKey(apiKeyToTest: string): Promise<{
       } catch {
         // Fallback to status text
       }
+      useGeminiUsageStore.getState().recordApiCall({
+        feature: 'key-validation',
+        model: 'models-list-api',
+        durationMs: Date.now() - startTime,
+        status: 'error',
+        errorMessage: errorMsg,
+        isCustomKey: true,
+      });
       return {
         isValid: false,
         message: errorMsg,
@@ -400,6 +410,17 @@ export async function validateGeminiApiKey(apiKeyToTest: string): Promise<{
     const data = (await response.json()) as ModelsResponse;
     const modelsList = data.models || [];
     const modelNames = modelsList.map((m) => m.name.replace(/^models\//, ''));
+
+    useGeminiUsageStore.getState().recordApiCall({
+      feature: 'key-validation',
+      model: 'models-list-api',
+      promptTokens: 10,
+      candidateTokens: modelNames.length * 15,
+      totalTokens: 10 + modelNames.length * 15,
+      durationMs: Date.now() - startTime,
+      status: 'success',
+      isCustomKey: true,
+    });
 
     return {
       isValid: true,

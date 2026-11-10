@@ -20,7 +20,7 @@ interface AnimatedCalorieRingProps {
   burnedCalories?: number;
 }
 
-export function AnimatedCalorieRing({
+export const AnimatedCalorieRing = React.memo(function AnimatedCalorieRing({
   consumed,
   target,
   remaining,
@@ -100,7 +100,7 @@ export function AnimatedCalorieRing({
       </View>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {

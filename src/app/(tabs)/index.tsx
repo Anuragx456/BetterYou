@@ -19,8 +19,9 @@ import { ToxicityReportModal } from '../../components/ToxicityReportModal';
 import {
   addLocalDays,
   formatDateLabel,
+  formatMonthYear,
   getLocalDateString,
-  getRecentDaysList,
+  getWeekDaysList,
 } from '../../utils/date';
 import { safeHaptics } from '../../utils/haptics';
 import { getFullImageUri } from '../../utils/imageManager';
@@ -37,11 +38,13 @@ export default function DashboardScreen() {
   const [selectedProduct, setSelectedProduct] = useState<ScannedProduct | null>(null);
   const [isAllScansModalVisible, setIsAllScansModalVisible] = useState<boolean>(false);
 
-  // Zustand state subscriptions
+  // Zustand state subscriptions (using granular primitive selectors to avoid background re-renders)
   const meals = useFitnessStore((state) => state.meals);
   const workouts = useFitnessStore((state) => state.workouts);
   const dailyGoals = useFitnessStore((state) => state.dailyGoals);
-  const activeWorkout = useFitnessStore((state) => state.activeWorkout);
+  const hasActiveWorkout = useFitnessStore((state) => Boolean(state.activeWorkout));
+  const activeWorkoutTitle = useFitnessStore((state) => state.activeWorkout?.title ?? '');
+  const activeWorkoutExercisesCount = useFitnessStore((state) => state.activeWorkout?.exercises.length ?? 0);
   const streakDays = useFitnessStore((state) => state.streakDays);
   const scannedProducts = useFitnessStore((state) => state.scannedProducts);
   const removeMeal = useFitnessStore((state) => state.removeMeal);
@@ -56,7 +59,7 @@ export default function DashboardScreen() {
   const [selectedDate, setSelectedDate] = useState<string>(todayDateString);
   const isViewingToday = selectedDate === todayDateString;
 
-  const recentDays = useMemo(() => getRecentDaysList(7), []);
+  const weekDays = useMemo(() => getWeekDaysList(selectedDate), [selectedDate]);
 
   // Filter selected date's meals
   const todayMeals = useMemo(() => {
@@ -169,12 +172,6 @@ export default function DashboardScreen() {
     [meals, workouts]
   );
 
-  const hasGeminiKey = true; // Powered by secure proxy or custom BYOK key
-
-  const handleShowAiKeyInfo = useCallback(() => {
-    router.push('/(tabs)/settings');
-  }, [router]);
-
   const handleConfirmDeleteMeal = useCallback(
     (meal: MealLog) => {
       Alert.alert(
@@ -222,63 +219,67 @@ export default function DashboardScreen() {
               Better<Text style={styles.brandAccent}>You</Text>
             </Text>
           </View>
+
           <View style={styles.headerBadgesRow}>
             {/* Streak Badge */}
             <View style={styles.streakBadge}>
-              <Ionicons name="flame" size={15} color="#10B981" />
+              <Ionicons name="flame" size={15} color={colors.primary} />
               <Text style={styles.streakText}>{streakDays}</Text>
             </View>
-
-            {/* AI Status Indicator */}
-            <Pressable
-              style={({ pressed }) => [
-                styles.aiStatusDotBtn,
-                pressed && styles.pressed,
-              ]}
-              hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
-              onPress={handleShowAiKeyInfo}
-              accessibilityLabel="AI Settings"
-            >
-              <View
-                style={[
-                  styles.aiStatusDot,
-                  { backgroundColor: hasGeminiKey ? colors.primary : colors.warning },
-                ]}
-              />
-            </Pressable>
 
             {/* Settings Button */}
             <Pressable
               style={({ pressed }) => [
-                styles.settingsHeaderButton,
+                styles.circularHeaderBtn,
                 pressed && styles.pressed,
               ]}
               hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
               onPress={() => router.push('/(tabs)/settings')}
               accessibilityLabel="Open Settings"
             >
-              <Ionicons name="settings-outline" size={18} color={colors.textSecondary} />
+              <Ionicons name="settings-outline" size={19} color={colors.textSecondary} />
             </Pressable>
           </View>
         </View>
 
-        {/* Date Navigation Scrubber */}
-        <View style={styles.dateScrubberContainer}>
-          <Pressable
-            style={({ pressed }) => [styles.dateNavArrow, pressed && styles.pressed]}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            onPress={handlePrevDay}
-            accessibilityLabel="Previous day"
-          >
-            <Ionicons name="chevron-back" size={16} color={colors.textSecondary} />
-          </Pressable>
+        {/* Date Navigation Scrubber - Month Pill with Arrows + Day Chips */}
+        <View style={styles.calendarStripSection}>
+          <View style={styles.monthPillRow}>
+            <Pressable
+              style={({ pressed }) => [styles.monthNavArrow, pressed && styles.pressed]}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              onPress={handlePrevDay}
+              accessibilityLabel="Previous day"
+            >
+              <Ionicons name="arrow-back" size={16} color={colors.text} />
+            </Pressable>
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.dateDaysScroll}
-          >
-            {recentDays.map((day) => {
+            <View style={styles.monthPill}>
+              <Text style={styles.monthPillText}>{formatMonthYear(selectedDate)}</Text>
+            </View>
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.monthNavArrow,
+                !canGoForward && styles.dateNavArrowDisabled,
+                pressed && canGoForward && styles.pressed,
+              ]}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              onPress={handleNextDay}
+              disabled={!canGoForward}
+              accessibilityLabel="Next day"
+            >
+              <Ionicons
+                name="arrow-forward"
+                size={16}
+                color={canGoForward ? colors.text : colors.textMuted}
+              />
+            </Pressable>
+          </View>
+
+          {/* Weekday Row: SUN MON TUE WED THR FRI SAT */}
+          <View style={styles.weekDaysGrid}>
+            {weekDays.map((day) => {
               const isSelected = day.dateStr === selectedDate;
               const hasData = hasDataOnDate(day.dateStr);
 
@@ -286,47 +287,41 @@ export default function DashboardScreen() {
                 <Pressable
                   key={day.dateStr}
                   style={({ pressed }) => [
-                    styles.dayPill,
-                    isSelected && styles.dayPillSelected,
+                    styles.dayCol,
                     pressed && styles.pressed,
                   ]}
                   onPress={() => handleSelectDay(day.dateStr)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${day.dayName} ${day.dayNum}`}
                 >
-                  <Text style={[styles.dayPillName, isSelected && styles.dayPillTextActive]}>
+                  <Text
+                    style={[
+                      styles.dayNameLabel,
+                      isSelected && styles.dayNameLabelActive,
+                    ]}
+                  >
                     {day.dayName}
-                  </Text>
-                  <Text style={[styles.dayPillNum, isSelected && styles.dayPillTextActive]}>
-                    {day.dayNum}
                   </Text>
                   <View
                     style={[
-                      styles.dayPillDot,
-                      hasData && (isSelected ? styles.dayPillDotActive : styles.dayPillDotMuted),
-                      !hasData && styles.dayPillDotEmpty,
+                      styles.dayCircle,
+                      isSelected && styles.dayCircleSelected,
                     ]}
-                  />
+                  >
+                    <Text
+                      style={[
+                        styles.dayNumberLabel,
+                        isSelected && styles.dayNumberLabelSelected,
+                      ]}
+                    >
+                      {day.dayNum}
+                    </Text>
+                  </View>
+                  {hasData && !isSelected && <View style={styles.dayDotIndicator} />}
                 </Pressable>
               );
             })}
-          </ScrollView>
-
-          <Pressable
-            style={({ pressed }) => [
-              styles.dateNavArrow,
-              !canGoForward && styles.dateNavArrowDisabled,
-              pressed && canGoForward && styles.pressed,
-            ]}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            onPress={handleNextDay}
-            disabled={!canGoForward}
-            accessibilityLabel="Next day"
-          >
-            <Ionicons
-              name="chevron-forward"
-              size={16}
-              color={canGoForward ? colors.textSecondary : colors.hairline}
-            />
-          </Pressable>
+          </View>
         </View>
 
         {/* Past Date Notice Banner */}
@@ -434,16 +429,16 @@ export default function DashboardScreen() {
             </Pressable>
           </View>
 
-          {activeWorkout && isViewingToday ? (
+          {hasActiveWorkout && isViewingToday ? (
             <View style={styles.activeWorkoutBanner}>
               <View style={styles.activeWorkoutLeft}>
                 <View style={styles.pulseDot} />
                 <View>
                   <Text style={styles.activeWorkoutTitle}>
-                    {activeWorkout.title}
+                    {activeWorkoutTitle}
                   </Text>
                   <Text style={styles.activeWorkoutSub}>
-                    {activeWorkout.exercises.length} Exercises in progress
+                    {activeWorkoutExercisesCount} Exercises in progress
                   </Text>
                 </View>
               </View>
@@ -481,7 +476,7 @@ export default function DashboardScreen() {
             </View>
           )}
 
-          {!activeWorkout && todayWorkouts.length === 0 && (
+          {!hasActiveWorkout && todayWorkouts.length === 0 && (
             <Pressable
               style={({ pressed }) => [
                 styles.startWorkoutCta,
@@ -679,7 +674,155 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 16,
+  },
+  dateLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    letterSpacing: 0.2,
+    marginBottom: 2,
+  },
+  brandTitle: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: colors.text,
+    letterSpacing: -0.6,
+  },
+  brandAccent: {
+    color: colors.primary,
+  },
+  headerBadgesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  streakBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFEDE8',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 122, 89, 0.25)',
+    minHeight: 34,
+  },
+  streakText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FF7A59',
+    fontVariant: ['tabular-nums'],
+  },
+  circularHeaderBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#181A20',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+
+  // Calendar Strip
+  calendarStripSection: {
+    marginBottom: 16,
+  },
+  monthPillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 14,
     marginBottom: 12,
+  },
+  monthPill: {
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    backgroundColor: colors.card,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    shadowColor: '#181A20',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  monthPillText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.text,
+    letterSpacing: 0.1,
+  },
+  monthNavArrow: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+  },
+  weekDaysGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 2,
+  },
+  dayCol: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 44,
+  },
+  dayNameLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    marginBottom: 6,
+    letterSpacing: 0.2,
+  },
+  dayNameLabelActive: {
+    color: colors.primary,
+  },
+  dayCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dayCircleSelected: {
+    backgroundColor: '#FF7A59',
+    shadowColor: '#FF7A59',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  dayNumberLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+    fontVariant: ['tabular-nums'],
+  },
+  dayNumberLabelSelected: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+  },
+  dayDotIndicator: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.textMuted,
+    marginTop: 4,
   },
 
   // Date Scrubber Strip
@@ -720,7 +863,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   dayPillSelected: {
-    backgroundColor: 'rgba(16, 185, 129, 0.16)',
+    backgroundColor: '#FFEDE8',
     borderColor: colors.primary,
   },
   dayPillName: {
@@ -794,80 +937,21 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.primary,
   },
-  dateLabel: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: colors.textSecondary,
-    letterSpacing: 0.2,
-    marginBottom: 2,
-  },
-  brandTitle: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: colors.text,
-    letterSpacing: -0.6,
-  },
-  brandAccent: {
-    color: colors.primary,
-  },
-  headerBadgesRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  aiStatusDotBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  aiStatusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  streakBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(16, 185, 129, 0.12)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 17,
-    gap: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.25)',
-    minHeight: 34,
-  },
-  streakText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.primary,
-    fontVariant: ['tabular-nums'],
-  },
-  settingsHeaderButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
 
   // Hero Card with Circular Calorie Gauge
   heroCard: {
     backgroundColor: colors.card,
-    borderRadius: 22,
+    borderRadius: 24,
     padding: 20,
     marginBottom: 14,
     borderWidth: 1,
     borderColor: colors.cardBorder,
     alignItems: 'center',
+    shadowColor: '#181A20',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    elevation: 2,
   },
   ringContainer: {
     marginVertical: 12,
@@ -1007,11 +1091,16 @@ const styles = StyleSheet.create({
   // Generic Clean Card
   card: {
     backgroundColor: colors.card,
-    borderRadius: 20,
-    padding: 16,
+    borderRadius: 24,
+    padding: 18,
     marginBottom: 14,
     borderWidth: 1,
     borderColor: colors.cardBorder,
+    shadowColor: '#181A20',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    elevation: 2,
   },
   cardHeaderRow: {
     flexDirection: 'row',

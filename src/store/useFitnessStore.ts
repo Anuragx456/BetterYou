@@ -107,6 +107,8 @@ export function calculateWorkoutVolume(exercises: ExerciseItem[]): number {
   }, 0);
 }
 
+let loadDataInFlight: Promise<void> | null = null;
+
 export const useFitnessStore = create<FitnessState>()(
   persist(
     (set, get) => ({
@@ -120,35 +122,44 @@ export const useFitnessStore = create<FitnessState>()(
       lastActiveWorkoutDate: undefined,
 
       loadDataFromDb: async () => {
-        try {
-          await getDatabase();
-          // Run one-time idempotent migration if legacy AsyncStorage data exists
-          await runAsyncStorageToSqliteMigration();
+        if (get().isInitialized) return;
+        if (loadDataInFlight) return loadDataInFlight;
 
-          const [dbMeals, dbWorkouts, dbProducts, dbGoals] = await Promise.all([
-            dbGetAllMeals(),
-            dbGetAllWorkouts(),
-            dbGetAllScannedProducts(),
-            dbGetDailyGoals(),
-          ]);
+        loadDataInFlight = (async () => {
+          try {
+            await getDatabase();
+            // Run one-time idempotent migration if legacy AsyncStorage data exists
+            await runAsyncStorageToSqliteMigration();
 
-          set({
-            meals: dbMeals,
-            workouts: dbWorkouts,
-            scannedProducts: dbProducts,
-            dailyGoals: dbGoals,
-            isInitialized: true,
-          });
+            const [dbMeals, dbWorkouts, dbProducts, dbGoals] = await Promise.all([
+              dbGetAllMeals(),
+              dbGetAllWorkouts(),
+              dbGetAllScannedProducts(),
+              dbGetDailyGoals(),
+            ]);
 
-          // Run background orphan image cleanup job
-          Promise.all([dbGetAllMealImagePaths(), dbGetAllProductImagePaths()])
-            .then(([mealPaths, prodPaths]) => {
-              cleanupOrphanImages([...mealPaths, ...prodPaths]).catch(() => {});
-            })
-            .catch(() => {});
-        } catch (err: unknown) {
-          console.warn('[fitnessStore] loadDataFromDb warning:', err);
-        }
+            set({
+              meals: dbMeals,
+              workouts: dbWorkouts,
+              scannedProducts: dbProducts,
+              dailyGoals: dbGoals,
+              isInitialized: true,
+            });
+
+            // Run background orphan image cleanup job
+            Promise.all([dbGetAllMealImagePaths(), dbGetAllProductImagePaths()])
+              .then(([mealPaths, prodPaths]) => {
+                cleanupOrphanImages([...mealPaths, ...prodPaths]).catch(() => {});
+              })
+              .catch(() => {});
+          } catch (err: unknown) {
+            console.warn('[fitnessStore] loadDataFromDb warning:', err);
+          } finally {
+            loadDataInFlight = null;
+          }
+        })();
+
+        return loadDataInFlight;
       },
 
       addMeal: async (mealData) => {

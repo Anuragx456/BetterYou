@@ -2,9 +2,11 @@ import { describe, expect, it } from 'bun:test';
 import {
   addLocalDays,
   formatDateLabel,
+  formatMonthYear,
   getLocalDateString,
   getLocalDayDifference,
   getRecentDaysList,
+  getWeekDaysList,
 } from '../date';
 import { calculateWorkoutVolume } from '../../store/useFitnessStore';
 
@@ -38,6 +40,21 @@ describe('Date & Fitness Calculation Utilities', () => {
     expect(days.length).toBe(7);
     expect(days[days.length - 1].isToday).toBe(true);
     expect(days[days.length - 1].dateStr).toBe(getLocalDateString());
+  });
+
+  it('formats month and year label and generates 7 week calendar days', () => {
+    const monthLabel = formatMonthYear('2025-02-14');
+    expect(monthLabel).toBe('Feb 2025');
+
+    const weekDays = getWeekDaysList('2025-02-14');
+    expect(weekDays.length).toBe(7);
+    expect(weekDays[0].dayName).toBe('SUN');
+    expect(weekDays[6].dayName).toBe('SAT');
+    // Ensure all 7 items have valid dateStr and dayNum
+    weekDays.forEach((day) => {
+      expect(day.dateStr).toContain('2025-02');
+      expect(typeof day.dayNum).toBe('number');
+    });
   });
 
 

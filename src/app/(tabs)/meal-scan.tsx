@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ManualMealModal } from '../../components/ManualMealModal';
+import { VoiceInputModal } from '../../components/VoiceInputModal';
 import { analyzeMealImage } from '../../services/aiVisionService';
 import { optimizeImageForAiVision } from '../../utils/imageOptimizer';
 import { useFitnessStore } from '../../store/useFitnessStore';
@@ -60,6 +61,7 @@ export default function MealScanScreen() {
   const [portionMultiplier, setPortionMultiplier] = useState<number>(1.0);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isTypeModalVisible, setIsTypeModalVisible] = useState<boolean>(false);
+  const [isVoiceModalVisible, setIsVoiceModalVisible] = useState<boolean>(false);
 
   // Trigger AI analysis on a chosen image
   const processImageForAnalysis = async (uri: string, base64: string | undefined) => {
@@ -524,6 +526,16 @@ export default function MealScanScreen() {
           </Pressable>
 
           <Pressable
+            style={({ pressed }) => [styles.galleryFallbackBtn, { marginTop: 10 }, pressed && styles.pressed]}
+            onPress={() => setIsVoiceModalVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Speak meal description"
+          >
+            <Ionicons name="mic-outline" size={18} color={colors.primary} />
+            <Text style={styles.galleryFallbackText}>Speak Meal Description</Text>
+          </Pressable>
+
+          <Pressable
             style={styles.demoFallbackBtn}
             onPress={handleSimulateSampleMeal}
           >
@@ -535,6 +547,19 @@ export default function MealScanScreen() {
             visible={isTypeModalVisible}
             onClose={() => setIsTypeModalVisible(false)}
             onSubmitResult={(result) => {
+              setAiResult(result);
+              setCapturedImageUri(null);
+              setPortionMultiplier(1.0);
+              setStage('verifying');
+            }}
+          />
+        )}
+        {isVoiceModalVisible && (
+          <VoiceInputModal
+            visible={isVoiceModalVisible}
+            mode="meal"
+            onClose={() => setIsVoiceModalVisible(false)}
+            onSubmitMealResult={(result) => {
               setAiResult(result);
               setCapturedImageUri(null);
               setPortionMultiplier(1.0);
@@ -612,20 +637,39 @@ export default function MealScanScreen() {
 
         <Text style={styles.privacyCaptionClean}>{AI_PRIVACY_NOTICE}</Text>
 
-        {/* Bottom Shutter & Gallery Bar */}
+        {/* Bottom Shutter, Gallery, Speak & Type Bar */}
         <View style={styles.bottomBar}>
           <Pressable
             style={({ pressed }) => [styles.sideBarBtn, pressed && styles.pressed]}
             onPress={handlePickFromGallery}
+            accessibilityRole="button"
+            accessibilityLabel="Pick meal photo from gallery"
           >
-            <Ionicons name="images" size={26} color={colors.white} />
+            <Ionicons name="images" size={24} color={colors.white} />
             <Text style={styles.sideBarBtnLabel}>Gallery</Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [styles.sideBarBtn, pressed && styles.pressed]}
+            onPress={() => {
+              safeHaptics.impactLight();
+              setIsVoiceModalVisible(true);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Add meal by speaking"
+          >
+            <View style={styles.voiceBtnCircle}>
+              <Ionicons name="mic" size={18} color={colors.primary} />
+            </View>
+            <Text style={[styles.sideBarBtnLabel, { color: colors.primaryLight }]}>Speak</Text>
           </Pressable>
 
           {/* Shutter Button */}
           <Pressable
             style={({ pressed }) => [styles.shutterOuterRing, pressed && styles.pressed]}
             onPress={handleCapturePhoto}
+            accessibilityRole="button"
+            accessibilityLabel="Capture photo of meal"
           >
             <View style={styles.shutterInnerCircle} />
           </Pressable>
@@ -633,8 +677,10 @@ export default function MealScanScreen() {
           <Pressable
             style={({ pressed }) => [styles.sideBarBtn, pressed && styles.pressed]}
             onPress={() => setIsTypeModalVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Type meal details manually"
           >
-            <Ionicons name="create-outline" size={26} color={colors.primary} />
+            <Ionicons name="create-outline" size={24} color={colors.white} />
             <Text style={styles.sideBarBtnLabel}>Type Meal</Text>
           </Pressable>
         </View>
@@ -644,6 +690,19 @@ export default function MealScanScreen() {
             visible={isTypeModalVisible}
             onClose={() => setIsTypeModalVisible(false)}
             onSubmitResult={(result) => {
+              setAiResult(result);
+              setCapturedImageUri(null);
+              setPortionMultiplier(1.0);
+              setStage('verifying');
+            }}
+          />
+        )}
+        {isVoiceModalVisible && (
+          <VoiceInputModal
+            visible={isVoiceModalVisible}
+            mode="meal"
+            onClose={() => setIsVoiceModalVisible(false)}
+            onSubmitMealResult={(result) => {
               setAiResult(result);
               setCapturedImageUri(null);
               setPortionMultiplier(1.0);
@@ -778,7 +837,17 @@ const styles = StyleSheet.create({
   sideBarBtn: {
     alignItems: 'center',
     gap: 4,
-    minWidth: 60,
+    minWidth: 54,
+  },
+  voiceBtnCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.primaryMuted,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sideBarBtnLabel: {
     color: colors.white,

@@ -56,5 +56,17 @@ describe('AI Vision Service Hardening (aiVisionService.ts)', () => {
       expect(report1.overallSafetyScore).toBe(report2.overallSafetyScore);
       expect(report1.productName).toBe(report2.productName);
     });
+
+    it('retries with different product name using productNameHint in options', async () => {
+      const originalReport = await analyzeIngredientsImage('almond hair oil demo');
+      expect(originalReport.productName).toBe('Commercial Hair Oil');
+
+      const retriedReport = await analyzeIngredientsImage('almond hair oil demo', {
+        productNameHint: 'Bajaj Almond Drops Non-Sticky Hair Oil',
+        isExplicitDemo: true,
+      });
+      expect(retriedReport.productName).toBe('Bajaj Almond Drops Non-Sticky Hair Oil');
+      expect(retriedReport.category).toBe('Hair Care');
+    });
   });
 });

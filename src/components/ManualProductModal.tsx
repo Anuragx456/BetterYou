@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { analyzeProductText } from '../services/aiVisionService';
+import { VoiceInputModal } from './VoiceInputModal';
 import { colors } from '../theme/colors';
 import { ToxicityReport } from '../types';
 
@@ -40,6 +41,7 @@ export function ManualProductModal({ visible, onClose, onSubmitResult }: ManualP
   const [productName, setProductName] = useState<string>('');
   const [ingredientsText, setIngredientsText] = useState<string>('');
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [isVoiceSubModalVisible, setIsVoiceSubModalVisible] = useState<boolean>(false);
 
   const handleAnalyze = async () => {
     const trimmedName = productName.trim();
@@ -94,7 +96,18 @@ export function ManualProductModal({ visible, onClose, onSubmitResult }: ManualP
             <View style={styles.cardGroup}>
               {/* Product Name Input */}
               <View style={styles.fieldSection}>
-                <Text style={styles.inputLabel}>PRODUCT OR BRAND NAME</Text>
+                <View style={styles.inputHeaderRow}>
+                  <Text style={styles.inputLabel}>PRODUCT OR BRAND NAME</Text>
+                  <Pressable
+                    style={({ pressed }) => [styles.speakInlineBtn, pressed && styles.pressed]}
+                    onPress={() => setIsVoiceSubModalVisible(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Speak product name"
+                  >
+                    <Ionicons name="mic" size={13} color={colors.primary} />
+                    <Text style={styles.speakInlineText}>Speak</Text>
+                  </Pressable>
+                </View>
                 <TextInput
                   style={styles.textInput}
                   value={productName}
@@ -170,6 +183,17 @@ export function ManualProductModal({ visible, onClose, onSubmitResult }: ManualP
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
+      {isVoiceSubModalVisible && (
+        <VoiceInputModal
+          visible={isVoiceSubModalVisible}
+          mode="product"
+          onClose={() => setIsVoiceSubModalVisible(false)}
+          onSubmitProductResult={(report) => {
+            onSubmitResult(report);
+            onClose();
+          }}
+        />
+      )}
     </Modal>
   );
 }
@@ -233,6 +257,28 @@ const styles = StyleSheet.create({
   },
   fieldSection: {
     width: '100%',
+  },
+  inputHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  speakInlineBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.primaryMuted,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+  },
+  speakInlineText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.primary,
   },
   labelRow: {
     flexDirection: 'row',

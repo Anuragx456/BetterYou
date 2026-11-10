@@ -110,3 +110,40 @@ export function getRecentDaysList(count: number = 7): DayItem[] {
   return result;
 }
 
+/**
+ * Returns formatted month and year label, e.g. "Feb 2025" or "Nov 2026".
+ */
+export function formatMonthYear(dateStr?: string): string {
+  const [y, m, d] = (dateStr || getLocalDateString()).split('-').map(Number);
+  const dateObj = new Date(y, (m || 1) - 1, d || 1);
+  return dateObj.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+}
+
+/**
+ * Returns the 7 calendar days of the week (Sunday through Saturday) for the given date.
+ */
+export function getWeekDaysList(referenceDateStr?: string): DayItem[] {
+  const baseStr = referenceDateStr || getLocalDateString();
+  const [y, m, d] = baseStr.split('-').map(Number);
+  const refDate = new Date(y, (m || 1) - 1, d || 1);
+  const dayOfWeek = refDate.getDay(); // 0 is Sunday, 6 is Saturday
+  const sunday = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate() - dayOfWeek);
+
+  const result: DayItem[] = [];
+  const todayStr = getLocalDateString();
+  const dayNamesShort = ['SUN', 'MON', 'TUE', 'WED', 'THR', 'FRI', 'SAT'];
+
+  for (let i = 0; i < 7; i++) {
+    const cur = new Date(sunday.getFullYear(), sunday.getMonth(), sunday.getDate() + i);
+    const curStr = getLocalDateString(cur);
+    result.push({
+      dateStr: curStr,
+      dayNum: cur.getDate(),
+      dayName: dayNamesShort[i],
+      isToday: curStr === todayStr,
+    });
+  }
+  return result;
+}
+
+

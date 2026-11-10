@@ -21,13 +21,25 @@ import {
   RawToxicityAiOutput,
 } from './aiSchemas';
 import { enqueueOfflineScan } from './scanQueueService';
+import { GeminiFeature, useGeminiUsageStore } from '../store/useGeminiUsageStore';
 
-// In-memory Scan Cache (Fingerprint -> { report, timestamp })
+// In-memory Scan Cache (Fingerprint -> { report, timestamp }) with LRU bounds
+const MAX_SCAN_CACHE_ENTRIES = 50;
 const toxicityScanCache = new Map<string, { report: ToxicityReport; timestamp: number }>();
 // In-memory Image Signature Cache (Image Hash -> { report/result, timestamp }) to eliminate duplicate network calls
 const toxicityImageHashCache = new Map<string, { report: ToxicityReport; timestamp: number }>();
 const mealImageHashCache = new Map<string, { result: MealAnalysisResult; timestamp: number }>();
 const SCAN_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+function setBoundedCache<K, V>(cache: Map<K, V>, key: K, value: V) {
+  if (cache.size >= MAX_SCAN_CACHE_ENTRIES) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) {
+      cache.delete(oldest);
+    }
+  }
+  cache.set(key, value);
+}
 
 export function clearAiVisionCaches() {
   toxicityScanCache.clear();
@@ -116,6 +128,7 @@ export interface GeminiVisionOptions {
   responseSchema?: Record<string, unknown>;
   timeoutMs?: number;
   maxRetries?: number;
+  feature?: GeminiFeature;
 }
 
 /**
@@ -129,12 +142,14 @@ export async function callGeminiVision(
   base64Image: string,
   options?: GeminiVisionOptions
 ): Promise<{ text: string; usedModel: string }> {
+  const startTime = Date.now();
   const customKey = getEffectiveApiKey();
   const { mimeType, base64Data } = parseBase64Image(base64Image);
   const chosenModel = getEffectiveModel();
   const timeoutMs = options?.timeoutMs ?? 30000;
   const maxRetries = options?.maxRetries ?? 2;
   const responseSchema = options?.responseSchema;
+  const feature: GeminiFeature = options?.feature || 'meal-vision';
 
   // 1. Direct BYOK Route (User-supplied key stored in hardware-backed SecureStore)
   if (customKey) {
@@ -205,6 +220,11 @@ export async function callGeminiVision(
                 parts?: { text?: string }[];
               };
             }[];
+            usageMetadata?: {
+              promptTokenCount?: number;
+              candidatesTokenCount?: number;
+              totalTokenCount?: number;
+            };
           }
 
           const result = (await response.json()) as GeminiResponse;
@@ -214,6 +234,23 @@ export async function callGeminiVision(
           if (!candidateText) {
             throw new Error(`Gemini ${model} returned empty content.`);
           }
+
+          const durationMs = Date.now() - startTime;
+          const usage = result.usageMetadata;
+          const promptTokens = usage?.promptTokenCount ?? Math.round(prompt.length / 4 + 258);
+          const candidateTokens = usage?.candidatesTokenCount ?? Math.round(candidateText.length / 4);
+          const totalTokens = usage?.totalTokenCount ?? (promptTokens + candidateTokens);
+
+          useGeminiUsageStore.getState().recordApiCall({
+            feature,
+            model,
+            promptTokens,
+            candidateTokens,
+            totalTokens,
+            durationMs,
+            status: 'success',
+            isCustomKey: true,
+          });
 
           return { text: extractJsonString(candidateText), usedModel: model };
         } catch (err: unknown) {
@@ -230,6 +267,15 @@ export async function callGeminiVision(
         }
       }
     }
+
+    useGeminiUsageStore.getState().recordApiCall({
+      feature,
+      model: chosenModel,
+      durationMs: Date.now() - startTime,
+      status: 'error',
+      errorMessage: lastError?.message || 'All BYOK Gemini models failed.',
+      isCustomKey: true,
+    });
 
     throw lastError ?? new Error('All BYOK Gemini models failed.');
   }
@@ -296,6 +342,18 @@ export async function callGeminiVision(
         throw new Error(data.error || 'Proxy returned empty response.');
       }
 
+      const durationMs = Date.now() - startTime;
+      useGeminiUsageStore.getState().recordApiCall({
+        feature,
+        model: data.usedModel || chosenModel,
+        promptTokens: Math.round(prompt.length / 4 + 258),
+        candidateTokens: Math.round((data.text || '').length / 4),
+        totalTokens: Math.round(prompt.length / 4 + 258 + (data.text || '').length / 4),
+        durationMs,
+        status: 'success',
+        isCustomKey: false,
+      });
+
       return { text: extractJsonString(data.text), usedModel: data.usedModel || chosenModel };
     } catch (err: unknown) {
       if (attempt < maxRetries && !(err instanceof Error && err.message.includes('rate limit'))) {
@@ -303,11 +361,28 @@ export async function callGeminiVision(
         continue;
       }
       const msg = err instanceof Error ? err.message : String(err);
+      useGeminiUsageStore.getState().recordApiCall({
+        feature,
+        model: chosenModel,
+        durationMs: Date.now() - startTime,
+        status: 'error',
+        errorMessage: msg,
+        isCustomKey: false,
+      });
       throw new Error(`Vision Service: ${msg}`);
     } finally {
       clearTimeout(timeoutId);
     }
   }
+
+  useGeminiUsageStore.getState().recordApiCall({
+    feature,
+    model: chosenModel,
+    durationMs: Date.now() - startTime,
+    status: 'error',
+    errorMessage: 'Vision Service request failed after retries.',
+    isCustomKey: false,
+  });
 
   throw new Error('Vision Service request failed after retries.');
 }
@@ -462,18 +537,10 @@ export async function analyzeMealImage(
     return cached.result;
   }
 
-  const prompt = `You are an elite sports nutritionist and computer vision AI.
-Analyze this meal photo thoroughly.
-Estimate:
-1. dishName: Concise descriptive name of the dish.
-2. estimatedWeightGrams: Approximate total weight of the portion in grams.
-3. calories: Total kilocalories (kcal).
-4. protein: Protein in grams.
-5. carbs: Carbohydrates in grams.
-6. fat: Fat in grams.
-7. ingredientsDetected: Array of identified ingredients.
-
-Return ONLY a valid JSON object matching the requested schema.`;
+  const prompt = `You are a sports nutritionist and computer vision AI.
+Analyze this meal photo thoroughly and estimate the dish name, portion weight in grams, total calories, and macronutrient split (protein, carbs, fat in grams).
+Ensure estimates are thermodynamically plausible (4*P + 4*C + 9*F ≈ calories).
+Return a valid JSON object matching the response schema.`;
 
   let parsed: RawMealAnalysisAiOutput | null = null;
   let usedModelName = 'gemini-3.6-flash';
@@ -481,6 +548,7 @@ Return ONLY a valid JSON object matching the requested schema.`;
   try {
     const { text: rawJson, usedModel } = await callGeminiVision(prompt, base64Image, {
       responseSchema: GEMINI_MEAL_RESPONSE_SCHEMA,
+      feature: 'meal-vision',
     });
     usedModelName = usedModel;
 
@@ -554,7 +622,7 @@ Return ONLY a valid JSON object matching the requested schema.`;
     generatedBy: usedModelName,
   };
 
-  mealImageHashCache.set(imageSig, { result, timestamp: Date.now() });
+  setBoundedCache(mealImageHashCache, imageSig, { result, timestamp: Date.now() });
   return result;
 }
 
@@ -564,37 +632,39 @@ Return ONLY a valid JSON object matching the requested schema.`;
  */
 export async function analyzeIngredientsImage(
   base64Image: string,
-  options?: { isExplicitDemo?: boolean; localImagePath?: string }
+  options?: { isExplicitDemo?: boolean; localImagePath?: string; productNameHint?: string }
 ): Promise<ToxicityReport> {
   const isDemo = options?.isExplicitDemo || (base64Image.length > 0 && base64Image.length < 50 && !base64Image.startsWith('data:') && !base64Image.startsWith('/9j/'));
   if (!base64Image || isDemo) {
     if (isDemo) {
-      const demoReport = getMockToxicityReport(base64Image);
+      const demoHint = options?.productNameHint || base64Image;
+      const demoReport = getMockToxicityReport(demoHint);
+      if (options?.productNameHint) {
+        demoReport.productName = options.productNameHint.trim();
+      }
       demoReport.generatedBy = 'offline-demo-mock';
       return demoReport;
     }
     throw new Error('No image data was provided for ingredient analysis. Please take a photo or choose from gallery.');
   }
 
-  // 1. Check Image Hash Cache FIRST (0 network requests for identical photos)
-  const imageSig = computeImageSignature(base64Image);
+  // 1. Check Image Hash Cache FIRST (incorporating productNameHint to avoid returning mismatched previous scan)
+  const imageSig = computeImageSignature(base64Image) + (options?.productNameHint ? `::hint:${options.productNameHint.trim().toLowerCase()}` : '');
   const cachedImage = toxicityImageHashCache.get(imageSig);
   if (cachedImage && Date.now() - cachedImage.timestamp < SCAN_CACHE_TTL_MS) {
     return cachedImage.report;
   }
 
-  const prompt = `You are an elite consumer chemical safety and Indian supermarket packaging expert.
-Perform thorough OCR on this product package or ingredient label photo:
-1. productName: Commercial product and brand name.
-2. category: Supermarket classification ("Food & Beverages", "Personal Care & Skincare", "Hair Care", "Oral Care", "Household & Cleaning", "Pest Control", "Baby Care", "Ayurveda & OTC").
-3. allIngredients: Array of detected ingredients, INS codes, and E-numbers.
-4. harmfulIngredients: Array of { name, category, healthImpact, severity: "low" | "moderate" | "high" }.
-5. indianMarketAlert: Contextual alert for deceptive Indian market formulations (e.g. 80% mineral oil hair oils, transfluthrin vaporizers) or null.
-6. novaGroup: 1-4 for food items or null.
-7. nutriscoreGrade: "a"|"b"|"c"|"d"|"e" for food items or null.
-8. cleanSummary: Factual summary of ingredients.
-
-Return ONLY a valid JSON object matching the requested schema.`;
+  const prompt = options?.productNameHint
+    ? `You are a consumer chemical safety and Indian supermarket packaging expert.
+The user confirms this product is: "${options.productNameHint}".
+Perform forensic OCR on this product package or ingredient label photo specifically for "${options.productNameHint}".
+Detect all printed ingredients, INS/E-number additives, and deceptive Indian formulation traps.
+Return a valid JSON object strictly matching the response schema.`
+    : `You are a consumer chemical safety and Indian supermarket packaging expert.
+Perform forensic OCR on this product package or ingredient label photo.
+Detect all printed ingredients, INS/E-number additives, and deceptive Indian formulation traps (e.g. 80% mineral oil hair oils, transfluthrin vaporizers).
+Return a valid JSON object strictly matching the response schema.`;
 
   let parsed: RawToxicityAiOutput | null = null;
   let usedModelName = 'gemini-3.6-flash';
@@ -602,6 +672,7 @@ Return ONLY a valid JSON object matching the requested schema.`;
   try {
     const { text: rawJson, usedModel } = await callGeminiVision(prompt, base64Image, {
       responseSchema: GEMINI_TOXICITY_RESPONSE_SCHEMA,
+      feature: 'toxicity-scan',
     });
     usedModelName = usedModel;
 
@@ -653,7 +724,7 @@ Return ONLY a valid JSON object matching the requested schema.`;
     };
   }
 
-  const detectedName = parsed.productName || 'Inspected Supermarket Item';
+  const detectedName = options?.productNameHint?.trim() || parsed.productName || 'Inspected Supermarket Item';
   const detectedIngredients: string[] =
     parsed.allIngredients.length > 0
       ? parsed.allIngredients
@@ -711,9 +782,9 @@ Return ONLY a valid JSON object matching the requested schema.`;
   if (parsed.cleanSummary) baseReport.cleanSummary = parsed.cleanSummary;
   baseReport.generatedBy = usedModelName;
 
-  // Save to both image hash and text fingerprint caches
-  toxicityScanCache.set(fingerprint, { report: baseReport, timestamp: Date.now() });
-  toxicityImageHashCache.set(imageSig, { report: baseReport, timestamp: Date.now() });
+  // Save to both bounded image hash and text fingerprint caches
+  setBoundedCache(toxicityScanCache, fingerprint, { report: baseReport, timestamp: Date.now() });
+  setBoundedCache(toxicityImageHashCache, imageSig, { report: baseReport, timestamp: Date.now() });
 
   return baseReport;
 }
@@ -721,7 +792,11 @@ Return ONLY a valid JSON object matching the requested schema.`;
 /**
  * Caller for Gemini Text-only Generation
  */
-async function callGeminiText(prompt: string): Promise<{ text: string; usedModel: string }> {
+async function callGeminiText(
+  prompt: string,
+  feature: GeminiFeature = 'meal-voice'
+): Promise<{ text: string; usedModel: string }> {
+  const startTime = Date.now();
   const customKey = getEffectiveApiKey();
   const chosenModel = getEffectiveModel();
 
@@ -769,6 +844,11 @@ async function callGeminiText(prompt: string): Promise<{ text: string; usedModel
               parts?: { text?: string }[];
             };
           }[];
+          usageMetadata?: {
+            promptTokenCount?: number;
+            candidatesTokenCount?: number;
+            totalTokenCount?: number;
+          };
         }
 
         const result = (await response.json()) as GeminiResponse;
@@ -778,6 +858,23 @@ async function callGeminiText(prompt: string): Promise<{ text: string; usedModel
         if (!candidateText) {
           throw new Error(`Gemini ${model} returned empty text.`);
         }
+
+        const durationMs = Date.now() - startTime;
+        const usage = result.usageMetadata;
+        const promptTokens = usage?.promptTokenCount ?? Math.round(prompt.length / 4);
+        const candidateTokens = usage?.candidatesTokenCount ?? Math.round(candidateText.length / 4);
+        const totalTokens = usage?.totalTokenCount ?? (promptTokens + candidateTokens);
+
+        useGeminiUsageStore.getState().recordApiCall({
+          feature,
+          model,
+          promptTokens,
+          candidateTokens,
+          totalTokens,
+          durationMs,
+          status: 'success',
+          isCustomKey: true,
+        });
 
         return { text: extractJsonString(candidateText), usedModel: model };
       } catch (err: unknown) {
@@ -789,6 +886,15 @@ async function callGeminiText(prompt: string): Promise<{ text: string; usedModel
         clearTimeout(timeoutId);
       }
     }
+
+    useGeminiUsageStore.getState().recordApiCall({
+      feature,
+      model: chosenModel,
+      durationMs: Date.now() - startTime,
+      status: 'error',
+      errorMessage: lastError?.message || 'All BYOK Gemini text models failed.',
+      isCustomKey: true,
+    });
 
     throw lastError ?? new Error('All BYOK Gemini text models failed.');
   }
@@ -835,9 +941,29 @@ async function callGeminiText(prompt: string): Promise<{ text: string; usedModel
       throw new Error(data.error || 'Proxy returned empty text.');
     }
 
+    const durationMs = Date.now() - startTime;
+    useGeminiUsageStore.getState().recordApiCall({
+      feature,
+      model: data.usedModel || chosenModel,
+      promptTokens: Math.round(prompt.length / 4),
+      candidateTokens: Math.round((data.text || '').length / 4),
+      totalTokens: Math.round(prompt.length / 4 + (data.text || '').length / 4),
+      durationMs,
+      status: 'success',
+      isCustomKey: false,
+    });
+
     return { text: extractJsonString(data.text), usedModel: data.usedModel || chosenModel };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
+    useGeminiUsageStore.getState().recordApiCall({
+      feature,
+      model: chosenModel,
+      durationMs: Date.now() - startTime,
+      status: 'error',
+      errorMessage: msg,
+      isCustomKey: false,
+    });
     throw new Error(`Text Service: ${msg}`);
   } finally {
     clearTimeout(timeoutId);
@@ -876,7 +1002,7 @@ Return ONLY a valid JSON object matching this schema:
 }`;
 
   try {
-    const { text: rawJson } = await callGeminiText(prompt);
+    const { text: rawJson } = await callGeminiText(prompt, 'meal-voice');
     const parsed = JSON.parse(rawJson) as RawMealAnalysisAiOutput;
 
     const validated = MealAnalysisAiSchema.safeParse(parsed);
@@ -991,7 +1117,7 @@ Extract:
 4. cleanSummary: 1-2 sentence plain-language screening summary.
 
 Return ONLY a valid JSON object matching the requested schema.`;
-      const { text: rawJson, usedModel } = await callGeminiText(prompt);
+      const { text: rawJson, usedModel } = await callGeminiText(prompt, 'toxicity-voice');
       const parsed = JSON.parse(rawJson) as RawToxicityAiOutput;
 
       if (parsed.indianMarketAlert) baseReport.indianMarketAlert = parsed.indianMarketAlert;
@@ -1022,7 +1148,7 @@ Identify its typical packaging formulation, brand ingredients, and chemical prof
 Return ONLY a valid JSON object matching the requested schema.`;
 
   try {
-    const { text: rawJson, usedModel } = await callGeminiText(prompt);
+    const { text: rawJson, usedModel } = await callGeminiText(prompt, 'toxicity-voice');
     const parsed = JSON.parse(rawJson) as RawToxicityAiOutput;
 
     const detectedName = parsed.productName?.trim() || cleanName;

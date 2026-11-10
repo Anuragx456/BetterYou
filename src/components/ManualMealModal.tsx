@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { analyzeMealText } from '../services/aiVisionService';
 import { validateMacroPlausibility } from '../services/aiSchemas';
+import { VoiceInputModal } from './VoiceInputModal';
 import { colors } from '../theme/colors';
 import { MealAnalysisResult } from '../types';
 
@@ -39,6 +40,7 @@ export function ManualMealModal({ visible, onClose, onSubmitResult }: ManualMeal
   // AI Description state
   const [description, setDescription] = useState<string>('');
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [isVoiceSubModalVisible, setIsVoiceSubModalVisible] = useState<boolean>(false);
 
   // Direct Macros state
   const [dishName, setDishName] = useState<string>('');
@@ -162,7 +164,18 @@ export function ManualMealModal({ visible, onClose, onSubmitResult }: ManualMeal
             {tabMode === 'ai' ? (
               /* AI Description Mode */
               <View style={styles.cardGroup}>
-                <Text style={styles.inputLabel}>WHAT DID YOU EAT?</Text>
+                <View style={styles.inputHeaderRow}>
+                  <Text style={styles.inputLabel}>WHAT DID YOU EAT?</Text>
+                  <Pressable
+                    style={({ pressed }) => [styles.speakInlineBtn, pressed && styles.pressed]}
+                    onPress={() => setIsVoiceSubModalVisible(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Speak meal"
+                  >
+                    <Ionicons name="mic" size={13} color={colors.primary} />
+                    <Text style={styles.speakInlineText}>Speak</Text>
+                  </Pressable>
+                </View>
                 <TextInput
                   style={styles.textArea}
                   value={description}
@@ -306,6 +319,17 @@ export function ManualMealModal({ visible, onClose, onSubmitResult }: ManualMeal
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
+      {isVoiceSubModalVisible && (
+        <VoiceInputModal
+          visible={isVoiceSubModalVisible}
+          mode="meal"
+          onClose={() => setIsVoiceSubModalVisible(false)}
+          onSubmitMealResult={(result) => {
+            onSubmitResult(result);
+            onClose();
+          }}
+        />
+      )}
     </Modal>
   );
 }
@@ -398,12 +422,34 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 16,
   },
+  inputHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  speakInlineBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.primaryMuted,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+  },
+  speakInlineText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.primary,
+  },
   inputLabel: {
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 1,
     color: colors.textMuted,
-    marginBottom: 6,
+    marginBottom: 0,
   },
   textArea: {
     backgroundColor: colors.cardHover,

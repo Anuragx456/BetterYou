@@ -29,8 +29,15 @@ export function EditProductModal({
   onClose,
   onSave,
 }: EditProductModalProps) {
+  const [prevInitialName, setPrevInitialName] = useState(initialName);
   const [productName, setProductName] = useState(initialName);
   const [ingredientsText, setIngredientsText] = useState(() => initialIngredients.join(', '));
+
+  if (initialName !== prevInitialName) {
+    setPrevInitialName(initialName);
+    setProductName(initialName);
+    setIngredientsText(initialIngredients.join(', '));
+  }
 
   // Compute live ingredient count
   const detectedIngredients = ingredientsText
