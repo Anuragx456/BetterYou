@@ -7,10 +7,15 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  dbGetAllMeals,
+  dbGetAllWorkouts,
+} from '../../db/client';
 import {
   generateJsonBackup,
   generateMealsCsv,
@@ -21,18 +26,23 @@ import { getAppLanguage, setAppLanguage, SupportedLanguage } from '../../i18n';
 import { useFitnessStore } from '../../store/useFitnessStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useGeminiUsageStore } from '../../store/useGeminiUsageStore';
-import { colors } from '../../theme/colors';
+import type { ThemeColors } from '../../theme/colors';
+import { useThemeColors, useThemedStyles } from '../../theme/theme';
 
 export default function SettingsScreen() {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
   const router = useRouter();
 
   // Store hooks
   const resetSettings = useSettingsStore((state) => state.resetSettings);
   const dailyGoals = useFitnessStore((state) => state.dailyGoals);
-  const workouts = useFitnessStore((state) => state.workouts);
-  const meals = useFitnessStore((state) => state.meals);
+  const workoutCount = useFitnessStore((state) => state.workoutCount);
+  const mealCount = useFitnessStore((state) => state.mealCount);
 
   const customApiKey = useSettingsStore((state) => state.customApiKey);
+  const colorScheme = useSettingsStore((state) => state.colorScheme);
+  const setColorScheme = useSettingsStore((state) => state.setColorScheme);
   const selectedModel = useSettingsStore((state) => state.selectedModel);
   const isCustomModel = useSettingsStore((state) => state.isCustomModel);
   const customModelName = useSettingsStore((state) => state.customModelName);
@@ -53,6 +63,7 @@ export default function SettingsScreen() {
   };
 
   const handleExportWorkoutsCsv = async () => {
+    const workouts = await dbGetAllWorkouts();
     const csv = generateWorkoutsCsv(workouts);
     const status = await shareOrCopyData(csv, 'BetterYou_Workouts.csv');
     Alert.alert(
@@ -62,6 +73,7 @@ export default function SettingsScreen() {
   };
 
   const handleExportMealsCsv = async () => {
+    const meals = await dbGetAllMeals();
     const csv = generateMealsCsv(meals);
     const status = await shareOrCopyData(csv, 'BetterYou_Meals.csv');
     Alert.alert(
@@ -71,6 +83,7 @@ export default function SettingsScreen() {
   };
 
   const handleExportJsonBackup = async () => {
+    const [workouts, meals] = await Promise.all([dbGetAllWorkouts(), dbGetAllMeals()]);
     const json = generateJsonBackup(workouts, meals, dailyGoals);
     const status = await shareOrCopyData(json, 'BetterYou_Backup.json');
     Alert.alert(
@@ -129,6 +142,38 @@ export default function SettingsScreen() {
             <Text style={styles.statusPillText} allowFontScaling>
               {hasCustom ? 'BYOK Mode' : 'Proxy Mode'}
             </Text>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader} allowFontScaling>
+            APPEARANCE
+          </Text>
+          <View style={styles.cardGroup}>
+            <View style={styles.navRow}>
+              <View style={[styles.iconBadge, { backgroundColor: colors.primaryMuted }]}>
+                <Ionicons
+                  name={colorScheme === 'dark' ? 'moon' : 'sunny-outline'}
+                  size={18}
+                  color={colors.primary}
+                />
+              </View>
+              <View style={styles.navRowMeta}>
+                <Text style={styles.navRowTitle} allowFontScaling>
+                  Dark mode
+                </Text>
+                <Text style={styles.navRowSubtitle} allowFontScaling>
+                  Dim the dashboard, scans, and workouts
+                </Text>
+              </View>
+              <Switch
+                value={colorScheme === 'dark'}
+                onValueChange={(enabled) => setColorScheme(enabled ? 'dark' : 'light')}
+                trackColor={{ false: colors.hairline, true: colors.primary }}
+                thumbColor={colors.white}
+                accessibilityLabel="Dark mode"
+              />
+            </View>
           </View>
         </View>
 
@@ -299,7 +344,7 @@ export default function SettingsScreen() {
                   Export Workouts (CSV)
                 </Text>
                 <Text style={styles.navRowSubtitle} allowFontScaling>
-                  Excel / Sheets compatible log ({workouts.length} sessions)
+                  Excel / Sheets compatible log ({workoutCount} sessions)
                 </Text>
               </View>
               <Ionicons name="download-outline" size={18} color={colors.primary} />
@@ -319,7 +364,7 @@ export default function SettingsScreen() {
                   Export Meals (CSV)
                 </Text>
                 <Text style={styles.navRowSubtitle} allowFontScaling>
-                  Nutrition & macro history ({meals.length} meals)
+                  Nutrition & macro history ({mealCount} meals)
                 </Text>
               </View>
               <Ionicons name="download-outline" size={18} color={colors.calories} />
@@ -406,7 +451,8 @@ export default function SettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -603,3 +649,5 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 });
+}
+

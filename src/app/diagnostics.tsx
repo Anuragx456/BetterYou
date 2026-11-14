@@ -15,9 +15,12 @@ import {
   testGeminiModelConnectivity,
   useSettingsStore,
 } from '../store/useSettingsStore';
-import { colors } from '../theme/colors';
+import type { ThemeColors } from '../theme/colors';
+import { useThemeColors, useThemedStyles } from '../theme/theme';
 
 export default function DiagnosticsScreen() {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
   const router = useRouter();
 
   const [isPinging, setIsPinging] = useState<boolean>(false);
@@ -145,9 +148,9 @@ export default function DiagnosticsScreen() {
                     ? 'Ping failed · Server error'
                     : 'Tests live HTTP roundtrip to Gemini endpoint'}
                 </Text>
-                {pingResult.testedAt && (
+                {pingResult.testedAt ? (
                   <Text style={styles.pingTime}>Last tested at {pingResult.testedAt}</Text>
-                )}
+                ) : null}
               </View>
 
               <Pressable
@@ -239,7 +242,8 @@ export default function DiagnosticsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -420,3 +424,5 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
 });
+}
+

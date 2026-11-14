@@ -10,13 +10,14 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Line, Polyline } from 'react-native-svg';
-import { colors } from '../theme/colors';
-import { WorkoutSession } from '../types';
+import type { ThemeColors } from '../theme/colors';
+import { useThemeColors, useThemedStyles } from '../theme/theme';
+import { ExerciseHistoryIndex, normalizeExerciseName } from '../utils/workoutAnalytics';
 
 interface ExerciseHistoryModalProps {
   visible: boolean;
   exerciseName: string;
-  workouts: WorkoutSession[];
+  historyIndex: ExerciseHistoryIndex;
   onClose: () => void;
 }
 
@@ -30,45 +31,15 @@ interface HistoricalDataPoint {
 export function ExerciseHistoryModal({
   visible,
   exerciseName,
-  workouts,
+  historyIndex,
   onClose,
 }: ExerciseHistoryModalProps) {
-  // Extract historical sessions for this specific exercise
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
   const historyData = useMemo<HistoricalDataPoint[]>(() => {
     if (!exerciseName) return [];
-    const points: HistoricalDataPoint[] = [];
-
-    const sorted = [...workouts].sort((a, b) => {
-      const da = new Date(a.completedAt || a.startedAt || 0).getTime();
-      const db = new Date(b.completedAt || b.startedAt || 0).getTime();
-      return da - db;
-    });
-
-    for (const session of sorted) {
-      const ex = session.exercises?.find(
-        (e) => e.name.toLowerCase().trim() === exerciseName.toLowerCase().trim()
-      );
-      if (ex && ex.sets.some((s) => s.completed && s.weightKg > 0)) {
-        const completedSets = ex.sets.filter((s) => s.completed && s.weightKg > 0);
-        const maxWeight = Math.max(...completedSets.map((s) => s.weightKg));
-        const totalVolume = completedSets.reduce((sum, s) => sum + s.weightKg * s.reps, 0);
-        const dateStr = (session.completedAt || session.startedAt || '').split('T')[0] || '';
-
-        points.push({
-          date: dateStr,
-          maxWeightKg: maxWeight,
-          totalVolumeKg: totalVolume,
-          sets: completedSets.map((s) => ({
-            setNumber: s.setNumber,
-            weightKg: s.weightKg,
-            reps: s.reps,
-          })),
-        });
-      }
-    }
-
-    return points;
-  }, [exerciseName, workouts]);
+    return historyIndex.get(normalizeExerciseName(exerciseName))?.sessions ?? [];
+  }, [exerciseName, historyIndex]);
 
   // Compute PRs (Personal Records)
   const prMetrics = useMemo(() => {
@@ -176,7 +147,7 @@ export function ExerciseHistoryModal({
           </View>
 
           {/* SVG Progression Trend Chart */}
-          {chartPoints && (
+          {chartPoints ? (
             <View style={styles.chartCard}>
               <View style={styles.chartHeader}>
                 <Text style={styles.chartTitle}>Max Weight Trend (kg)</Text>
@@ -216,7 +187,7 @@ export function ExerciseHistoryModal({
                 ))}
               </Svg>
             </View>
-          )}
+          ) : null}
 
           {/* Past Sessions List */}
           <View style={styles.sessionsSection}>
@@ -263,7 +234,8 @@ export function ExerciseHistoryModal({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -459,3 +431,5 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
 });
+}
+

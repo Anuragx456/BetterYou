@@ -14,7 +14,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFitnessStore } from '../store/useFitnessStore';
-import { colors } from '../theme/colors';
+import type { ThemeColors } from '../theme/colors';
+import { useThemeColors, useThemedStyles } from '../theme/theme';
 
 const CALORIE_PRESETS = [1600, 1800, 2000, 2200, 2500, 2800];
 
@@ -48,6 +49,8 @@ const ACTIVITY_OPTIONS: ActivityOption[] = [
 ];
 
 export default function NutritionTargetScreen() {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
   const router = useRouter();
   const dailyGoals = useFitnessStore((state) => state.dailyGoals);
   const updateDailyGoals = useFitnessStore((state) => state.updateDailyGoals);
@@ -515,18 +518,19 @@ export default function NutritionTargetScreen() {
           <Text style={styles.saveBtnText}>Save Nutrition Targets</Text>
         </Pressable>
 
-        {feedback && (
+        {feedback ? (
           <View style={styles.feedbackBanner}>
             <Ionicons name="checkmark-circle" size={16} color={colors.success} />
             <Text style={styles.feedbackText}>{feedback}</Text>
           </View>
-        )}
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -969,3 +973,5 @@ const styles = StyleSheet.create({
     color: colors.success,
   },
 });
+}
+

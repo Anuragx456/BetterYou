@@ -9,6 +9,10 @@ export function resetVirtualImageStore(): void {
   virtualFileStore.clear();
 }
 
+export async function ensureFileSystemReady(): Promise<void> {
+  await getFileSystem();
+}
+
 async function getFileSystem() {
   if (hasCheckedFs) return fsModule;
   hasCheckedFs = true;

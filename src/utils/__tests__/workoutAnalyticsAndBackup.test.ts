@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'bun:test';
 import {
+  buildExerciseHistoryIndex,
   detectPersonalRecord,
   getPreviousSessionExerciseValues,
+  personalRecordFromSnapshot,
 } from '../workoutAnalytics';
 import {
   generateJsonBackup,
@@ -80,6 +82,23 @@ describe('Workout Analytics & PR Detection', () => {
     // Max past set volume was 90 * 8 = 720kg or 85 * 10 = 850kg
     const prCheck = detectPersonalRecord('Barbell Bench Press', 90, 10, sampleWorkouts); // 900kg
     expect(prCheck.isVolumePr).toBe(true);
+  });
+
+  it('answers previous-session and PR lookups from one history index', () => {
+    const index = buildExerciseHistoryIndex(sampleWorkouts);
+    const snap = index.get('barbell bench press');
+    expect(snap?.previous?.lastDate).toBe('2026-11-03');
+    expect(snap?.previous?.summaryText).toContain('85kg×10');
+    expect(snap?.sessions).toHaveLength(2);
+    expect(snap?.maxWeight).toBe(95);
+
+    const below = personalRecordFromSnapshot(92, 5, snap);
+    expect(below.isWeightPr).toBe(false);
+    const above = personalRecordFromSnapshot(100, 5, snap);
+    expect(above.isWeightPr).toBe(true);
+    expect(above.previousMaxWeight).toBe(95);
+    expect(personalRecordFromSnapshot(90, 10, snap).isVolumePr).toBe(true);
+    expect(index.get('overhead cable extension')).toBeUndefined();
   });
 });
 

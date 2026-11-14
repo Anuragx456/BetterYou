@@ -25,11 +25,14 @@ import {
   useSettingsStore,
   validateGeminiApiKey,
 } from '../store/useSettingsStore';
-import { colors } from '../theme/colors';
+import type { ThemeColors } from '../theme/colors';
+import { useThemeColors, useThemedStyles } from '../theme/theme';
 
 const GOOGLE_AI_STUDIO_URL = 'https://aistudio.google.com/app/apikey';
 
 export default function AiSettingsScreen() {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
   const router = useRouter();
 
   const customApiKey = useSettingsStore((state) => state.customApiKey);
@@ -73,7 +76,7 @@ export default function AiSettingsScreen() {
         Alert.alert('Unable to open link', `Please navigate to: ${GOOGLE_AI_STUDIO_URL}`);
       });
     }
-  }, []);
+  }, [colors.card, colors.primary]);
 
   const handlePasteKey = useCallback(async () => {
     try {
@@ -243,7 +246,7 @@ export default function AiSettingsScreen() {
             </View>
 
             {/* Validation Message */}
-            {validationResult.type && (
+            {validationResult.type ? (
               <View
                 style={[
                   styles.messageBanner,
@@ -277,7 +280,7 @@ export default function AiSettingsScreen() {
                   {validationResult.message}
                 </Text>
               </View>
-            )}
+            ) : null}
 
             {/* Actions Row */}
             <View style={styles.cardActionRow}>
@@ -296,7 +299,7 @@ export default function AiSettingsScreen() {
                 )}
               </Pressable>
 
-              {hasCustom && (
+              {hasCustom ? (
                 <Pressable
                   style={styles.clearBtn}
                   onPress={handleClearCustomKey}
@@ -304,7 +307,7 @@ export default function AiSettingsScreen() {
                 >
                   <Text style={styles.clearBtnText}>Remove</Text>
                 </Pressable>
-              )}
+              ) : null}
             </View>
 
             {/* Active Key Info & AI Studio Link */}
@@ -385,9 +388,9 @@ export default function AiSettingsScreen() {
                     <Text style={styles.modelId}>{model.id}</Text>
                   </View>
 
-                  {isSelected && (
+                  {isSelected ? (
                     <Ionicons name="checkmark" size={18} color={colors.primary} />
-                  )}
+                  ) : null}
                 </Pressable>
               );
             })}
@@ -436,7 +439,8 @@ export default function AiSettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -826,3 +830,5 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 });
+}
+

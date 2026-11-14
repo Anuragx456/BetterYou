@@ -17,7 +17,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { analyzeMealText } from '../services/aiVisionService';
 import { validateMacroPlausibility } from '../services/aiSchemas';
 import { VoiceInputModal } from './VoiceInputModal';
-import { colors } from '../theme/colors';
+import type { ThemeColors } from '../theme/colors';
+import { useThemeColors, useThemedStyles } from '../theme/theme';
 import { MealAnalysisResult } from '../types';
 
 interface ManualMealModalProps {
@@ -35,6 +36,8 @@ const QUICK_MEAL_PROMPTS = [
 ];
 
 export function ManualMealModal({ visible, onClose, onSubmitResult }: ManualMealModalProps) {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
   const [tabMode, setTabMode] = useState<'ai' | 'direct'>('ai');
 
   // AI Description state
@@ -334,7 +337,8 @@ export function ManualMealModal({ visible, onClose, onSubmitResult }: ManualMeal
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -540,3 +544,5 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
 });
+}
+

@@ -6,15 +6,22 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "betteryou",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.betteryou.app"
+      "bundleIdentifier": "com.betteryou.app",
+      "buildNumber": "1"
     },
     "android": {
       "package": "com.betteryou.app",
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.POST_NOTIFICATIONS"
+      ],
       "adaptiveIcon": {
-        "backgroundColor": "#0A0C10",
+        "backgroundColor": "#F7F8FA",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -30,7 +37,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#0A0C10",
+          "backgroundColor": "#F7F8FA",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
@@ -42,12 +49,25 @@
           "cameraPermission": "BetterYou uses camera vision to estimate meal calories and detect harmful additives on product labels."
         }
       ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "BetterYou accesses your photo library to let you select meal photos and product ingredient labels for analysis."
+        }
+      ],
       "expo-font",
       "expo-image",
       "expo-web-browser",
       "expo-secure-store",
       "expo-sqlite",
       "expo-localization",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#FF7A59"
+        }
+      ],
       "@sentry/react-native",
       [
         "expo-speech-recognition",

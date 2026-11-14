@@ -9,7 +9,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../theme/colors';
+import type { ThemeColors } from '../theme/colors';
+import { useThemeColors, useThemedStyles } from '../theme/theme';
 import { captureException } from '../services/telemetryService';
 
 interface Props {
@@ -54,47 +55,60 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
-      return (
-        <SafeAreaView style={styles.container}>
-          <ScrollView
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
-          >
-            <View style={styles.iconCircle}>
-              <Ionicons name="alert-circle" size={48} color={colors.danger} />
-            </View>
-
-            <Text style={styles.title}>Something went wrong</Text>
-            <Text style={styles.subtitle}>
-              An unexpected error occurred while rendering the screen. You can reload the view below.
-            </Text>
-
-            {this.state.error && (
-              <View style={styles.errorDetailsBox}>
-                <Text style={styles.errorDetailsTitle}>Error Details:</Text>
-                <Text style={styles.errorMessage}>
-                  {this.state.error.name}: {this.state.error.message}
-                </Text>
-              </View>
-            )}
-
-            <Pressable
-              style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]}
-              onPress={this.handleReset}
-            >
-              <Ionicons name="refresh" size={18} color={colors.textInverse} />
-              <Text style={styles.primaryBtnText}>Reload Screen</Text>
-            </Pressable>
-          </ScrollView>
-        </SafeAreaView>
-      );
+      return <ErrorFallback error={this.state.error} onReset={this.handleReset} />;
     }
 
     return this.props.children;
   }
 }
 
-const styles = StyleSheet.create({
+function ErrorFallback({
+  error,
+  onReset,
+}: {
+  error: Error | null;
+  onReset: () => void;
+}) {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
+  return (
+    <SafeAreaView style={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.iconCircle}>
+          <Ionicons name="alert-circle" size={48} color={colors.danger} />
+        </View>
+
+        <Text style={styles.title}>Something went wrong</Text>
+        <Text style={styles.subtitle}>
+          An unexpected error occurred while rendering the screen. You can reload the view below.
+        </Text>
+
+        {error ? (
+          <View style={styles.errorDetailsBox}>
+            <Text style={styles.errorDetailsTitle}>Error Details:</Text>
+            <Text style={styles.errorMessage}>
+              {error.name}: {error.message}
+            </Text>
+          </View>
+        ) : null}
+
+        <Pressable
+          style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]}
+          onPress={onReset}
+        >
+          <Ionicons name="refresh" size={18} color={colors.textInverse} />
+          <Text style={styles.primaryBtnText}>Reload Screen</Text>
+        </Pressable>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -174,3 +188,5 @@ const styles = StyleSheet.create({
     opacity: 0.75,
   },
 });
+}
+

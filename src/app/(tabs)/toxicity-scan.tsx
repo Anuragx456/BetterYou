@@ -1,4 +1,4 @@
-import { AI_TOXICITY_DISCLAIMER, AI_PRIVACY_NOTICE } from '../../constants/disclaimers';
+import { AI_TOXICITY_DISCLAIMER } from '../../constants/disclaimers';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Image } from 'expo-image';
@@ -10,7 +10,6 @@ import {
   Alert,
   Dimensions,
   Linking,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -18,16 +17,14 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { EditProductModal } from '../../components/EditProductModal';
-import { ManualProductModal } from '../../components/ManualProductModal';
-import { RetryProductModal } from '../../components/RetryProductModal';
-import { VoiceInputModal } from '../../components/VoiceInputModal';
-import { analyzeIngredientsImage, analyzeProductText } from '../../services/aiVisionService';
 import { optimizeImageForAiVision } from '../../utils/imageOptimizer';
-import { fetchProductByBarcode, recalculateToxicityReport } from '../../services/barcodeService';
+import { CAPTURE_JPEG_QUALITY, selectPreferredPictureSize } from '../../utils/cameraPictureSize';
+import { createBarcodeScanGuard } from '../../utils/barcodeScanGuard';
+import { useOnDemandComponent } from '../../utils/useOnDemandComponent';
 import { useFitnessStore } from '../../store/useFitnessStore';
 import { safeHaptics } from '../../utils/haptics';
-import { colors } from '../../theme/colors';
+import type { ThemeColors } from '../../theme/colors';
+import { useThemeColors, useThemedStyles } from '../../theme/theme';
 import {
   NovaGroup,
   NutriscoreGrade,
@@ -35,87 +32,33 @@ import {
   ToxicityReport,
 } from '../../types';
 
+async function screenLabelImage(base64: string, fileUri: string, hint?: string) {
+  const vision = await import('../../services/aiVisionService');
+  const imageHash = fileUri ? await vision.hashImageFile(fileUri) : '';
+  return vision.analyzeIngredientsImage(base64, {
+    productNameHint: hint,
+    imageHash: imageHash || undefined,
+    localImagePath: fileUri,
+  });
+}
+
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 type ScreenState = 'scanning' | 'loading' | 'report';
 
-interface DemoLabelSample {
-  id: string;
-  name: string;
-  categoryLabel: string;
-  hint: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  color: string;
-  badge: string;
-}
-
-const DEMO_LABEL_SAMPLES: DemoLabelSample[] = [
-  {
-    id: 'hair_oil',
-    name: 'Almond Hair Oil',
-    categoryLabel: 'Hair Oil',
-    hint: 'hair_oil',
-    icon: 'water',
-    color: '#38BDF8',
-    badge: '77% Mineral Oil',
-  },
-  {
-    id: 'mosquito',
-    name: 'Mosquito Vaporizer',
-    categoryLabel: 'Pest Control',
-    hint: 'mosquito',
-    icon: 'bug',
-    color: '#EF4444',
-    badge: 'Transfluthrin Alert',
-  },
-  {
-    id: 'namkeen',
-    name: 'Spicy Namkeen',
-    categoryLabel: 'Snack Food',
-    hint: 'namkeen',
-    icon: 'flame',
-    color: '#F59E0B',
-    badge: 'Palm Olein & MSG',
-  },
-  {
-    id: 'toothpaste',
-    name: 'Strong Toothpaste',
-    categoryLabel: 'Oral Care',
-    hint: 'toothpaste',
-    icon: 'happy',
-    color: '#2DD4BF',
-    badge: 'SLS Canker Risk',
-  },
-  {
-    id: 'cleaner',
-    name: 'Surface Disinfectant',
-    categoryLabel: 'Floor Wash',
-    hint: 'cleaner',
-    icon: 'color-wand',
-    color: '#A78BFA',
-    badge: 'BKC Pet Hazard',
-  },
-  {
-    id: 'baby',
-    name: 'Baby Talc Powder',
-    categoryLabel: 'Baby Care',
-    hint: 'baby',
-    icon: 'heart',
-    color: '#FB7185',
-    badge: 'Talc Inhalation',
-  },
-  {
-    id: 'pure_oil',
-    name: 'Kachi Ghani Mustard',
-    categoryLabel: 'Pure Pantry',
-    hint: 'pure_oil',
-    icon: 'shield-checkmark',
-    color: '#10B981',
-    badge: '100% Clean',
-  },
-];
+const LabelPreview = React.memo(function LabelPreview({ uri }: { uri: string | null }) {
+  const styles = useThemedStyles(createStyles);
+  if (!uri) return null;
+  return (
+    <View style={styles.labelPreviewContainer}>
+      <Image source={{ uri }} style={styles.labelPreviewImage} contentFit="cover" recyclingKey={uri} />
+    </View>
+  );
+});
 
 export default function ToxicityScanScreen() {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
   const router = useRouter();
   const [isFocused, setIsFocused] = useState<boolean>(true);
   const addScannedProduct = useFitnessStore((state) => state.addScannedProduct);
@@ -132,12 +75,20 @@ export default function ToxicityScanScreen() {
   // Camera Permissions
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
+  const barcodeGuardRef = useRef(createBarcodeScanGuard());
+  const [scanMode, setScanMode] = useState<'label' | 'barcode'>('label');
+  const [pictureSize, setPictureSize] = useState<string | undefined>(undefined);
 
   // States
   const [screenState, setScreenState] = useState<ScreenState>('scanning');
   const [enableTorch, setEnableTorch] = useState<boolean>(false);
   const [report, setReport] = useState<ToxicityReport | null>(null);
   const [capturedImageUri, setCapturedImageUri] = useState<string | null>(null);
+  const [labelPreviewUri, setLabelPreviewUri] = useState<string | null>(null);
+  const rememberCapture = (fullUri: string | null, thumbUri?: string | null) => {
+    setCapturedImageUri(fullUri);
+    setLabelPreviewUri(thumbUri || fullUri);
+  };
   const [isSaved, setIsSaved] = useState<boolean>(false);
   const [isEditModalVisible, setIsEditModalVisible] = useState<boolean>(false);
   const [isRetryModalVisible, setIsRetryModalVisible] = useState<boolean>(false);
@@ -145,10 +96,39 @@ export default function ToxicityScanScreen() {
   const [barcodeSearchPill, setBarcodeSearchPill] = useState<string | null>(null);
   const [isTypeProductModalVisible, setIsTypeProductModalVisible] = useState<boolean>(false);
   const [isVoiceModalVisible, setIsVoiceModalVisible] = useState<boolean>(false);
+  const [EditProduct, loadEditProduct] = useOnDemandComponent(() =>
+    import('../../components/EditProductModal').then((mod) => mod.EditProductModal)
+  );
+  const [RetryProduct, loadRetryProduct] = useOnDemandComponent(() =>
+    import('../../components/RetryProductModal').then((mod) => mod.RetryProductModal)
+  );
+  const [ManualProduct, loadManualProduct] = useOnDemandComponent(() =>
+    import('../../components/ManualProductModal').then((mod) => mod.ManualProductModal)
+  );
+  const [VoiceProduct, loadVoiceProduct] = useOnDemandComponent(() =>
+    import('../../components/VoiceInputModal').then((mod) => mod.VoiceInputModal)
+  );
+  const openEditProduct = useCallback(() => {
+    loadEditProduct();
+    setIsEditModalVisible(true);
+  }, [loadEditProduct]);
+  const openRetryProduct = useCallback(() => {
+    loadRetryProduct();
+    setIsRetryModalVisible(true);
+  }, [loadRetryProduct]);
+  const openManualProduct = useCallback(() => {
+    loadManualProduct();
+    setIsTypeProductModalVisible(true);
+  }, [loadManualProduct]);
+  const openVoiceProduct = useCallback(() => {
+    loadVoiceProduct();
+    setIsVoiceModalVisible(true);
+  }, [loadVoiceProduct]);
 
   // Handle Edit Save
-  const handleSaveEdit = (newName: string, newIngredients: string[]) => {
+  const handleSaveEdit = async (newName: string, newIngredients: string[]) => {
     if (!report) return;
+    const { recalculateToxicityReport } = await import('../../services/barcodeService');
     const updated = recalculateToxicityReport(newName, newIngredients, report);
     setReport(updated);
     Alert.alert('Report Updated!', 'Safety score, additives, and Indian market alerts have been recalculated.');
@@ -157,7 +137,7 @@ export default function ToxicityScanScreen() {
   // Reset to scan another label
   const handleResetScanner = () => {
     setReport(null);
-    setCapturedImageUri(null);
+    rememberCapture(null);
     setIsSaved(false);
     setIsProcessingBarcode(false);
     setBarcodeSearchPill(null);
@@ -182,15 +162,17 @@ export default function ToxicityScanScreen() {
         // Re-analyze existing captured photo with the new product name hint
         try {
           const optimized = await optimizeImageForAiVision(capturedImageUri, 1024);
-          updatedReport = await analyzeIngredientsImage(optimized.base64 || '', {
-            productNameHint: cleanName,
-          });
+          updatedReport = await screenLabelImage(
+            optimized.base64 || '',
+            optimized.uri || capturedImageUri,
+            cleanName
+          );
         } catch {
-          // If image re-analysis encounters issues, fall back to product formulation database
+          const { analyzeProductText } = await import('../../services/aiVisionService');
           updatedReport = await analyzeProductText(cleanName);
         }
       } else {
-        // Barcode or manual scan: query Indian chemical & formulation database
+        const { analyzeProductText } = await import('../../services/aiVisionService');
         updatedReport = await analyzeProductText(cleanName);
       }
 
@@ -213,22 +195,26 @@ export default function ToxicityScanScreen() {
   // AUTOMATIC BARCODE SCANNER HANDLER (Deterministic Fast-Path)
   // -------------------------------------------------------------
   const handleBarcodeScanned = async ({ data }: { data: string }) => {
-    if (screenState !== 'scanning' || isProcessingBarcode || !data) return;
+    if (scanMode !== 'barcode' || screenState !== 'scanning' || !data) return;
+    if (!barcodeGuardRef.current.tryAcquire()) return;
     setIsProcessingBarcode(true);
     setBarcodeSearchPill(`Checking barcode: ${data}...`);
 
     try {
+      const { fetchProductByBarcode } = await import('../../services/barcodeService');
       const toxReport = await fetchProductByBarcode(data);
       safeHaptics.success();
       setReport(toxReport);
       setBarcodeSearchPill(null);
       setScreenState('report');
     } catch {
-      // If barcode not found in local/global database, keep scanning live without jarring screen switch
       setBarcodeSearchPill('Barcode not found in registry. Snap photo to OCR printed label.');
       setTimeout(() => setBarcodeSearchPill(null), 3500);
     } finally {
-      setTimeout(() => setIsProcessingBarcode(false), 3000);
+      setTimeout(() => {
+        barcodeGuardRef.current.release();
+        setIsProcessingBarcode(false);
+      }, 3000);
     }
   };
 
@@ -242,7 +228,7 @@ export default function ToxicityScanScreen() {
         'Camera is not ready or unavailable on this device. Please select a packaging photo from your gallery or type ingredients manually.',
         [
           { text: 'Gallery', onPress: handlePickLabelFromGallery },
-          { text: 'Type Manually', onPress: () => setIsTypeProductModalVisible(true) },
+          { text: 'Type Manually', onPress: () => openManualProduct() },
           { text: 'Cancel', style: 'cancel' },
         ]
       );
@@ -252,14 +238,15 @@ export default function ToxicityScanScreen() {
     try {
       safeHaptics.impactHeavy();
       const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.8,
+        quality: CAPTURE_JPEG_QUALITY,
       });
 
       if (photo?.uri) {
         setScreenState('loading');
         const optimized = await optimizeImageForAiVision(photo.uri, 1024);
-        setCapturedImageUri(optimized.uri || photo.uri);
-        const toxReport = await analyzeIngredientsImage(optimized.base64 || '');
+        const fileUri = optimized.uri || photo.uri;
+        rememberCapture(fileUri, optimized.thumbnailUri);
+        const toxReport = await screenLabelImage(optimized.base64 || '', fileUri);
         setReport(toxReport);
         setScreenState('report');
       }
@@ -284,15 +271,16 @@ export default function ToxicityScanScreen() {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         allowsEditing: true,
-        quality: 0.8,
+        quality: CAPTURE_JPEG_QUALITY,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
         setScreenState('loading');
         const optimized = await optimizeImageForAiVision(asset.uri, 1024);
-        setCapturedImageUri(optimized.uri || asset.uri);
-        const toxReport = await analyzeIngredientsImage(optimized.base64 || '');
+        const fileUri = optimized.uri || asset.uri;
+        rememberCapture(fileUri, optimized.thumbnailUri);
+        const toxReport = await screenLabelImage(optimized.base64 || '', fileUri);
         setReport(toxReport);
         setScreenState('report');
       }
@@ -301,15 +289,6 @@ export default function ToxicityScanScreen() {
       Alert.alert('Gallery Error', `Failed to analyze selected photo: ${msg}`);
       setScreenState('scanning');
     }
-  };
-
-  // Demo Fallback for OCR across Indian Supermarket categories
-  const handleSimulateDemoOCR = async (categoryHint?: string) => {
-    setCapturedImageUri(null);
-    setScreenState('loading');
-    const toxReport = await analyzeIngredientsImage(categoryHint || 'hair_oil', { isExplicitDemo: true });
-    setReport(toxReport);
-    setScreenState('report');
   };
 
   // Save report to zustand history
@@ -443,12 +422,7 @@ export default function ToxicityScanScreen() {
             </Pressable>
           </View>
 
-          {/* Captured Image Preview */}
-          {capturedImageUri && (
-            <View style={styles.labelPreviewContainer}>
-              <Image source={{ uri: capturedImageUri }} style={styles.labelPreviewImage} contentFit="cover" />
-            </View>
-          )}
+          <LabelPreview uri={labelPreviewUri} />
 
           {/* Provenance & Verification Badge */}
           {report.generatedBy === 'offline-demo-mock' ? (
@@ -502,7 +476,7 @@ export default function ToxicityScanScreen() {
               <Pressable
                 style={styles.inlineEditBtnClean}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                onPress={() => setIsEditModalVisible(true)}
+                onPress={() => openEditProduct()}
               >
                 <Ionicons name="pencil" size={12} color={colors.textSecondary} />
               </Pressable>
@@ -514,7 +488,7 @@ export default function ToxicityScanScreen() {
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               onPress={() => {
                 safeHaptics.selection();
-                setIsRetryModalVisible(true);
+                openRetryProduct();
               }}
               accessibilityRole="button"
               accessibilityLabel="Wrong product detected? Retry with actual product name"
@@ -539,12 +513,12 @@ export default function ToxicityScanScreen() {
           </View>
 
           {/* Indian Supermarket Context Alert Box */}
-          {report.indianMarketAlert && (
+          {report.indianMarketAlert ? (
             <View style={styles.indianAlertCardClean}>
               <Ionicons name="warning-outline" size={16} color={colors.warning} />
               <Text style={styles.indianAlertTextClean}>{report.indianMarketAlert}</Text>
             </View>
-          )}
+          ) : null}
 
           {/* Clean Ingredients Breakdown */}
           <View style={styles.ingredientsSectionClean}>
@@ -554,7 +528,7 @@ export default function ToxicityScanScreen() {
               </Text>
               <Pressable
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                onPress={() => setIsEditModalVisible(true)}
+                onPress={() => openEditProduct()}
               >
                 <Text style={styles.editLinkTextClean}>Edit</Text>
               </Pressable>
@@ -622,7 +596,7 @@ export default function ToxicityScanScreen() {
               ))}
 
               {/* Clean / Unflagged Ingredients */}
-              {report.allIngredients && report.allIngredients.map((ing, idx) => {
+              {report.allIngredients ? report.allIngredients.map((ing, idx) => {
                 const isFlagged = report.harmfulIngredients.some(
                   (h) => h.name.toLowerCase().includes(ing.toLowerCase()) || ing.toLowerCase().includes(h.name.toLowerCase())
                 );
@@ -636,7 +610,7 @@ export default function ToxicityScanScreen() {
                     </View>
                   </View>
                 );
-              })}
+              }) : null}
             </View>
           </View>
 
@@ -649,26 +623,26 @@ export default function ToxicityScanScreen() {
               ) : null}
             </View>
             <View style={styles.standardsRowClean}>
-              {novaDetails && (
+              {novaDetails ? (
                 <View style={styles.standardChipClean}>
                   <Text style={[styles.standardChipTag, { color: novaDetails.color }]}>{novaDetails.label}</Text>
                   <Text style={styles.standardChipDesc}>{novaDetails.title}</Text>
                 </View>
-              )}
-              {report.nutriscoreGrade && (
+              ) : null}
+              {report.nutriscoreGrade ? (
                 <View style={styles.standardChipClean}>
                   <Text style={[styles.standardChipTag, { color: getNutriscoreColor(report.nutriscoreGrade) }]}>
                     Nutri-Score {report.nutriscoreGrade.toUpperCase()}
                   </Text>
                   <Text style={styles.standardChipDesc}>Quality</Text>
                 </View>
-              )}
-              {report.targetExposure && (
+              ) : null}
+              {report.targetExposure ? (
                 <View style={styles.standardChipClean}>
                   <Text style={[styles.standardChipTag, { color: exposureMeta.color }]}>{report.targetExposure}</Text>
                   <Text style={styles.standardChipDesc}>Exposure</Text>
                 </View>
-              )}
+              ) : null}
             </View>
           </View>
 
@@ -684,26 +658,26 @@ export default function ToxicityScanScreen() {
         </ScrollView>
 
         {/* Edit Product & Ingredients Modal */}
-        {isEditModalVisible && (
-          <EditProductModal
+        {isEditModalVisible && EditProduct ? (
+          <EditProduct
             visible={isEditModalVisible}
             initialName={report.productName || ''}
             initialIngredients={report.allIngredients || []}
             onClose={() => setIsEditModalVisible(false)}
             onSave={handleSaveEdit}
           />
-        )}
+        ) : null}
 
         {/* Retry with Different Product Name Modal */}
-        {isRetryModalVisible && (
-          <RetryProductModal
+        {isRetryModalVisible && RetryProduct ? (
+          <RetryProduct
             visible={isRetryModalVisible}
             currentProductName={report.productName || ''}
             hasCapturedImage={Boolean(capturedImageUri)}
             onClose={() => setIsRetryModalVisible(false)}
             onRetry={handleRetryWithProductName}
           />
-        )}
+        ) : null}
       </SafeAreaView>
     );
   }
@@ -759,7 +733,7 @@ export default function ToxicityScanScreen() {
               { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.cardBorder, marginTop: 10 },
               pressed && styles.pressed,
             ]}
-            onPress={() => setIsTypeProductModalVisible(true)}
+            onPress={() => openManualProduct()}
           >
             <Text style={[styles.grantPermissionText, { color: colors.text }]}>Type Product Manually</Text>
           </Pressable>
@@ -770,7 +744,7 @@ export default function ToxicityScanScreen() {
               { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.cardBorder, marginTop: 10 },
               pressed && styles.pressed,
             ]}
-            onPress={() => setIsVoiceModalVisible(true)}
+            onPress={() => openVoiceProduct()}
             accessibilityRole="button"
             accessibilityLabel="Speak product name"
           >
@@ -779,39 +753,32 @@ export default function ToxicityScanScreen() {
               <Text style={[styles.grantPermissionText, { color: colors.text }]}>Speak Product Name</Text>
             </View>
           </Pressable>
-
-          <Pressable
-            style={({ pressed }) => [styles.demoBtn, pressed && styles.pressed]}
-            onPress={() => handleSimulateDemoOCR('hair_oil')}
-          >
-            <Text style={styles.demoBtnText}>Simulate Demo Label OCR</Text>
-          </Pressable>
         </View>
-        {isTypeProductModalVisible && (
-          <ManualProductModal
+        {isTypeProductModalVisible && ManualProduct ? (
+          <ManualProduct
             visible={isTypeProductModalVisible}
             onClose={() => setIsTypeProductModalVisible(false)}
             onSubmitResult={(newReport) => {
               setReport(newReport);
-              setCapturedImageUri(null);
+              rememberCapture(null);
               setIsSaved(false);
               setScreenState('report');
             }}
           />
-        )}
-        {isVoiceModalVisible && (
-          <VoiceInputModal
+        ) : null}
+        {isVoiceModalVisible && VoiceProduct ? (
+          <VoiceProduct
             visible={isVoiceModalVisible}
             mode="product"
             onClose={() => setIsVoiceModalVisible(false)}
             onSubmitProductResult={(newReport) => {
               setReport(newReport);
-              setCapturedImageUri(null);
+              rememberCapture(null);
               setIsSaved(false);
               setScreenState('report');
             }}
           />
-        )}
+        ) : null}
       </SafeAreaView>
     );
   }
@@ -821,40 +788,67 @@ export default function ToxicityScanScreen() {
   // -------------------------------------------------------------
   return (
     <View style={styles.cameraContainer}>
-      {isFocused && screenState === 'scanning' && (
+      {isFocused && screenState === 'scanning' ? (
         <CameraView
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
           facing="back"
           enableTorch={enableTorch}
-          barcodeScannerSettings={{
-            barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'qr', 'code128', 'code39'],
+          pictureSize={pictureSize}
+          onCameraReady={() => {
+            selectPreferredPictureSize(cameraRef.current).then((size) => {
+              if (size) setPictureSize(size);
+            });
           }}
-          onBarcodeScanned={
-            !isProcessingBarcode
-              ? handleBarcodeScanned
-              : undefined
-          }
+          {...(scanMode === 'barcode'
+            ? {
+                barcodeScannerSettings: {
+                  barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e'],
+                },
+                onBarcodeScanned: handleBarcodeScanned,
+              }
+            : {})}
         />
-      )}
+      ) : null}
 
-      {/* Viewfinder Overlay */}
-      <SafeAreaView style={styles.overlayContainer}>
-        {/* Top Header */}
+      {/* Viewfinder Overlay. Bottom inset belongs to the tab bar, so this view stops above it. */}
+      <SafeAreaView style={styles.overlayContainer} edges={['top', 'left', 'right']}>
         <View style={styles.topSection}>
           <View style={styles.topBar}>
-            <Pressable
-              style={({ pressed }) => [styles.topIconBtn, pressed && styles.pressed]}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              onPress={() => router.back()}
-            >
-              <Ionicons name="close" size={22} color={colors.white} />
-            </Pressable>
-
-            {/* Title Badge */}
-            <View style={styles.titleBadge}>
-              <Ionicons name="document-text" size={15} color={colors.primary} />
-              <Text style={styles.titleBadgeText}>Ingredient Label Scanner</Text>
+            <View style={styles.scanModeRow}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.scanModeBtn,
+                  scanMode === 'label' && styles.scanModeBtnActive,
+                  pressed && styles.pressed,
+                ]}
+                onPress={() => {
+                  barcodeGuardRef.current.release();
+                  setScanMode('label');
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: scanMode === 'label' }}
+                accessibilityLabel="Scan a printed ingredient label"
+              >
+                <Text style={[styles.scanModeText, scanMode === 'label' && styles.scanModeTextActive]}>
+                  Label
+                </Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.scanModeBtn,
+                  scanMode === 'barcode' && styles.scanModeBtnActive,
+                  pressed && styles.pressed,
+                ]}
+                onPress={() => setScanMode('barcode')}
+                accessibilityRole="button"
+                accessibilityState={{ selected: scanMode === 'barcode', busy: isProcessingBarcode }}
+                accessibilityLabel="Scan a product barcode"
+              >
+                <Text style={[styles.scanModeText, scanMode === 'barcode' && styles.scanModeTextActive]}>
+                  Barcode
+                </Text>
+              </Pressable>
             </View>
 
             <Pressable
@@ -865,6 +859,8 @@ export default function ToxicityScanScreen() {
               ]}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               onPress={() => setEnableTorch((prev) => !prev)}
+              accessibilityRole="button"
+              accessibilityLabel={enableTorch ? 'Turn flash off' : 'Turn flash on'}
             >
               <Ionicons
                 name={enableTorch ? 'flash' : 'flash-off'}
@@ -874,26 +870,16 @@ export default function ToxicityScanScreen() {
             </Pressable>
           </View>
 
-          {/* Indian Supermarket Banner Pill */}
-          <View style={styles.indianBannerPill}>
-            <Text style={styles.indianFlag}>🇮🇳</Text>
-            <Text style={styles.indianBannerText}>
-              Ingredient Label OCR • Groceries, Cosmetics, Hair Oils, Cleaners & Pest Control
-            </Text>
-          </View>
-
-          {/* Real-time Barcode Feedback Pill */}
-          {barcodeSearchPill && (
+          {barcodeSearchPill ? (
             <View style={styles.barcodeStatusPill}>
               <Ionicons name="barcode-outline" size={14} color={colors.primary} />
               <Text style={styles.barcodeStatusText} numberOfLines={2}>
                 {barcodeSearchPill}
               </Text>
             </View>
-          )}
+          ) : null}
         </View>
 
-        {/* Framing Overlay for Ingredient Label */}
         <View style={styles.reticleWrapper}>
           <View style={styles.ocrReticle}>
             <View style={[styles.cornerBracket, styles.bracketTL]} />
@@ -901,50 +887,19 @@ export default function ToxicityScanScreen() {
             <View style={[styles.cornerBracket, styles.bracketBL]} />
             <View style={[styles.cornerBracket, styles.bracketBR]} />
             <View style={styles.ocrCenterHelp}>
-              <Ionicons name="scan-outline" size={38} color="rgba(255,255,255,0.45)" />
+              <Ionicons
+                name={scanMode === 'barcode' ? 'barcode-outline' : 'scan-outline'}
+                size={32}
+                color="rgba(255,255,255,0.45)"
+              />
               <Text style={styles.reticleHelpLabel}>
-                Align barcode for instant lookup, or snap photo of ingredient list
+                {scanMode === 'barcode' ? 'Center the barcode' : 'Frame the ingredient list'}
               </Text>
             </View>
           </View>
         </View>
 
-        {/* Bottom Control Bar */}
         <View style={styles.bottomControlsBar}>
-          {/* Quick Demo Label Samples Carousel */}
-          <View style={styles.sampleContainer}>
-            <View style={styles.sampleHeaderRow}>
-              <Text style={styles.sampleHeader}>Instant Demo Labels</Text>
-              <Text style={styles.sampleHint}>Tap to analyze</Text>
-            </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.sampleScrollRow}
-            >
-              {DEMO_LABEL_SAMPLES.map((sample) => (
-                <Pressable
-                  key={sample.id}
-                  style={({ pressed }) => [styles.sampleChip, pressed && styles.pressed]}
-                  hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-                  onPress={() => handleSimulateDemoOCR(sample.hint)}
-                >
-                  <Ionicons name={sample.icon} size={13} color={sample.color} />
-                  <View style={styles.sampleChipTextCol}>
-                    <Text style={styles.sampleChipName} numberOfLines={1}>
-                      {sample.name}
-                    </Text>
-                    <Text style={[styles.sampleChipBadge, { color: sample.color }]} numberOfLines={1}>
-                      {sample.badge}
-                    </Text>
-                  </View>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
-
-          <Text style={styles.privacyCaptionClean}>{AI_PRIVACY_NOTICE}</Text>
-          {/* Shutter, Gallery, Speak & Type Action Row */}
           <View style={styles.shutterRow}>
             <Pressable
               style={({ pressed }) => [styles.sideBarBtn, pressed && styles.pressed]}
@@ -963,7 +918,7 @@ export default function ToxicityScanScreen() {
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               onPress={() => {
                 safeHaptics.impactLight();
-                setIsVoiceModalVisible(true);
+                openVoiceProduct();
               }}
               accessibilityRole="button"
               accessibilityLabel="Add product by speaking"
@@ -986,46 +941,47 @@ export default function ToxicityScanScreen() {
             <Pressable
               style={({ pressed }) => [styles.sideBarBtn, pressed && styles.pressed]}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              onPress={() => setIsTypeProductModalVisible(true)}
+              onPress={() => openManualProduct()}
               accessibilityRole="button"
               accessibilityLabel="Type product name manually"
             >
               <Ionicons name="create-outline" size={24} color={colors.white} />
-              <Text style={styles.sideBarBtnLabel}>Type Product</Text>
+              <Text style={styles.sideBarBtnLabel}>Type</Text>
             </Pressable>
           </View>
         </View>
       </SafeAreaView>
-        {isTypeProductModalVisible && (
-          <ManualProductModal
+        {isTypeProductModalVisible && ManualProduct ? (
+          <ManualProduct
             visible={isTypeProductModalVisible}
             onClose={() => setIsTypeProductModalVisible(false)}
             onSubmitResult={(newReport) => {
               setReport(newReport);
-              setCapturedImageUri(null);
+              rememberCapture(null);
               setIsSaved(false);
               setScreenState('report');
             }}
           />
-        )}
-        {isVoiceModalVisible && (
-          <VoiceInputModal
+        ) : null}
+        {isVoiceModalVisible && VoiceProduct ? (
+          <VoiceProduct
             visible={isVoiceModalVisible}
             mode="product"
             onClose={() => setIsVoiceModalVisible(false)}
             onSubmitProductResult={(newReport) => {
               setReport(newReport);
-              setCapturedImageUri(null);
+              rememberCapture(null);
               setIsSaved(false);
               setScreenState('report');
             }}
           />
-        )}
+        ) : null}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -1036,19 +992,18 @@ const styles = StyleSheet.create({
   },
   overlayContainer: {
     flex: 1,
-    justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 8,
   },
 
-  // Top Section
   topSection: {
+    flexShrink: 0,
     gap: 8,
   },
   topBar: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 12,
   },
   topIconBtn: {
     width: 44,
@@ -1064,46 +1019,34 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(245, 158, 11, 0.25)',
     borderColor: colors.calories,
   },
-  titleBadge: {
+  scanModeRow: {
+    flex: 1,
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 16,
+    padding: 3,
+    gap: 4,
   },
-  titleBadgeText: {
+  scanModeBtn: {
+    flex: 1,
+    minHeight: 36,
+    paddingHorizontal: 12,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scanModeBtnActive: {
+    backgroundColor: colors.primary,
+  },
+  scanModeText: {
+    color: colors.white,
     fontSize: 13,
-    fontWeight: '700',
-    color: colors.text,
+    fontWeight: '600',
+  },
+  scanModeTextActive: {
+    color: '#04140C',
   },
 
-  // Indian Banner Pill
-  indianBannerPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'center',
-    backgroundColor: 'rgba(18, 22, 30, 0.85)',
-    borderRadius: 12,
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-    gap: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.3)',
-    maxWidth: SCREEN_WIDTH * 0.94,
-  },
-  indianFlag: {
-    fontSize: 12,
-  },
-  indianBannerText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.calories,
-    letterSpacing: 0.2,
-  },
   barcodeStatusPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1127,12 +1070,16 @@ const styles = StyleSheet.create({
 
   // Reticles
   reticleWrapper: {
+    flex: 1,
+    minHeight: 0,
     alignItems: 'center',
     justifyContent: 'center',
+    marginVertical: 16,
   },
   ocrReticle: {
     width: SCREEN_WIDTH * 0.88,
-    height: 380,
+    flex: 1,
+    maxHeight: 360,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: 'rgba(16, 185, 129, 0.35)',
@@ -1176,14 +1123,11 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 10,
   },
   reticleHelpLabel: {
-    position: 'absolute',
-    bottom: -32,
     color: 'rgba(255,255,255,0.85)',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
     textAlign: 'center',
-    maxWidth: SCREEN_WIDTH * 0.82,
-    lineHeight: 16,
+    paddingHorizontal: 24,
   },
   ocrCenterHelp: {
     alignItems: 'center',
@@ -1192,62 +1136,8 @@ const styles = StyleSheet.create({
 
   // Bottom Controls Bar
   bottomControlsBar: {
-    paddingBottom: Platform.OS === 'ios' ? 12 : 20,
-    gap: 12,
-  },
-  sampleContainer: {
-    backgroundColor: 'rgba(10, 14, 20, 0.85)',
-    borderRadius: 14,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  sampleHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  sampleHeader: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: colors.primary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  sampleHint: {
-    fontSize: 10,
-    color: colors.textSecondary,
-  },
-  sampleScrollRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  sampleChip: {
-    backgroundColor: colors.card,
-    borderRadius: 10,
-    paddingVertical: 7,
-    paddingHorizontal: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    minHeight: 40,
-    minWidth: 120,
-  },
-  sampleChipTextCol: {
-    flex: 1,
-  },
-  sampleChipName: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  sampleChipBadge: {
-    fontSize: 9,
-    fontWeight: '700',
-    marginTop: 1,
+    flexShrink: 0,
+    paddingBottom: 12,
   },
   shutterRow: {
     flexDirection: 'row',
@@ -1858,15 +1748,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.textSecondary,
   },
-  demoBtn: {
-    paddingVertical: 8,
-  },
-  demoBtnText: {
-    fontSize: 12,
-    color: colors.primary,
-    textDecorationLine: 'underline',
-  },
-
   pressed: {
     opacity: 0.82,
     transform: [{ scale: 0.98 }],
@@ -1879,11 +1760,6 @@ const styles = StyleSheet.create({
     lineHeight: 14,
     paddingHorizontal: 16,
   },
-  privacyCaptionClean: {
-    fontSize: 10,
-    color: colors.textMuted,
-    textAlign: 'center',
-    paddingHorizontal: 20,
-    marginBottom: 8,
-  },
 });
+}
+

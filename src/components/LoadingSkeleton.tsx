@@ -7,7 +7,8 @@ import Animated, {
   withTiming,
   Easing,
 } from 'react-native-reanimated';
-import { colors } from '../theme/colors';
+import type { ThemeColors } from '../theme/colors';
+import { useThemedStyles } from '../theme/theme';
 
 interface LoadingSkeletonProps {
   style?: ViewStyle;
@@ -22,18 +23,21 @@ export function LoadingSkeleton({
   width = '100%',
   borderRadius = 8,
 }: LoadingSkeletonProps) {
+  const styles = useThemedStyles(createStyles);
   const opacity = useSharedValue(0.3);
 
   useEffect(() => {
-    opacity.value = withRepeat(
-      withTiming(0.7, { duration: 800, easing: Easing.inOut(Easing.ease) }),
-      -1,
-      true
+    opacity.set(
+      withRepeat(
+        withTiming(0.7, { duration: 800, easing: Easing.inOut(Easing.ease) }),
+        -1,
+        true
+      )
     );
   }, [opacity]);
 
   const animatedStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value,
+    opacity: opacity.get(),
   }));
 
   return (
@@ -52,6 +56,7 @@ export function LoadingSkeleton({
 }
 
 export function DashboardHeroSkeleton() {
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={styles.cardContainer}>
       <View style={styles.centerRow}>
@@ -67,6 +72,7 @@ export function DashboardHeroSkeleton() {
 }
 
 export function ListCardSkeleton() {
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={styles.cardContainer}>
       <View style={styles.topRow}>
@@ -79,7 +85,8 @@ export function ListCardSkeleton() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   skeleton: {
     backgroundColor: colors.surfaceSubtle,
   },
@@ -107,3 +114,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 });
+}
+

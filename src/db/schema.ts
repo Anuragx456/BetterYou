@@ -23,6 +23,7 @@ export const meals = sqliteTable(
     estimatedWeightGrams: integer('estimated_weight_grams').notNull(),
     portionMultiplier: real('portion_multiplier').notNull().default(1.0),
     imagePath: text('image_path'), // Relative path in documentDirectory (e.g. "images/meals/...")
+    thumbnailPath: text('thumbnail_path'),
     ingredientsDetected: text('ingredients_detected').notNull().default('[]'), // JSON array
     notes: text('notes'),
     createdAt: integer('created_at').notNull(),
@@ -68,6 +69,7 @@ export const exercises = sqliteTable(
   },
   (table) => [
     index('exercises_workout_id_idx').on(table.workoutId),
+    index('exercises_name_idx').on(table.name),
   ]
 );
 
@@ -112,6 +114,7 @@ export const scannedProducts = sqliteTable(
   },
   (table) => [
     index('scanned_products_date_idx').on(table.date),
+    index('scanned_products_scanned_at_idx').on(table.scannedAt),
   ]
 );
 
@@ -133,6 +136,15 @@ export const dailyGoals = sqliteTable('daily_goals', {
 export const migrationsMeta = sqliteTable('migrations_meta', {
   id: text('id').primaryKey(),
   appliedAt: integer('applied_at').notNull(),
+});
+
+/**
+ * Short-lived vision results keyed by an image hash so a relaunch can skip Gemini.
+ */
+export const visionCache = sqliteTable('vision_cache', {
+  cacheKey: text('cache_key').primaryKey(),
+  payload: text('payload').notNull(),
+  createdAt: integer('created_at').notNull(),
 });
 
 export type MealRecord = typeof meals.$inferSelect;

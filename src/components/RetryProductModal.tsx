@@ -14,7 +14,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../theme/colors';
+import type { ThemeColors } from '../theme/colors';
+import { useThemeColors, useThemedStyles } from '../theme/theme';
 import { safeHaptics } from '../utils/haptics';
 
 interface RetryProductModalProps {
@@ -45,6 +46,8 @@ export function RetryProductModal({
   onClose,
   onRetry,
 }: RetryProductModalProps) {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
   const [productName, setProductName] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
@@ -256,7 +259,8 @@ export function RetryProductModal({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -452,3 +456,5 @@ const styles = StyleSheet.create({
     gap: 8,
   },
 });
+}
+

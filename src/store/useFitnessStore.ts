@@ -1,16 +1,20 @@
-import { safeAsyncStorage } from '../utils/storage';
 import { getLocalDateString, getLocalDayDifference } from '../utils/date';
 import {
   dbDeleteMeal,
   dbDeleteScannedProduct,
   dbDeleteWorkout,
   dbUpdateWorkout,
+  dbGetActivityDates,
+  invalidateActivityDatesCache,
   dbGetAllMealImagePaths,
-  dbGetAllMeals,
   dbGetAllProductImagePaths,
-  dbGetAllScannedProducts,
   dbGetAllWorkouts,
   dbGetDailyGoals,
+  dbGetLibraryCounts,
+  dbGetMealsByDate,
+  dbGetProductSummaries,
+  dbGetScannedProductById,
+  dbGetWorkoutsByDate,
   dbInsertMeal,
   dbInsertScannedProduct,
   dbInsertWorkout,
@@ -23,8 +27,9 @@ import {
   deletePersistedImage,
   saveImageToDocuments,
 } from '../utils/imageManager';
+import { activeWorkoutPersistStorage, flushActiveWorkoutPersist } from '../utils/debouncedStorage';
 import { create } from 'zustand';
-import { createJSONStorage, persist } from 'zustand/middleware';
+import { persist } from 'zustand/middleware';
 import {
   DailyGoals,
   ExerciseItem,
@@ -39,9 +44,17 @@ export interface FitnessState {
   // In-Memory Cached State (Populated from SQLite)
   meals: MealLog[];
   workouts: WorkoutSession[];
+  dashboardWorkouts: WorkoutSession[];
   scannedProducts: ScannedProduct[];
   dailyGoals: DailyGoals;
   isInitialized: boolean;
+  dashboardDate: string;
+  activityDates: string[];
+  mealCount: number;
+  mealPhotoCount: number;
+  workoutCount: number;
+  scannedProductCount: number;
+  workoutsHistoryLoaded: boolean;
 
   // Active Session / UI State
   activeWorkout: WorkoutSession | null;
@@ -50,6 +63,11 @@ export interface FitnessState {
 
   // Lifecycle
   loadDataFromDb: () => Promise<void>;
+  loadDashboardDate: (date: string) => Promise<void>;
+  loadWorkoutHistory: () => Promise<void>;
+  loadAllProductSummaries: () => Promise<void>;
+  loadScannedProductReport: (id: string) => Promise<void>;
+  refreshLoadedData: () => Promise<void>;
 
   // Meal Actions
   addMeal: (meal: Omit<MealLog, 'id' | 'timestamp'>) => Promise<MealLog>;
@@ -107,16 +125,64 @@ export function calculateWorkoutVolume(exercises: ExerciseItem[]): number {
   }, 0);
 }
 
+function mergeProductRows(incoming: ScannedProduct[], existing: ScannedProduct[]): ScannedProduct[] {
+  if (existing.length === 0) return incoming;
+  return incoming.map((item) => {
+    const prior = existing.find((product) => product.id === item.id && product.reportComplete);
+    return prior ?? item;
+  });
+}
+
+function withDate(dates: string[], date: string): string[] {
+  return dates.includes(date) ? dates : [...dates, date];
+}
+
 let loadDataInFlight: Promise<void> | null = null;
+
+function scheduleIdleTask(task: () => void): void {
+  const isNative =
+    typeof window !== 'undefined' ||
+    Boolean((globalThis as Record<string, unknown>).nativeCallSyncHook);
+  if (!isNative) {
+    setTimeout(task, 0);
+    return;
+  }
+  void import('react-native')
+    .then((reactNative) => {
+      const interactionManager = (
+        reactNative as unknown as {
+          InteractionManager?: {
+            runAfterInteractions?: (task: () => void) => void;
+          };
+        }
+      ).InteractionManager;
+      if (interactionManager?.runAfterInteractions) {
+        interactionManager.runAfterInteractions(task);
+        return;
+      }
+      task();
+    })
+    .catch(() => {
+      task();
+    });
+}
 
 export const useFitnessStore = create<FitnessState>()(
   persist(
     (set, get) => ({
       meals: [],
       workouts: [],
+      dashboardWorkouts: [],
       scannedProducts: [],
       dailyGoals: DEFAULT_GOALS,
       isInitialized: false,
+      dashboardDate: getLocalDateString(),
+      activityDates: [],
+      mealCount: 0,
+      mealPhotoCount: 0,
+      workoutCount: 0,
+      scannedProductCount: 0,
+      workoutsHistoryLoaded: false,
       activeWorkout: null,
       streakDays: 0,
       lastActiveWorkoutDate: undefined,
@@ -128,30 +194,40 @@ export const useFitnessStore = create<FitnessState>()(
         loadDataInFlight = (async () => {
           try {
             await getDatabase();
-            // Run one-time idempotent migration if legacy AsyncStorage data exists
             await runAsyncStorageToSqliteMigration();
-
-            const [dbMeals, dbWorkouts, dbProducts, dbGoals] = await Promise.all([
-              dbGetAllMeals(),
-              dbGetAllWorkouts(),
-              dbGetAllScannedProducts(),
+            const date = get().dashboardDate || getLocalDateString();
+            const [meals, dayWorkouts, summaries, goals, activityDates, counts] = await Promise.all([
+              dbGetMealsByDate(date),
+              dbGetWorkoutsByDate(date),
+              dbGetProductSummaries(3),
               dbGetDailyGoals(),
+              dbGetActivityDates(),
+              dbGetLibraryCounts().catch(() => null),
             ]);
+            const history = get().workoutsHistoryLoaded ? await dbGetAllWorkouts() : dayWorkouts;
 
             set({
-              meals: dbMeals,
-              workouts: dbWorkouts,
-              scannedProducts: dbProducts,
-              dailyGoals: dbGoals,
+              meals,
+              dashboardWorkouts: dayWorkouts,
+              workouts: history,
+              scannedProducts: mergeProductRows(summaries, get().scannedProducts),
+              dailyGoals: goals,
+              activityDates,
+              dashboardDate: date,
+              mealCount: counts?.meals ?? meals.length,
+              mealPhotoCount: counts?.mealsWithPhotos ?? meals.filter((meal) => Boolean(meal.imageUri)).length,
+              workoutCount: counts?.workouts ?? history.length,
+              scannedProductCount: counts?.products ?? summaries.length,
               isInitialized: true,
             });
 
-            // Run background orphan image cleanup job
-            Promise.all([dbGetAllMealImagePaths(), dbGetAllProductImagePaths()])
-              .then(([mealPaths, prodPaths]) => {
-                cleanupOrphanImages([...mealPaths, ...prodPaths]).catch(() => {});
-              })
-              .catch(() => {});
+            scheduleIdleTask(() => {
+              Promise.all([dbGetAllMealImagePaths(), dbGetAllProductImagePaths()])
+                .then(([mealPaths, prodPaths]) => {
+                  cleanupOrphanImages([...mealPaths, ...prodPaths]).catch(() => {});
+                })
+                .catch(() => {});
+            });
           } catch (err: unknown) {
             console.warn('[fitnessStore] loadDataFromDb warning:', err);
           } finally {
@@ -162,8 +238,68 @@ export const useFitnessStore = create<FitnessState>()(
         return loadDataInFlight;
       },
 
+      loadDashboardDate: async (date: string) => {
+        const [meals, dayWorkouts, activityDates] = await Promise.all([
+          dbGetMealsByDate(date),
+          dbGetWorkoutsByDate(date),
+          dbGetActivityDates(),
+        ]);
+        set({ dashboardDate: date, meals, dashboardWorkouts: dayWorkouts, activityDates });
+      },
+
+      loadWorkoutHistory: async () => {
+        const workouts = await dbGetAllWorkouts();
+        set({ workouts, workoutsHistoryLoaded: true });
+      },
+
+      loadAllProductSummaries: async () => {
+        const summaries = await dbGetProductSummaries(100);
+        set((state) => ({
+          scannedProducts: mergeProductRows(summaries, state.scannedProducts),
+        }));
+      },
+
+      loadScannedProductReport: async (id: string) => {
+        const current = get().scannedProducts.find((product) => product.id === id);
+        if (current?.reportComplete) return;
+        const full = await dbGetScannedProductById(id);
+        if (!full) return;
+        set((state) => ({
+          scannedProducts: state.scannedProducts.some((product) => product.id === id)
+            ? state.scannedProducts.map((product) => (product.id === id ? full : product))
+            : [full, ...state.scannedProducts],
+        }));
+      },
+
+      refreshLoadedData: async () => {
+        const date = get().dashboardDate || getLocalDateString();
+        const productLimit = get().scannedProducts.length > 3 ? 100 : 3;
+        const [meals, dayWorkouts, summaries, activityDates, counts] = await Promise.all([
+          dbGetMealsByDate(date),
+          dbGetWorkoutsByDate(date),
+          dbGetProductSummaries(productLimit),
+          dbGetActivityDates(),
+          dbGetLibraryCounts().catch(() => null),
+        ]);
+        const history = get().workoutsHistoryLoaded ? await dbGetAllWorkouts() : dayWorkouts;
+        set((state) => ({
+          meals,
+          dashboardWorkouts: dayWorkouts,
+          workouts: history,
+          scannedProducts: mergeProductRows(summaries, state.scannedProducts),
+          activityDates,
+          dashboardDate: date,
+          mealCount: counts?.meals ?? state.mealCount,
+          mealPhotoCount: counts?.mealsWithPhotos ?? state.mealPhotoCount,
+          workoutCount: counts?.workouts ?? state.workoutCount,
+          scannedProductCount: counts?.products ?? state.scannedProductCount,
+          isInitialized: true,
+        }));
+      },
+
       addMeal: async (mealData) => {
         let finalImageUri = mealData.imageUri;
+        let finalThumbnailUri = mealData.thumbnailUri;
         if (finalImageUri) {
           try {
             finalImageUri = await saveImageToDocuments(finalImageUri, 'meals');
@@ -171,15 +307,30 @@ export const useFitnessStore = create<FitnessState>()(
             // Keep original URI if copy fails
           }
         }
+        if (finalThumbnailUri) {
+          try {
+            finalThumbnailUri = await saveImageToDocuments(finalThumbnailUri, 'meals');
+          } catch {
+            finalThumbnailUri = undefined;
+          }
+        }
 
         const newMeal = await dbInsertMeal({
           ...mealData,
           imageUri: finalImageUri,
+          thumbnailUri: finalThumbnailUri,
         });
 
-        set((state) => ({
-          meals: [newMeal, ...state.meals].slice(0, 300),
-        }));
+        set((state) => {
+          const mealDate = newMeal.date || getLocalDateString(newMeal.timestamp);
+          const onDashboard = mealDate === state.dashboardDate;
+          return {
+            meals: onDashboard ? [newMeal, ...state.meals].slice(0, 300) : state.meals,
+            mealCount: state.mealCount + 1,
+            mealPhotoCount: state.mealPhotoCount + (newMeal.imageUri ? 1 : 0),
+            activityDates: withDate(state.activityDates, mealDate),
+          };
+        });
 
         return newMeal;
       },
@@ -189,9 +340,14 @@ export const useFitnessStore = create<FitnessState>()(
         if (target?.imageUri) {
           deletePersistedImage(target.imageUri).catch(() => {});
         }
+        if (target?.thumbnailUri) {
+          deletePersistedImage(target.thumbnailUri).catch(() => {});
+        }
         await dbDeleteMeal(id);
         set((state) => ({
           meals: state.meals.filter((m) => m.id !== id),
+          mealCount: Math.max(0, state.mealCount - 1),
+          mealPhotoCount: target?.imageUri ? Math.max(0, state.mealPhotoCount - 1) : state.mealPhotoCount,
         }));
       },
 
@@ -474,33 +630,51 @@ export const useFitnessStore = create<FitnessState>()(
         // Save to SQLite
         await dbInsertWorkout(completedWorkout);
 
-        set((state) => ({
-          activeWorkout: null,
-          workouts: [completedWorkout, ...state.workouts].slice(0, 150),
-          streakDays: newStreak,
-          lastActiveWorkoutDate: todayStr,
-        }));
+        set((state) => {
+          const sessionDate = getLocalDateString(completedWorkout.completedAt || completedWorkout.startedAt);
+          const onDashboard = sessionDate === state.dashboardDate;
+          const inHistory = state.workoutsHistoryLoaded || onDashboard;
+          return {
+            activeWorkout: null,
+            workouts: inHistory ? [completedWorkout, ...state.workouts].slice(0, 150) : state.workouts,
+            dashboardWorkouts: onDashboard
+              ? [completedWorkout, ...state.dashboardWorkouts]
+              : state.dashboardWorkouts,
+            streakDays: newStreak,
+            lastActiveWorkoutDate: todayStr,
+            workoutCount: state.workoutCount + 1,
+            activityDates: withDate(state.activityDates, sessionDate),
+          };
+        });
 
+        await flushActiveWorkoutPersist();
         return completedWorkout;
       },
 
       cancelActiveWorkout: () => {
         set({ activeWorkout: null });
+        void flushActiveWorkoutPersist();
       },
 
       addWorkout: async (workout) => {
         await dbInsertWorkout(workout);
+        const sessionDate = workout.date || getLocalDateString(workout.completedAt || workout.startedAt);
         set((state) => ({
           workouts: [workout, ...state.workouts].slice(0, 150),
+          dashboardWorkouts:
+            sessionDate === state.dashboardDate
+              ? [workout, ...state.dashboardWorkouts]
+              : state.dashboardWorkouts,
+          workoutCount: state.workoutCount + 1,
+          activityDates: withDate(state.activityDates, sessionDate),
         }));
       },
 
       updateWorkout: async (id, updates) => {
         await dbUpdateWorkout(id, updates);
         set((state) => ({
-          workouts: state.workouts.map((w) =>
-            w.id === id ? { ...w, ...updates } : w
-          ),
+          workouts: state.workouts.map((w) => (w.id === id ? { ...w, ...updates } : w)),
+          dashboardWorkouts: state.dashboardWorkouts.map((w) => (w.id === id ? { ...w, ...updates } : w)),
         }));
       },
 
@@ -508,6 +682,8 @@ export const useFitnessStore = create<FitnessState>()(
         await dbDeleteWorkout(id);
         set((state) => ({
           workouts: state.workouts.filter((w) => w.id !== id),
+          dashboardWorkouts: state.dashboardWorkouts.filter((w) => w.id !== id),
+          workoutCount: Math.max(0, state.workoutCount - 1),
         }));
       },
 
@@ -527,12 +703,15 @@ export const useFitnessStore = create<FitnessState>()(
           imageUri: finalImageUri,
           id: `scan_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
           scannedAt: new Date().toISOString(),
+          reportComplete: true,
+          flaggedCount: productData.report.harmfulIngredients.length,
         };
 
         await dbInsertScannedProduct(newScanned);
 
         set((state) => ({
           scannedProducts: [newScanned, ...state.scannedProducts].slice(0, 100),
+          scannedProductCount: state.scannedProductCount + 1,
         }));
       },
 
@@ -542,6 +721,9 @@ export const useFitnessStore = create<FitnessState>()(
         const updated: ScannedProduct = {
           ...current,
           ...updates,
+          flaggedCount: updates.report
+            ? updates.report.harmfulIngredients.length
+            : current.flaggedCount,
         };
         await dbInsertScannedProduct(updated);
         set((state) => ({
@@ -558,11 +740,13 @@ export const useFitnessStore = create<FitnessState>()(
         await dbDeleteScannedProduct(id);
         set((state) => ({
           scannedProducts: state.scannedProducts.filter((p) => p.id !== id),
+          scannedProductCount: Math.max(0, state.scannedProductCount - 1),
         }));
       },
 
       clearAllData: async () => {
         const db = await getDatabase();
+        invalidateActivityDatesCache();
         await db.execAsync(`
           DELETE FROM meals;
           DELETE FROM workout_sessions;
@@ -574,17 +758,24 @@ export const useFitnessStore = create<FitnessState>()(
         set({
           meals: [],
           workouts: [],
+          dashboardWorkouts: [],
           scannedProducts: [],
           activeWorkout: null,
           dailyGoals: DEFAULT_GOALS,
           streakDays: 0,
           lastActiveWorkoutDate: undefined,
+          activityDates: [],
+          mealCount: 0,
+          mealPhotoCount: 0,
+          workoutCount: 0,
+          scannedProductCount: 0,
+          workoutsHistoryLoaded: false,
         });
       },
     }),
     {
       name: 'betteryou-active-workout-draft',
-      storage: createJSONStorage(() => safeAsyncStorage),
+      storage: activeWorkoutPersistStorage,
       partialize: (state) => ({
         // ONLY persist lightweight UI session state: active draft workout and streak
         activeWorkout: state.activeWorkout,

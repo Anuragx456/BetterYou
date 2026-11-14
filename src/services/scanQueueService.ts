@@ -202,7 +202,7 @@ export async function processOfflineScanQueue(): Promise<{
   if (succeededCount > 0) {
     try {
       const { useFitnessStore } = await import('../store/useFitnessStore');
-      useFitnessStore.getState().loadDataFromDb().catch(() => {});
+      useFitnessStore.getState().refreshLoadedData().catch(() => {});
     } catch {
       // Safe fallback in isolated environments
     }

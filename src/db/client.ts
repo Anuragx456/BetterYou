@@ -206,6 +206,7 @@ export async function getDatabase(): Promise<DatabaseAdapter> {
       estimated_weight_grams INTEGER NOT NULL,
       portion_multiplier REAL NOT NULL DEFAULT 1.0,
       image_path TEXT,
+      thumbnail_path TEXT,
       ingredients_detected TEXT NOT NULL DEFAULT '[]',
       notes TEXT,
       created_at INTEGER NOT NULL
@@ -232,6 +233,7 @@ export async function getDatabase(): Promise<DatabaseAdapter> {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS exercises_workout_id_idx ON exercises(workout_id);
+    CREATE INDEX IF NOT EXISTS exercises_name_idx ON exercises(name);
 
     CREATE TABLE IF NOT EXISTS sets (
       id TEXT PRIMARY KEY NOT NULL,
@@ -258,6 +260,7 @@ export async function getDatabase(): Promise<DatabaseAdapter> {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS scanned_products_date_idx ON scanned_products(date);
+    CREATE INDEX IF NOT EXISTS scanned_products_scanned_at_idx ON scanned_products(scanned_at);
 
     CREATE TABLE IF NOT EXISTS daily_goals (
       id TEXT PRIMARY KEY NOT NULL,
@@ -272,7 +275,20 @@ export async function getDatabase(): Promise<DatabaseAdapter> {
       id TEXT PRIMARY KEY NOT NULL,
       applied_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS vision_cache (
+      cache_key TEXT PRIMARY KEY NOT NULL,
+      payload TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
   `);
+
+  // Databases created before thumbnail_path existed need the column added.
+  try {
+    await dbInstance.execAsync('ALTER TABLE meals ADD COLUMN thumbnail_path TEXT;');
+  } catch {
+    // The column is already present.
+  }
 
   isInitialized = true;
   return dbInstance;
@@ -282,18 +298,61 @@ export async function getDatabase(): Promise<DatabaseAdapter> {
 // MEAL REPOSITORY
 // -------------------------------------------------------------
 
+interface MealRow {
+  id: string;
+  date: string;
+  dish_name: string;
+  timestamp: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  estimated_weight_grams: number;
+  portion_multiplier: number;
+  image_path: string | null;
+  thumbnail_path?: string | null;
+  ingredients_detected: string;
+  notes: string | null;
+}
+
+function mapMealRow(r: MealRow): MealLog {
+  let ingredientsDetected: string[] = [];
+  try {
+    ingredientsDetected = JSON.parse(r.ingredients_detected);
+  } catch {
+    ingredientsDetected = [];
+  }
+
+  return {
+    id: r.id,
+    date: r.date,
+    dishName: r.dish_name,
+    timestamp: r.timestamp,
+    calories: r.calories,
+    protein: r.protein,
+    carbs: r.carbs,
+    fat: r.fat,
+    estimatedWeightGrams: r.estimated_weight_grams,
+    portionMultiplier: r.portion_multiplier,
+    imageUri: r.image_path ?? undefined,
+    thumbnailUri: r.thumbnail_path ?? undefined,
+    ingredientsDetected,
+    notes: r.notes ?? undefined,
+  };
+}
+
 export async function dbInsertMeal(meal: Omit<MealLog, 'id' | 'timestamp'> & { id?: string; timestamp?: string }): Promise<MealLog> {
   const db = await getDatabase();
   const id = meal.id || `meal_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const timestamp = meal.timestamp || new Date().toISOString();
-  const date = getLocalDateString(timestamp);
+  const date = meal.date || getLocalDateString(timestamp);
   const now = Date.now();
 
   await db.runAsync(
     `INSERT INTO meals (
       id, date, dish_name, timestamp, calories, protein, carbs, fat,
-      estimated_weight_grams, portion_multiplier, image_path, ingredients_detected, notes, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      estimated_weight_grams, portion_multiplier, image_path, thumbnail_path, ingredients_detected, notes, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       date,
@@ -306,14 +365,17 @@ export async function dbInsertMeal(meal: Omit<MealLog, 'id' | 'timestamp'> & { i
       meal.estimatedWeightGrams ?? 0,
       meal.portionMultiplier ?? 1.0,
       meal.imageUri ?? null,
+      meal.thumbnailUri ?? null,
       JSON.stringify(meal.ingredientsDetected || []),
       meal.notes ?? null,
       now,
     ]
   );
+  invalidateActivityDatesCache();
 
   return {
     id,
+    date,
     dishName: meal.dishName,
     timestamp,
     calories: meal.calories,
@@ -323,6 +385,7 @@ export async function dbInsertMeal(meal: Omit<MealLog, 'id' | 'timestamp'> & { i
     estimatedWeightGrams: meal.estimatedWeightGrams,
     portionMultiplier: meal.portionMultiplier ?? 1.0,
     imageUri: meal.imageUri,
+    thumbnailUri: meal.thumbnailUri,
     ingredientsDetected: meal.ingredientsDetected || [],
     notes: meal.notes,
   };
@@ -330,85 +393,25 @@ export async function dbInsertMeal(meal: Omit<MealLog, 'id' | 'timestamp'> & { i
 
 export async function dbGetMealsByDate(date: string): Promise<MealLog[]> {
   const db = await getDatabase();
-  const rows = await db.getAllAsync<{
-    id: string;
-    dish_name: string;
-    timestamp: string;
-    calories: number;
-    protein: number;
-    carbs: number;
-    fat: number;
-    estimated_weight_grams: number;
-    portion_multiplier: number;
-    image_path: string | null;
-    ingredients_detected: string;
-    notes: string | null;
-  }>('SELECT * FROM meals WHERE date = ? ORDER BY timestamp DESC', [date]);
+  const rows = await db.getAllAsync<MealRow>(
+    'SELECT * FROM meals WHERE date = ? ORDER BY timestamp DESC',
+    [date]
+  );
 
-  return rows.map((r) => ({
-    id: r.id,
-    dishName: r.dish_name,
-    timestamp: r.timestamp,
-    calories: r.calories,
-    protein: r.protein,
-    carbs: r.carbs,
-    fat: r.fat,
-    estimatedWeightGrams: r.estimated_weight_grams,
-    portionMultiplier: r.portion_multiplier,
-    imageUri: r.image_path ?? undefined,
-    ingredientsDetected: (() => {
-      try {
-        return JSON.parse(r.ingredients_detected);
-      } catch {
-        return [];
-      }
-    })(),
-    notes: r.notes ?? undefined,
-  }));
+  return rows.map(mapMealRow);
 }
 
 export async function dbGetAllMeals(): Promise<MealLog[]> {
   const db = await getDatabase();
-  const rows = await db.getAllAsync<{
-    id: string;
-    dish_name: string;
-    timestamp: string;
-    calories: number;
-    protein: number;
-    carbs: number;
-    fat: number;
-    estimated_weight_grams: number;
-    portion_multiplier: number;
-    image_path: string | null;
-    ingredients_detected: string;
-    notes: string | null;
-  }>('SELECT * FROM meals ORDER BY timestamp DESC LIMIT 300');
+  const rows = await db.getAllAsync<MealRow>('SELECT * FROM meals ORDER BY timestamp DESC LIMIT 300');
 
-  return rows.map((r) => ({
-    id: r.id,
-    dishName: r.dish_name,
-    timestamp: r.timestamp,
-    calories: r.calories,
-    protein: r.protein,
-    carbs: r.carbs,
-    fat: r.fat,
-    estimatedWeightGrams: r.estimated_weight_grams,
-    portionMultiplier: r.portion_multiplier,
-    imageUri: r.image_path ?? undefined,
-    ingredientsDetected: (() => {
-      try {
-        return JSON.parse(r.ingredients_detected);
-      } catch {
-        return [];
-      }
-    })(),
-    notes: r.notes ?? undefined,
-  }));
+  return rows.map(mapMealRow);
 }
 
 export async function dbDeleteMeal(id: string): Promise<void> {
   const db = await getDatabase();
   await db.runAsync('DELETE FROM meals WHERE id = ?', [id]);
+  invalidateActivityDatesCache();
 }
 
 export async function dbGetAllMealImagePaths(): Promise<string[]> {
@@ -427,6 +430,7 @@ async function hydrateWorkoutsWithExercisesAndSets(
   db: DatabaseAdapter,
   sessionRows: {
     id: string;
+    date?: string;
     title: string;
     started_at: string;
     completed_at: string | null;
@@ -511,6 +515,7 @@ async function hydrateWorkoutsWithExercisesAndSets(
 
     return {
       id: s.id,
+      date: s.date,
       title: s.title,
       startedAt: s.started_at,
       completedAt: s.completed_at ?? undefined,
@@ -524,7 +529,7 @@ async function hydrateWorkoutsWithExercisesAndSets(
 
 export async function dbInsertWorkout(workout: WorkoutSession): Promise<void> {
   const db = await getDatabase();
-  const date = getLocalDateString(workout.completedAt || workout.startedAt);
+  const date = workout.date || getLocalDateString(workout.completedAt || workout.startedAt);
   const now = Date.now();
 
   try {
@@ -550,29 +555,32 @@ export async function dbInsertWorkout(workout: WorkoutSession): Promise<void> {
       ]
     );
 
-    // Clean and insert exercises and sets
     await db.runAsync('DELETE FROM exercises WHERE workout_id = ?', [workout.id]);
 
+    const exerciseRows: unknown[][] = [];
+    const setRows: unknown[][] = [];
     for (let eIdx = 0; eIdx < (workout.exercises || []).length; eIdx++) {
       const ex = workout.exercises[eIdx];
-      await db.runAsync(
-        'INSERT INTO exercises (id, workout_id, name, order_index, created_at) VALUES (?, ?, ?, ?, ?)',
-        [ex.id, workout.id, ex.name, eIdx, now]
-      );
-
+      exerciseRows.push([ex.id, workout.id, ex.name, eIdx, now]);
       for (const s of ex.sets || []) {
-        await db.runAsync(
-          'INSERT INTO sets (id, exercise_id, set_number, weight_kg, reps, completed, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [s.id, ex.id, s.setNumber, s.weightKg, s.reps, s.completed ? 1 : 0, now]
-        );
+        setRows.push([s.id, ex.id, s.setNumber, s.weightKg, s.reps, s.completed ? 1 : 0, now]);
       }
     }
+
+    await runChunkedInsert(db, 'exercises', ['id', 'workout_id', 'name', 'order_index', 'created_at'], exerciseRows);
+    await runChunkedInsert(
+      db,
+      'sets',
+      ['id', 'exercise_id', 'set_number', 'weight_kg', 'reps', 'completed', 'created_at'],
+      setRows
+    );
 
     try {
       await db.execAsync('COMMIT;');
     } catch {
       // Non-fatal
     }
+    invalidateActivityDatesCache();
   } catch (err) {
     try {
       await db.execAsync('ROLLBACK;');
@@ -580,6 +588,22 @@ export async function dbInsertWorkout(workout: WorkoutSession): Promise<void> {
       // Ignore
     }
     throw err;
+  }
+}
+
+async function runChunkedInsert(
+  db: DatabaseAdapter,
+  table: string,
+  columns: string[],
+  rows: unknown[][]
+): Promise<void> {
+  const chunkSize = 80;
+  const tuple = `(${columns.map(() => '?').join(', ')})`;
+  for (let offset = 0; offset < rows.length; offset += chunkSize) {
+    const chunk = rows.slice(offset, offset + chunkSize);
+    if (chunk.length === 0) continue;
+    const sql = `INSERT INTO ${table} (${columns.join(', ')}) VALUES ${chunk.map(() => tuple).join(', ')}`;
+    await db.runAsync(sql, chunk.flat());
   }
 }
 
@@ -614,6 +638,7 @@ export async function dbGetAllWorkouts(): Promise<WorkoutSession[]> {
 export async function dbDeleteWorkout(id: string): Promise<void> {
   const db = await getDatabase();
   await db.runAsync('DELETE FROM workout_sessions WHERE id = ?', [id]);
+  invalidateActivityDatesCache();
 }
 
 export async function dbUpdateWorkout(id: string, updates: Partial<WorkoutSession>): Promise<void> {
@@ -688,6 +713,7 @@ function parseScannedProductRow(r: {
     scannedAt: r.scanned_at,
     imageUrl: r.image_path ?? undefined,
     report,
+    reportComplete: true,
   };
 }
 
@@ -703,6 +729,120 @@ export async function dbGetAllScannedProducts(): Promise<ScannedProduct[]> {
   }>('SELECT * FROM scanned_products ORDER BY scanned_at DESC LIMIT 100');
 
   return rows.map(parseScannedProductRow);
+}
+
+interface ProductSummarySqlRow {
+  id: string;
+  barcode: string | null;
+  product_name: string;
+  overall_safety_score: number;
+  risk_level: string;
+  scanned_at: string;
+  image_path: string | null;
+  flagged_count?: number | null;
+}
+
+function mapProductSummary(r: ProductSummarySqlRow): ScannedProduct {
+  const riskLevel =
+    r.risk_level === 'Safe' || r.risk_level === 'Moderate' || r.risk_level === 'High Risk'
+      ? r.risk_level
+      : 'Moderate';
+
+  return {
+    id: r.id,
+    barcode: r.barcode ?? undefined,
+    productName: r.product_name,
+    scannedAt: r.scanned_at,
+    imageUrl: r.image_path ?? undefined,
+    reportComplete: false,
+    flaggedCount: Number(r.flagged_count ?? 0),
+    report: {
+      productName: r.product_name,
+      overallSafetyScore: r.overall_safety_score,
+      riskLevel,
+      harmfulIngredients: [],
+      cleanSummary: '',
+    },
+  };
+}
+
+/**
+ * List rows for the dashboard and the all-scans modal.
+ * Leaves report_json on disk so startup does not JSON.parse every scan.
+ */
+export async function dbGetProductSummaries(limit = 100): Promise<ScannedProduct[]> {
+  const db = await getDatabase();
+  const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  const rows = await db.getAllAsync<ProductSummarySqlRow>(
+    `SELECT id, barcode, product_name, overall_safety_score, risk_level, scanned_at, image_path,
+            COALESCE(json_array_length(report_json, '$.harmfulIngredients'), 0) AS flagged_count
+     FROM scanned_products
+     ORDER BY scanned_at DESC
+     LIMIT ${safeLimit}`
+  );
+  return rows.map(mapProductSummary);
+}
+
+export async function dbGetScannedProductById(id: string): Promise<ScannedProduct | null> {
+  const db = await getDatabase();
+  const row = await db.getFirstAsync<{
+    id: string;
+    barcode: string | null;
+    product_name: string;
+    scanned_at: string;
+    image_path: string | null;
+    report_json: string;
+  }>(
+    'SELECT id, barcode, product_name, scanned_at, image_path, report_json FROM scanned_products WHERE id = ?',
+    [id]
+  );
+  if (!row) return null;
+  return parseScannedProductRow(row);
+}
+
+let activityDatesCache: string[] | null = null;
+
+export function invalidateActivityDatesCache(): void {
+  activityDatesCache = null;
+}
+
+export async function dbGetActivityDates(): Promise<string[]> {
+  if (activityDatesCache) return activityDatesCache;
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{ date: string }>(
+    `SELECT date FROM meals
+     UNION
+     SELECT date FROM workout_sessions`
+  );
+  activityDatesCache = rows.map((row) => row.date).filter((date) => Boolean(date));
+  return activityDatesCache;
+}
+
+export async function dbGetLibraryCounts(): Promise<{
+  meals: number;
+  mealsWithPhotos: number;
+  workouts: number;
+  products: number;
+}> {
+  const db = await getDatabase();
+  const row = await db.getFirstAsync<{
+    meals: number;
+    meals_with_photos: number;
+    workouts: number;
+    products: number;
+  }>(
+    `SELECT
+      (SELECT COUNT(*) FROM meals) AS meals,
+      (SELECT COUNT(*) FROM meals WHERE image_path IS NOT NULL AND image_path != '') AS meals_with_photos,
+      (SELECT COUNT(*) FROM workout_sessions) AS workouts,
+      (SELECT COUNT(*) FROM scanned_products) AS products`
+  );
+  return {
+    meals: Number(row?.meals ?? 0),
+    mealsWithPhotos: Number(row?.meals_with_photos ?? 0),
+    workouts: Number(row?.workouts ?? 0),
+    products: Number(row?.products ?? 0),
+  };
 }
 
 export async function dbGetScannedProductsByDate(date: string): Promise<ScannedProduct[]> {

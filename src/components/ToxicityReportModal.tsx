@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   Linking,
@@ -15,7 +15,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { recalculateToxicityReport } from '../services/barcodeService';
 import { getFullImageUri } from '../utils/imageManager';
 import { useFitnessStore } from '../store/useFitnessStore';
-import { colors } from '../theme/colors';
+import type { ThemeColors } from '../theme/colors';
+import { useThemeColors, useThemedStyles } from '../theme/theme';
 import {
   NovaGroup,
   NutriscoreGrade,
@@ -35,10 +36,17 @@ export function ToxicityReportModal({
   product,
   onClose,
 }: ToxicityReportModalProps) {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
   const updateScannedProduct = useFitnessStore((state) => state.updateScannedProduct);
   const removeScannedProduct = useFitnessStore((state) => state.removeScannedProduct);
 
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
+
+  useEffect(() => {
+    if (!visible || !product || product.reportComplete) return;
+    useFitnessStore.getState().loadScannedProductReport(product.id).catch(() => {});
+  }, [visible, product]);
 
   if (!product) return null;
 
@@ -257,12 +265,12 @@ export function ToxicityReportModal({
           </View>
 
           {/* Indian Supermarket Context Alert Box */}
-          {report.indianMarketAlert && (
+          {report.indianMarketAlert ? (
             <View style={styles.indianAlertCardClean}>
               <Ionicons name="warning-outline" size={16} color={colors.warning} />
               <Text style={styles.indianAlertTextClean}>{report.indianMarketAlert}</Text>
             </View>
-          )}
+          ) : null}
 
           {/* Clean Ingredients Breakdown */}
           <View style={styles.ingredientsSectionClean}>
@@ -340,7 +348,7 @@ export function ToxicityReportModal({
               ))}
 
               {/* Clean / Unflagged Ingredients */}
-              {report.allIngredients && report.allIngredients.map((ing, idx) => {
+              {report.allIngredients ? report.allIngredients.map((ing, idx) => {
                 const isFlagged = report.harmfulIngredients.some(
                   (h) => h.name.toLowerCase().includes(ing.toLowerCase()) || ing.toLowerCase().includes(h.name.toLowerCase())
                 );
@@ -354,7 +362,7 @@ export function ToxicityReportModal({
                     </View>
                   </View>
                 );
-              })}
+              }) : null}
             </View>
           </View>
 
@@ -367,26 +375,26 @@ export function ToxicityReportModal({
               ) : null}
             </View>
             <View style={styles.standardsRowClean}>
-              {novaDetails && (
+              {novaDetails ? (
                 <View style={styles.standardChipClean}>
                   <Text style={[styles.standardChipTag, { color: novaDetails.color }]}>{novaDetails.label}</Text>
                   <Text style={styles.standardChipDesc}>{novaDetails.title}</Text>
                 </View>
-              )}
-              {report.nutriscoreGrade && (
+              ) : null}
+              {report.nutriscoreGrade ? (
                 <View style={styles.standardChipClean}>
                   <Text style={[styles.standardChipTag, { color: getNutriscoreColor(report.nutriscoreGrade) }]}>
                     Nutri-Score {report.nutriscoreGrade.toUpperCase()}
                   </Text>
                   <Text style={styles.standardChipDesc}>Quality</Text>
                 </View>
-              )}
-              {report.targetExposure && (
+              ) : null}
+              {report.targetExposure ? (
                 <View style={styles.standardChipClean}>
                   <Text style={[styles.standardChipTag, { color: exposureMeta.color }]}>{report.targetExposure}</Text>
                   <Text style={styles.standardChipDesc}>Exposure</Text>
                 </View>
-              )}
+              ) : null}
             </View>
           </View>
 
@@ -402,7 +410,7 @@ export function ToxicityReportModal({
         </ScrollView>
 
         {/* Nested Edit Product Modal */}
-        {isEditModalVisible && (
+        {isEditModalVisible ? (
           <EditProductModal
             visible={isEditModalVisible}
             initialName={product.productName}
@@ -410,13 +418,14 @@ export function ToxicityReportModal({
             onClose={() => setIsEditModalVisible(false)}
             onSave={handleSaveEdit}
           />
-        )}
+        ) : null}
       </SafeAreaView>
     </Modal>
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -903,3 +912,5 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.98 }],
   },
 });
+}
+

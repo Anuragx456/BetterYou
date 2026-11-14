@@ -25,7 +25,8 @@ import {
   useSettingsStore,
   validateGeminiApiKey,
 } from '../store/useSettingsStore';
-import { colors } from '../theme/colors';
+import type { ThemeColors } from '../theme/colors';
+import { useThemeColors, useThemedStyles } from '../theme/theme';
 import { safeHaptics } from '../utils/haptics';
 
 const GOOGLE_AI_STUDIO_PLAN_URL = 'https://aistudio.google.com/app/plan_information';
@@ -51,12 +52,15 @@ function formatTimestamp(ms: number): string {
 }
 
 export function GeminiUsageSection() {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
   const router = useRouter();
 
   // Settings & Fitness state
   const customApiKey = useSettingsStore((state) => state.customApiKey);
-  const meals = useFitnessStore((state) => state.meals);
-  const scannedProducts = useFitnessStore((state) => state.scannedProducts);
+  const mealCount = useFitnessStore((state) => state.mealCount);
+  const mealPhotoCount = useFitnessStore((state) => state.mealPhotoCount);
+  const scannedProductCount = useFitnessStore((state) => state.scannedProductCount);
 
   // Usage Store state
   const totalCalls = useGeminiUsageStore((state) => state.totalCalls);
@@ -74,10 +78,9 @@ export function GeminiUsageSection() {
 
   // Auto-sync initial scan count from existing meals and scanned products if clean
   useEffect(() => {
-    const mealsWithPhotos = meals.filter((m) => Boolean(m.imageUri)).length;
-    const mealsWithoutPhotos = meals.length - mealsWithPhotos;
-    syncFromStoreHistory(mealsWithPhotos, mealsWithoutPhotos, scannedProducts.length);
-  }, [meals, scannedProducts, syncFromStoreHistory]);
+    const mealsWithoutPhotos = Math.max(0, mealCount - mealPhotoCount);
+    syncFromStoreHistory(mealPhotoCount, mealsWithoutPhotos, scannedProductCount);
+  }, [mealCount, mealPhotoCount, scannedProductCount, syncFromStoreHistory]);
 
   const hasCustom = isUsingCustomKey();
   const activeModelId = getEffectiveModel();
@@ -473,7 +476,8 @@ export function GeminiUsageSection() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: {
     marginTop: 8,
     marginBottom: 16,
@@ -817,3 +821,5 @@ const styles = StyleSheet.create({
     opacity: 0.75,
   },
 });
+}
+

@@ -17,14 +17,15 @@ const withAppSize: ConfigPlugin = (config) => {
         props.push({ type: "property", key, value });
       }
     };
-    // Include 32-bit ARM for broad Indian budget device compatibility alongside 64-bit
-    upsert("reactNativeArchitectures", "arm64-v8a,armeabi-v7a");
+    upsert("reactNativeArchitectures", "arm64-v8a");
     upsert("android.enableMinifyInReleaseBuilds", "true");
     upsert("android.enableShrinkResourcesInReleaseBuilds", "true");
     upsert("android.enablePngCrunchInReleaseBuilds", "true");
+    upsert("android.enableBundleCompression", "true");
+    upsert("expo.useLegacyPackaging", "true");
     upsert("hermesEnabled", "true");
     upsert("expo.gif.enabled", "false");
-    upsert("expo.webp.enabled", "true");
+    upsert("expo.webp.enabled", "false");
     return cfg;
   });
 

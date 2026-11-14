@@ -30,7 +30,8 @@ import {
   startSpeechRecognition,
   stopSpeechRecognition,
 } from '../services/speechService';
-import { colors } from '../theme/colors';
+import type { ThemeColors } from '../theme/colors';
+import { useThemeColors, useThemedStyles } from '../theme/theme';
 import { MealAnalysisResult, ToxicityReport } from '../types';
 import { safeHaptics } from '../utils/haptics';
 
@@ -64,38 +65,42 @@ const QUICK_PRODUCT_PROMPTS = [
   "Johnson's Baby Powder",
 ];
 
-// Reanimated Waveform Bar Component
+// Reanimated Waveform Bar Component (GPU-accelerated scaleY)
 function WaveformBar({ isListening, delay, minHeight, maxHeight }: {
   isListening: boolean;
   delay: number;
   minHeight: number;
   maxHeight: number;
 }) {
-  const heightAnim = useSharedValue(minHeight);
+  const styles = useThemedStyles(createStyles);
+  const minScale = Math.max(0.1, minHeight / maxHeight);
+  const scaleAnim = useSharedValue(minScale);
 
   useEffect(() => {
     if (isListening) {
-      heightAnim.value = withDelay(
-        delay,
-        withRepeat(
-          withSequence(
-            withTiming(maxHeight, { duration: 320, easing: Easing.inOut(Easing.ease) }),
-            withTiming(minHeight, { duration: 320, easing: Easing.inOut(Easing.ease) })
-          ),
-          -1,
-          true
+      scaleAnim.set(
+        withDelay(
+          delay,
+          withRepeat(
+            withSequence(
+              withTiming(1, { duration: 320, easing: Easing.inOut(Easing.ease) }),
+              withTiming(minScale, { duration: 320, easing: Easing.inOut(Easing.ease) })
+            ),
+            -1,
+            true
+          )
         )
       );
     } else {
-      heightAnim.value = withTiming(minHeight, { duration: 250 });
+      scaleAnim.set(withTiming(minScale, { duration: 250 }));
     }
-  }, [isListening, delay, minHeight, maxHeight, heightAnim]);
+  }, [isListening, delay, minScale, scaleAnim]);
 
   const barStyle = useAnimatedStyle(() => ({
-    height: heightAnim.value,
+    transform: [{ scaleY: scaleAnim.get() }],
   }));
 
-  return <Animated.View style={[styles.waveBar, barStyle]} />;
+  return <Animated.View style={[styles.waveBar, { height: maxHeight, transformOrigin: 'bottom' }, barStyle]} />;
 }
 
 export function VoiceInputModal({
@@ -105,6 +110,8 @@ export function VoiceInputModal({
   onSubmitMealResult,
   onSubmitProductResult,
 }: VoiceInputModalProps) {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
   const [transcript, setTranscript] = useState<string>('');
   const [isListening, setIsListening] = useState<boolean>(false);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
@@ -119,28 +126,32 @@ export function VoiceInputModal({
 
   useEffect(() => {
     if (isListening) {
-      pulseScale.value = withRepeat(
-        withTiming(1.35, { duration: 1100, easing: Easing.out(Easing.ease) }),
-        -1,
-        false
+      pulseScale.set(
+        withRepeat(
+          withTiming(1.35, { duration: 1100, easing: Easing.out(Easing.ease) }),
+          -1,
+          false
+        )
       );
-      pulseOpacity.value = withRepeat(
-        withSequence(
-          withTiming(0.6, { duration: 400 }),
-          withTiming(0, { duration: 700 })
-        ),
-        -1,
-        false
+      pulseOpacity.set(
+        withRepeat(
+          withSequence(
+            withTiming(0.6, { duration: 400 }),
+            withTiming(0, { duration: 700 })
+          ),
+          -1,
+          false
+        )
       );
     } else {
-      pulseScale.value = withTiming(1, { duration: 200 });
-      pulseOpacity.value = withTiming(0, { duration: 200 });
+      pulseScale.set(withTiming(1, { duration: 200 }));
+      pulseOpacity.set(withTiming(0, { duration: 200 }));
     }
   }, [isListening, pulseScale, pulseOpacity]);
 
   const pulseRingStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: pulseScale.value }],
-    opacity: pulseOpacity.value,
+    transform: [{ scale: pulseScale.get() }],
+    opacity: pulseOpacity.get(),
   }));
 
   // Check speech availability on mount
@@ -454,14 +465,14 @@ export function VoiceInputModal({
               </ScrollView>
             </View>
 
-            {!isSpeechAvailable && (
+            {!isSpeechAvailable ? (
               <View style={styles.noticeBanner}>
                 <Ionicons name="information-circle-outline" size={16} color={colors.warning} />
                 <Text style={styles.noticeText}>
                   Speech recognition requires a connected microphone or device speech service. You can also type or use quick suggestions above.
                 </Text>
               </View>
-            )}
+            ) : null}
 
             {/* Submit Action Button */}
             <Pressable
@@ -496,7 +507,8 @@ export function VoiceInputModal({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -754,3 +766,5 @@ const styles = StyleSheet.create({
     opacity: 0.75,
   },
 });
+}
+

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { useFitnessStore, calculateWorkoutVolume } from '../useFitnessStore';
 import { useSettingsStore } from '../useSettingsStore';
-import { getDatabase } from '../../db/client';
+import { getDatabase, invalidateActivityDatesCache } from '../../db/client';
 import { ToxicityReport } from '../../types';
 
 describe('Store Logic Tests (useFitnessStore & useSettingsStore)', () => {
@@ -17,11 +17,13 @@ describe('Store Logic Tests (useFitnessStore & useSettingsStore)', () => {
       DELETE FROM daily_goals;
       DELETE FROM migrations_meta;
     `);
+    invalidateActivityDatesCache();
 
     // Reset Zustand fitness store state
     useFitnessStore.setState({
       meals: [],
       workouts: [],
+      dashboardWorkouts: [],
       scannedProducts: [],
       dailyGoals: {
         calorieTarget: 2200,
@@ -32,10 +34,17 @@ describe('Store Logic Tests (useFitnessStore & useSettingsStore)', () => {
       activeWorkout: null,
       streakDays: 0,
       isInitialized: false,
+      workoutsHistoryLoaded: false,
+      activityDates: [],
+      mealCount: 0,
+      mealPhotoCount: 0,
+      workoutCount: 0,
+      scannedProductCount: 0,
     });
 
     // Reset Zustand settings store state
     useSettingsStore.getState().resetSettings();
+    useSettingsStore.getState().setColorScheme('light');
   });
 
   describe('useFitnessStore - Daily Goals & Initialization', () => {
@@ -279,6 +288,15 @@ describe('Store Logic Tests (useFitnessStore & useSettingsStore)', () => {
 
       store.clearCustomApiKey();
       expect(useSettingsStore.getState().customApiKey).toBe('');
+    });
+
+    it('keeps the appearance choice when the API key is reset', () => {
+      const store = useSettingsStore.getState();
+      store.setColorScheme('dark');
+      expect(useSettingsStore.getState().colorScheme).toBe('dark');
+      store.resetSettings();
+      expect(useSettingsStore.getState().colorScheme).toBe('dark');
+      store.setColorScheme('light');
     });
 
     it('selects models and custom model overrides', () => {

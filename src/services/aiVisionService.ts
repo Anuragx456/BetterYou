@@ -47,6 +47,100 @@ export function clearAiVisionCaches() {
   mealImageHashCache.clear();
 }
 
+export async function hashImagePayload(base64: string): Promise<string> {
+  if (!base64) return '';
+  // Hash a bounded sample. SHA-256 of a multi-hundred-KB base64 string blocks the JS thread.
+  const sample =
+    base64.length <= 2048
+      ? base64
+      : `${base64.length}:${base64.slice(0, 1024)}:${base64.slice(-1024)}`;
+  try {
+    const Crypto = await import('expo-crypto');
+    return await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, sample);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Native file digest. Avoids copying the vision base64 string into the hash.
+ */
+export async function hashImageFile(uri: string): Promise<string> {
+  if (!uri || uri.startsWith('data:')) return '';
+  try {
+    const { File } = await import('expo-file-system');
+    const file = new File(uri);
+    if (!file.exists) return '';
+    return await file.digest('SHA-256');
+  } catch {
+    return '';
+  }
+}
+
+const GEMINI_FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
+
+export function geminiModelsInOrder(chosenModel: string): string[] {
+  return [chosenModel, ...GEMINI_FALLBACK_MODELS.filter((model) => model !== chosenModel)];
+}
+
+export function isGeminiModelMissingMessage(message: string): boolean {
+  return /not found|not supported|unknown model|invalid model|does not exist|is not available/i.test(message);
+}
+
+/**
+ * After the chosen model, try one fallback. Keep walking the list only when a
+ * model name itself does not exist.
+ */
+export function nextGeminiModelIndex(
+  cursor: { index: number; realFallbackUsed: boolean; modelCount: number },
+  outcome: 'missing' | 'failed'
+): { index: number; realFallbackUsed: boolean } | null {
+  const nextIndex = cursor.index + 1;
+  if (nextIndex >= cursor.modelCount) return null;
+  if (outcome === 'missing') {
+    return { index: nextIndex, realFallbackUsed: cursor.realFallbackUsed };
+  }
+  if (cursor.realFallbackUsed) return null;
+  return { index: nextIndex, realFallbackUsed: true };
+}
+
+async function readPersistedVisionCache<T>(key: string): Promise<T | null> {
+  try {
+    const { getDatabase } = await import('../db/client');
+    const db = await getDatabase();
+    const row = await db.getFirstAsync<{ payload: string; created_at: number }>(
+      'SELECT payload, created_at FROM vision_cache WHERE cache_key = ?',
+      [key]
+    );
+    if (!row) return null;
+    if (Date.now() - Number(row.created_at) > SCAN_CACHE_TTL_MS) {
+      await db.runAsync('DELETE FROM vision_cache WHERE cache_key = ?', [key]);
+      return null;
+    }
+    return JSON.parse(row.payload) as T;
+  } catch {
+    return null;
+  }
+}
+
+async function writePersistedVisionCache(key: string, payload: unknown): Promise<void> {
+  try {
+    const { getDatabase } = await import('../db/client');
+    const db = await getDatabase();
+    await db.runAsync(
+      'INSERT OR REPLACE INTO vision_cache (cache_key, payload, created_at) VALUES (?, ?, ?)',
+      [key, JSON.stringify(payload), Date.now()]
+    );
+    await db.runAsync(
+      `DELETE FROM vision_cache WHERE cache_key NOT IN (
+        SELECT cache_key FROM vision_cache ORDER BY created_at DESC LIMIT ${MAX_SCAN_CACHE_ENTRIES}
+      )`
+    );
+  } catch {
+    // The in-memory cache still serves this process.
+  }
+}
+
 /**
  * Computes a fast deterministic signature for an image payload
  * to detect repeated scans prior to any network dispatch.
@@ -129,6 +223,8 @@ export interface GeminiVisionOptions {
   timeoutMs?: number;
   maxRetries?: number;
   feature?: GeminiFeature;
+  /** When set, a model response that fails this check is not retried. The next model is tried. */
+  acceptText?: (text: string) => boolean;
 }
 
 /**
@@ -175,12 +271,16 @@ export async function callGeminiVision(
       },
     };
 
-    const fallbackCandidates = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
-    const modelsToTry = [chosenModel, ...fallbackCandidates.filter((m) => m !== chosenModel)];
+    const modelsToTry = geminiModelsInOrder(chosenModel);
     let lastError: Error | null = null;
+    let lastInvalid: { text: string; usedModel: string } | null = null;
+    let modelIndex = 0;
+    let realFallbackUsed = false;
     const serializedBody = JSON.stringify(requestBody);
 
-    for (const model of modelsToTry) {
+    while (modelIndex < modelsToTry.length) {
+      const model = modelsToTry[modelIndex];
+      let modelMissing = false;
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -198,8 +298,22 @@ export async function callGeminiVision(
           });
 
           if (!response.ok) {
+            if (response.status === 404) {
+              lastError = new Error(`Gemini ${model} returned HTTP 404`);
+              modelMissing = true;
+              break;
+            }
+            if (response.status === 400) {
+              const errText = await response.text().catch(() => '');
+              if (isGeminiModelMissingMessage(errText)) {
+                lastError = new Error(`Gemini ${model} returned HTTP 400`);
+                modelMissing = true;
+                break;
+              }
+              throw new Error('Gemini API Authentication Error (400). Please verify your custom API key.');
+            }
             // Fatal auth errors - do not retry
-            if (response.status === 400 || response.status === 401 || response.status === 403) {
+            if (response.status === 401 || response.status === 403) {
               throw new Error(`Gemini API Authentication Error (${response.status}). Please verify your custom API key.`);
             }
 
@@ -235,6 +349,12 @@ export async function callGeminiVision(
             throw new Error(`Gemini ${model} returned empty content.`);
           }
 
+          const extracted = extractJsonString(candidateText);
+          if (options?.acceptText && !options.acceptText(extracted)) {
+            lastInvalid = { text: extracted, usedModel: model };
+            break;
+          }
+
           const durationMs = Date.now() - startTime;
           const usage = result.usageMetadata;
           const promptTokens = usage?.promptTokenCount ?? Math.round(prompt.length / 4 + 258);
@@ -252,20 +372,31 @@ export async function callGeminiVision(
             isCustomKey: true,
           });
 
-          return { text: extractJsonString(candidateText), usedModel: model };
+          return { text: extracted, usedModel: model };
         } catch (err: unknown) {
           lastError = err instanceof Error ? err : new Error(String(err));
           if (lastError.message.includes('Authentication Error')) {
             throw lastError;
           }
           if (attempt === maxRetries) {
-            // Fall through to next model in fallback chain
             break;
           }
         } finally {
           clearTimeout(timeoutId);
         }
       }
+
+      const nextModel = nextGeminiModelIndex(
+        { index: modelIndex, realFallbackUsed, modelCount: modelsToTry.length },
+        modelMissing ? 'missing' : 'failed'
+      );
+      if (!nextModel) break;
+      modelIndex = nextModel.index;
+      realFallbackUsed = nextModel.realFallbackUsed;
+    }
+
+    if (lastInvalid && !lastError) {
+      return lastInvalid;
     }
 
     useGeminiUsageStore.getState().recordApiCall({
@@ -518,7 +649,7 @@ function getMockToxicityReport(productHint?: string): ToxicityReport {
  */
 export async function analyzeMealImage(
   base64Image: string,
-  options?: { isExplicitDemo?: boolean; localImagePath?: string }
+  options?: { isExplicitDemo?: boolean; localImagePath?: string; imageHash?: string }
 ): Promise<MealAnalysisResult> {
   const isDemo = options?.isExplicitDemo || base64Image === 'demo_sample';
   if (!base64Image || isDemo) {
@@ -531,10 +662,15 @@ export async function analyzeMealImage(
   }
 
   // 1. Check Image Hash Cache (0 network requests on repeated photo analysis)
-  const imageSig = computeImageSignature(base64Image);
+  const imageSig = options?.imageHash || computeImageSignature(base64Image);
   const cached = mealImageHashCache.get(imageSig);
   if (cached && Date.now() - cached.timestamp < SCAN_CACHE_TTL_MS) {
     return cached.result;
+  }
+  const persistedMeal = await readPersistedVisionCache<MealAnalysisResult>(`meal:${imageSig}`);
+  if (persistedMeal) {
+    setBoundedCache(mealImageHashCache, imageSig, { result: persistedMeal, timestamp: Date.now() });
+    return persistedMeal;
   }
 
   const prompt = `You are a sports nutritionist and computer vision AI.
@@ -549,6 +685,13 @@ Return a valid JSON object matching the response schema.`;
     const { text: rawJson, usedModel } = await callGeminiVision(prompt, base64Image, {
       responseSchema: GEMINI_MEAL_RESPONSE_SCHEMA,
       feature: 'meal-vision',
+      acceptText: (text) => {
+        try {
+          return MealAnalysisAiSchema.safeParse(JSON.parse(text)).success;
+        } catch {
+          return false;
+        }
+      },
     });
     usedModelName = usedModel;
 
@@ -623,6 +766,7 @@ Return a valid JSON object matching the response schema.`;
   };
 
   setBoundedCache(mealImageHashCache, imageSig, { result, timestamp: Date.now() });
+  await writePersistedVisionCache(`meal:${imageSig}`, result);
   return result;
 }
 
@@ -632,7 +776,7 @@ Return a valid JSON object matching the response schema.`;
  */
 export async function analyzeIngredientsImage(
   base64Image: string,
-  options?: { isExplicitDemo?: boolean; localImagePath?: string; productNameHint?: string }
+  options?: { isExplicitDemo?: boolean; localImagePath?: string; productNameHint?: string; imageHash?: string }
 ): Promise<ToxicityReport> {
   const isDemo = options?.isExplicitDemo || (base64Image.length > 0 && base64Image.length < 50 && !base64Image.startsWith('data:') && !base64Image.startsWith('/9j/'));
   if (!base64Image || isDemo) {
@@ -649,10 +793,17 @@ export async function analyzeIngredientsImage(
   }
 
   // 1. Check Image Hash Cache FIRST (incorporating productNameHint to avoid returning mismatched previous scan)
-  const imageSig = computeImageSignature(base64Image) + (options?.productNameHint ? `::hint:${options.productNameHint.trim().toLowerCase()}` : '');
+  const imageSig =
+    (options?.imageHash || computeImageSignature(base64Image)) +
+    (options?.productNameHint ? `::hint:${options.productNameHint.trim().toLowerCase()}` : '');
   const cachedImage = toxicityImageHashCache.get(imageSig);
   if (cachedImage && Date.now() - cachedImage.timestamp < SCAN_CACHE_TTL_MS) {
     return cachedImage.report;
+  }
+  const persistedReport = await readPersistedVisionCache<ToxicityReport>(`tox:${imageSig}`);
+  if (persistedReport) {
+    setBoundedCache(toxicityImageHashCache, imageSig, { report: persistedReport, timestamp: Date.now() });
+    return persistedReport;
   }
 
   const prompt = options?.productNameHint
@@ -673,6 +824,13 @@ Return a valid JSON object strictly matching the response schema.`;
     const { text: rawJson, usedModel } = await callGeminiVision(prompt, base64Image, {
       responseSchema: GEMINI_TOXICITY_RESPONSE_SCHEMA,
       feature: 'toxicity-scan',
+      acceptText: (text) => {
+        try {
+          return ToxicityAnalysisAiSchema.safeParse(JSON.parse(text)).success;
+        } catch {
+          return false;
+        }
+      },
     });
     usedModelName = usedModel;
 
@@ -785,6 +943,7 @@ Return a valid JSON object strictly matching the response schema.`;
   // Save to both bounded image hash and text fingerprint caches
   setBoundedCache(toxicityScanCache, fingerprint, { report: baseReport, timestamp: Date.now() });
   setBoundedCache(toxicityImageHashCache, imageSig, { report: baseReport, timestamp: Date.now() });
+  await writePersistedVisionCache(`tox:${imageSig}`, baseReport);
 
   return baseReport;
 }
@@ -810,12 +969,15 @@ async function callGeminiText(
       },
     };
 
-    const fallbackCandidates = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
-    const modelsToTry = [chosenModel, ...fallbackCandidates.filter((m) => m !== chosenModel)];
+    const modelsToTry = geminiModelsInOrder(chosenModel);
     let lastError: Error | null = null;
+    let modelIndex = 0;
+    let realFallbackUsed = false;
     const serializedBody = JSON.stringify(requestBody);
 
-    for (const model of modelsToTry) {
+    while (modelIndex < modelsToTry.length) {
+      const model = modelsToTry[modelIndex];
+      let modelMissing = false;
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000);
 
@@ -832,7 +994,19 @@ async function callGeminiText(
         });
 
         if (!response.ok) {
-          if (response.status === 400 || response.status === 401 || response.status === 403) {
+          if (response.status === 404) {
+            modelMissing = true;
+            throw new Error(`Gemini ${model} HTTP 404`);
+          }
+          if (response.status === 400) {
+            const errText = await response.text().catch(() => '');
+            if (isGeminiModelMissingMessage(errText)) {
+              modelMissing = true;
+              throw new Error(`Gemini ${model} HTTP 400`);
+            }
+            throw new Error('Gemini API Authentication Error (400). Please check your custom API key.');
+          }
+          if (response.status === 401 || response.status === 403) {
             throw new Error(`Gemini API Authentication Error (${response.status}). Please check your custom API key.`);
           }
           throw new Error(`Gemini ${model} HTTP ${response.status}`);
@@ -885,6 +1059,14 @@ async function callGeminiText(
       } finally {
         clearTimeout(timeoutId);
       }
+
+      const nextModel = nextGeminiModelIndex(
+        { index: modelIndex, realFallbackUsed, modelCount: modelsToTry.length },
+        modelMissing ? 'missing' : 'failed'
+      );
+      if (!nextModel) break;
+      modelIndex = nextModel.index;
+      realFallbackUsed = nextModel.realFallbackUsed;
     }
 
     useGeminiUsageStore.getState().recordApiCall({

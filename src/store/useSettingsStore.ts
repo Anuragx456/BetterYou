@@ -101,12 +101,15 @@ export const AVAILABLE_GEMINI_MODELS: GeminiModelOption[] = [
 
 export const DEFAULT_MODEL_ID = 'gemini-3.6-flash';
 
+export type ColorScheme = 'light' | 'dark';
+
 export interface SettingsState {
   // State
   customApiKey: string;
   selectedModel: string;
   isCustomModel: boolean;
   customModelName: string;
+  colorScheme: ColorScheme;
 
   // Actions
   setCustomApiKey: (key: string) => void;
@@ -114,6 +117,7 @@ export interface SettingsState {
   setSelectedModel: (modelId: string) => void;
   setIsCustomModel: (isCustom: boolean) => void;
   setCustomModelName: (modelName: string) => void;
+  setColorScheme: (scheme: ColorScheme) => void;
   resetSettings: () => void;
 }
 
@@ -128,6 +132,7 @@ export const useSettingsStore = create<SettingsState>()(
       selectedModel: DEFAULT_MODEL_ID,
       isCustomModel: false,
       customModelName: '',
+      colorScheme: 'light',
 
       setCustomApiKey: (key: string) => {
         const trimmed = key.trim();
@@ -156,6 +161,10 @@ export const useSettingsStore = create<SettingsState>()(
         set({ customModelName: modelName.trim(), isCustomModel: true });
       },
 
+      setColorScheme: (scheme) => {
+        set({ colorScheme: scheme });
+      },
+
       resetSettings: () => {
         deleteSecureItem(SECURE_KEYS.GEMINI_API_KEY);
         set({
@@ -174,6 +183,7 @@ export const useSettingsStore = create<SettingsState>()(
         selectedModel: state.selectedModel,
         isCustomModel: state.isCustomModel,
         customModelName: state.customModelName,
+        colorScheme: state.colorScheme,
       }),
       onRehydrateStorage: () => () => {
         // Hydrate custom API key from secure hardware-backed storage

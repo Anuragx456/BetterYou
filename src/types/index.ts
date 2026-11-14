@@ -33,6 +33,7 @@ export interface MealLog {
   estimatedWeightGrams: number;
   portionMultiplier: number;
   imageUri?: string;
+  thumbnailUri?: string;
   ingredientsDetected: string[];
   notes?: string;
   date?: string; // Local YYYY-MM-DD
@@ -117,6 +118,10 @@ export interface ScannedProduct {
   scannedAt: string; // ISO 8601 string
   imageUrl?: string;
   imageUri?: string;
+  /** False when the row is a list summary and report_json has not been parsed. */
+  reportComplete?: boolean;
+  /** Additive count stored with the summary so the dashboard does not parse report_json. */
+  flaggedCount?: number;
 }
 
 export interface ExerciseSet {

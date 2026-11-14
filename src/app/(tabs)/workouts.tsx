@@ -6,7 +6,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -36,12 +35,15 @@ import {
   calculateWorkoutVolume,
   useFitnessStore,
 } from '../../store/useFitnessStore';
-import { colors } from '../../theme/colors';
+import type { ThemeColors } from '../../theme/colors';
+import { useThemeColors, useThemedStyles } from '../../theme/theme';
 import { ExerciseItem, ExerciseSet, WorkoutSession } from '../../types';
 import { safeHaptics } from '../../utils/haptics';
 import {
-  detectPersonalRecord,
-  getPreviousSessionExerciseValues,
+  buildExerciseHistoryIndex,
+  normalizeExerciseName,
+  personalRecordFromSnapshot,
+  type ExerciseHistoryIndex,
 } from '../../utils/workoutAnalytics';
 
 const REST_PRESETS = [60, 90, 120];
@@ -50,6 +52,149 @@ function formatTime(totalSec: number): string {
   const mins = Math.floor(totalSec / 60);
   const secs = totalSec % 60;
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
+
+function secondsUntil(endsAt: number): number {
+  return Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
+}
+
+/**
+ * Diary clock. Ticks inside this row so the workout history list is not rebuilt every second.
+ */
+const DiaryTimerReadout = React.memo(function DiaryTimerReadout({
+  endsAt,
+}: {
+  endsAt: number | null;
+}) {
+  const styles = useThemedStyles(createStyles);
+  const [trackedEndsAt, setTrackedEndsAt] = useState(endsAt);
+  const [label, setLabel] = useState(() => (endsAt ? formatTime(secondsUntil(endsAt)) : '120m'));
+
+  if (trackedEndsAt !== endsAt) {
+    setTrackedEndsAt(endsAt);
+    setLabel(endsAt ? formatTime(secondsUntil(endsAt)) : '120m');
+  }
+
+  useEffect(() => {
+    if (!endsAt) return;
+    const interval = setInterval(() => {
+      setLabel(formatTime(secondsUntil(endsAt)));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [endsAt]);
+
+  return (
+    <Text style={styles.timerDurationBig} allowFontScaling>
+      {label}
+    </Text>
+  );
+});
+
+const ExerciseSuggestionRow = React.memo(function ExerciseSuggestionRow({
+  name,
+  onSelect,
+}: {
+  name: string;
+  onSelect: (name: string) => void;
+}) {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
+  return (
+    <Pressable
+      style={styles.suggestionRow}
+      onPress={() => onSelect(name)}
+      accessibilityRole="button"
+      accessibilityLabel={`Add ${name}`}
+    >
+      <Text style={styles.suggestionText} allowFontScaling>
+        {name}
+      </Text>
+      <Ionicons name="add" size={18} color={colors.textSecondary} />
+    </Pressable>
+  );
+});
+
+function AddExerciseSheet({
+  visible,
+  onClose,
+  onSelect,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onSelect: (name: string) => void;
+}) {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
+  const [customExerciseName, setCustomExerciseName] = useState('');
+  const [wasVisible, setWasVisible] = useState(visible);
+  if (wasVisible !== visible) {
+    setWasVisible(visible);
+    if (!visible) setCustomExerciseName('');
+  }
+
+  const renderSuggestion = useCallback(
+    ({ item }: { item: string }) => <ExerciseSuggestionRow name={item} onSelect={onSelect} />,
+    [onSelect]
+  );
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle} allowFontScaling>
+              Add Exercise
+            </Text>
+            <Pressable
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              onPress={onClose}
+              accessibilityRole="button"
+              accessibilityLabel="Close add exercise modal"
+            >
+              <Ionicons name="close" size={20} color={colors.textSecondary} />
+            </Pressable>
+          </View>
+
+          <View style={styles.customExerciseRow}>
+            <TextInput
+              style={styles.customExerciseInput}
+              placeholder="Custom exercise name..."
+              placeholderTextColor={colors.textMuted}
+              value={customExerciseName}
+              onChangeText={setCustomExerciseName}
+              selectionColor={colors.primary}
+              accessibilityLabel="Custom exercise name input"
+            />
+            <Pressable
+              style={[
+                styles.customExerciseSubmitBtn,
+                !customExerciseName.trim() && { opacity: 0.5 },
+              ]}
+              disabled={!customExerciseName.trim()}
+              onPress={() => onSelect(customExerciseName)}
+              accessibilityRole="button"
+              accessibilityLabel="Add custom exercise"
+            >
+              <Text style={styles.customExerciseSubmitText}>Add</Text>
+            </Pressable>
+          </View>
+
+          <Text style={styles.modalSuggestionsHeader} allowFontScaling>
+            POPULAR EXERCISES
+          </Text>
+
+          <View style={{ height: 260 }}>
+            <FlashList
+              data={POPULAR_EXERCISES}
+              keyExtractor={(item) => item}
+              renderItem={renderSuggestion}
+              keyboardShouldPersistTaps="handled"
+            />
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
 }
 
 const POPULAR_EXERCISES = [
@@ -68,6 +213,8 @@ const POPULAR_EXERCISES = [
 ];
 
 export default function WorkoutsScreen() {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
   // Store subscriptions (granular selectors)
   const activeWorkout = useFitnessStore((state) => state.activeWorkout);
   const workouts = useFitnessStore((state) => state.workouts);
@@ -93,15 +240,17 @@ export default function WorkoutsScreen() {
   const updateWorkout = useFitnessStore((state) => state.updateWorkout);
   const removeWorkout = useFitnessStore((state) => state.removeWorkout);
 
-  // Auto-Rest Timer State
-  const [restTimerSeconds, setRestTimerSeconds] = useState<number>(0);
-  const [restTimerTotal, setRestTimerTotal] = useState<number>(90);
-  const [isRestTimerActive, setIsRestTimerActive] = useState<boolean>(false);
+  useEffect(() => {
+    useFitnessStore.getState().loadWorkoutHistory().catch(() => {});
+  }, []);
+
+  // Wall-clock rest session. The visible countdown lives in isolated children.
+  const [restSession, setRestSession] = useState<{ endsAt: number; total: number } | null>(null);
+  const preferredRestSeconds = useRef(90);
 
   // Modals
   const [isAddExerciseModalVisible, setIsAddExerciseModalVisible] =
     useState<boolean>(false);
-  const [customExerciseName, setCustomExerciseName] = useState<string>('');
   const [selectedHistoryExercise, setSelectedHistoryExercise] = useState<string | null>(null);
   const [editingWorkout, setEditingWorkout] = useState<WorkoutSession | null>(null);
   const [workoutTab, setWorkoutTab] = useState<'practise' | 'timer' | 'checkin'>('practise');
@@ -115,28 +264,33 @@ export default function WorkoutsScreen() {
   );
 
   // Rest Timer Controls
-  const triggerRestTimer = useCallback((seconds: number = 90) => {
-    setRestTimerTotal(seconds);
-    setRestTimerSeconds(seconds);
-    setIsRestTimerActive(true);
+  const triggerRestTimer = useCallback((seconds: number = preferredRestSeconds.current) => {
+    const safe = Math.max(1, Math.round(seconds));
+    preferredRestSeconds.current = safe;
+    setRestSession({ endsAt: Date.now() + safe * 1000, total: safe });
   }, []);
 
   const handleAdjustRestTimer = useCallback((delta: number) => {
     safeHaptics.selection();
-    setRestTimerSeconds((prev) => Math.max(0, prev + delta));
-    setRestTimerTotal((prev) => Math.max(15, prev + delta));
+    setRestSession((prev) => {
+      if (!prev) return prev;
+      const remaining = Math.max(0, secondsUntil(prev.endsAt) + delta);
+      const total = Math.max(15, prev.total + delta);
+      preferredRestSeconds.current = total;
+      return { endsAt: Date.now() + remaining * 1000, total };
+    });
   }, []);
 
   const handlePresetRestTimer = useCallback((sec: number) => {
     safeHaptics.selection();
-    setRestTimerTotal(sec);
-    setRestTimerSeconds(sec);
+    const safe = Math.max(15, sec);
+    preferredRestSeconds.current = safe;
+    setRestSession({ endsAt: Date.now() + safe * 1000, total: safe });
   }, []);
 
   const handleDismissRestTimer = useCallback(() => {
     cancelRestTimerNotification();
-    setIsRestTimerActive(false);
-    setRestTimerSeconds(0);
+    setRestSession(null);
   }, []);
 
   // Toggle Set Complete (triggers auto-rest on completion + PR detection)
@@ -147,13 +301,15 @@ export default function WorkoutsScreen() {
 
       if (nextCompleted) {
         safeHaptics.success();
-        triggerRestTimer(restTimerTotal > 0 ? restTimerTotal : 90);
+        triggerRestTimer(preferredRestSeconds.current);
       } else {
         safeHaptics.selection();
       }
     },
-    [updateSetInActiveExercise, triggerRestTimer, restTimerTotal]
+    [updateSetInActiveExercise, triggerRestTimer]
   );
+
+  const historyIndex = useMemo(() => buildExerciseHistoryIndex(workouts), [workouts]);
 
   // Add Set with previous-session value pre-filling
   const handleAddSet = useCallback(
@@ -165,7 +321,7 @@ export default function WorkoutsScreen() {
 
       // If user had previous values for this set number, prefill it!
       if (ex) {
-        const prev = getPreviousSessionExerciseValues(ex.name, workouts);
+        const prev = historyIndex.get(normalizeExerciseName(ex.name))?.previous;
         const nextSetIdx = ex.sets.length; // index for the new set
         if (prev && prev.sets[nextSetIdx]) {
           const pastSet = prev.sets[nextSetIdx];
@@ -183,7 +339,7 @@ export default function WorkoutsScreen() {
         }
       }
     },
-    [addSetToActiveExercise, workouts, updateSetInActiveExercise]
+    [addSetToActiveExercise, historyIndex, updateSetInActiveExercise]
   );
 
   const handleRemoveSet = useCallback(
@@ -263,28 +419,57 @@ export default function WorkoutsScreen() {
   };
 
   // Add Exercise Handler
-  const handleSelectAddExercise = (name: string) => {
-    if (!name.trim()) return;
-    addExerciseToActiveWorkout(name.trim());
+  const openExerciseHistory = useCallback((name: string) => {
+    setSelectedHistoryExercise(name);
+  }, []);
 
-    // If user has past values for this exercise, prefill the first set
-    const prev = getPreviousSessionExerciseValues(name.trim(), workouts);
-    if (prev && prev.sets.length > 0) {
-      setTimeout(() => {
-        const currentWorkout = useFitnessStore.getState().activeWorkout;
-        const newlyAddedEx = currentWorkout?.exercises[currentWorkout.exercises.length - 1];
-        if (newlyAddedEx && newlyAddedEx.sets[0]) {
-          updateSetInActiveExercise(newlyAddedEx.id, newlyAddedEx.sets[0].id, {
-            weightKg: prev.sets[0].weightKg,
-            reps: prev.sets[0].reps,
-          });
-        }
-      }, 40);
-    }
+  const renderActiveExercise = useCallback(
+    ({ item }: { item: ExerciseItem }) => (
+      <ActiveExerciseCard
+        exercise={item}
+        historyIndex={historyIndex}
+        onRemoveExercise={handleRemoveExercise}
+        onAddSet={handleAddSet}
+        onToggleComplete={handleToggleSetComplete}
+        onEndEditingUpdate={handleEndEditingUpdate}
+        onDeleteSet={handleRemoveSet}
+        onOpenExerciseHistory={openExerciseHistory}
+      />
+    ),
+    [
+      historyIndex,
+      handleRemoveExercise,
+      handleAddSet,
+      handleToggleSetComplete,
+      handleEndEditingUpdate,
+      handleRemoveSet,
+      openExerciseHistory,
+    ]
+  );
 
-    setCustomExerciseName('');
-    setIsAddExerciseModalVisible(false);
-  };
+  const handleSelectAddExercise = useCallback(
+    (name: string) => {
+      if (!name.trim()) return;
+      addExerciseToActiveWorkout(name.trim());
+
+      const prev = historyIndex.get(normalizeExerciseName(name.trim()))?.previous;
+      if (prev && prev.sets.length > 0) {
+        setTimeout(() => {
+          const currentWorkout = useFitnessStore.getState().activeWorkout;
+          const newlyAddedEx = currentWorkout?.exercises[currentWorkout.exercises.length - 1];
+          if (newlyAddedEx && newlyAddedEx.sets[0]) {
+            updateSetInActiveExercise(newlyAddedEx.id, newlyAddedEx.sets[0].id, {
+              weightKg: prev.sets[0].weightKg,
+              reps: prev.sets[0].reps,
+            });
+          }
+        }, 40);
+      }
+
+      setIsAddExerciseModalVisible(false);
+    },
+    [addExerciseToActiveWorkout, historyIndex, updateSetInActiveExercise]
+  );
 
   // Delete past workout from history
   const handleConfirmDeleteHistory = useCallback(
@@ -352,10 +537,10 @@ export default function WorkoutsScreen() {
       <WorkoutHistoryCard
         session={item}
         onDelete={handleConfirmDeleteHistory}
-        onEdit={(w) => setEditingWorkout(w)}
+        onEdit={setEditingWorkout}
       />
     ),
-    [handleConfirmDeleteHistory]
+    [handleConfirmDeleteHistory, setEditingWorkout]
   );
 
   const listHeader = useMemo(
@@ -474,9 +659,7 @@ export default function WorkoutsScreen() {
               <Text style={styles.timerSubtitle}>
                 Manage your exercise with Interval Timer
               </Text>
-              <Text style={styles.timerDurationBig}>
-                {isRestTimerActive ? formatTime(restTimerSeconds) : '120m'}
-              </Text>
+              <DiaryTimerReadout endsAt={restSession?.endsAt ?? null} />
             </View>
           </View>
 
@@ -487,17 +670,17 @@ export default function WorkoutsScreen() {
             ]}
             onPress={() => {
               safeHaptics.impactMedium();
-              if (isRestTimerActive) {
+              if (restSession) {
                 handleDismissRestTimer();
               } else {
                 triggerRestTimer(120);
               }
             }}
             accessibilityRole="button"
-            accessibilityLabel={isRestTimerActive ? 'Pause timer' : 'Start interval timer'}
+            accessibilityLabel={restSession ? 'Pause timer' : 'Start interval timer'}
           >
             <Ionicons
-              name={isRestTimerActive ? 'pause' : 'play'}
+              name={restSession ? 'pause' : 'play'}
               size={18}
               color="#FFFFFF"
             />
@@ -595,10 +778,11 @@ export default function WorkoutsScreen() {
       startWorkout,
       handleExportWorkouts,
       workoutTab,
-      isRestTimerActive,
-      restTimerSeconds,
+      restSession,
       triggerRestTimer,
       handleDismissRestTimer,
+      colors,
+      styles,
     ]
   );
 
@@ -674,156 +858,74 @@ export default function WorkoutsScreen() {
           </View>
         </View>
 
-        {/* Exercise List */}
-        <ScrollView
-          contentContainerStyle={styles.exerciseScrollList}
-          showsVerticalScrollIndicator={false}
+        <FlashList
+          data={activeWorkout.exercises}
+          keyExtractor={(item) => item.id}
+          renderItem={renderActiveExercise}
           keyboardShouldPersistTaps="handled"
-        >
-          {activeWorkout.exercises.map((exercise: ExerciseItem) => (
-            <ActiveExerciseCard
-              key={exercise.id}
-              exercise={exercise}
-              workouts={workouts}
-              onRemoveExercise={handleRemoveExercise}
-              onAddSet={handleAddSet}
-              onToggleComplete={handleToggleSetComplete}
-              onEndEditingUpdate={handleEndEditingUpdate}
-              onDeleteSet={handleRemoveSet}
-              onOpenExerciseHistory={(name) => setSelectedHistoryExercise(name)}
-            />
-          ))}
+          contentContainerStyle={styles.exerciseScrollList}
+          style={styles.activeExerciseList}
+          ListFooterComponent={
+            <View>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.addExerciseMainBtn,
+                  pressed && styles.pressed,
+                ]}
+                onPress={() => setIsAddExerciseModalVisible(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Add an exercise to this session"
+              >
+                <Ionicons name="add" size={18} color={colors.text} />
+                <Text style={styles.addExerciseMainBtnText} allowFontScaling>
+                  Add Exercise
+                </Text>
+              </Pressable>
 
-          {/* Add Exercise CTA */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.addExerciseMainBtn,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => setIsAddExerciseModalVisible(true)}
-            accessibilityRole="button"
-            accessibilityLabel="Add an exercise to this session"
-          >
-            <Ionicons name="add" size={18} color={colors.text} />
-            <Text style={styles.addExerciseMainBtnText} allowFontScaling>
-              Add Exercise
-            </Text>
-          </Pressable>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.cancelWorkoutBtn,
+                  pressed && styles.pressed,
+                ]}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                onPress={handleConfirmCancelWorkout}
+                accessibilityRole="button"
+                accessibilityLabel="Discard active workout"
+              >
+                <Ionicons name="close-circle-outline" size={15} color={colors.danger} />
+                <Text style={styles.cancelWorkoutBtnText} allowFontScaling>
+                  Discard Workout
+                </Text>
+              </Pressable>
+            </View>
+          }
+        />
 
-          {/* Cancel Workout Button */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.cancelWorkoutBtn,
-              pressed && styles.pressed,
-            ]}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            onPress={handleConfirmCancelWorkout}
-            accessibilityRole="button"
-            accessibilityLabel="Discard active workout"
-          >
-            <Ionicons name="close-circle-outline" size={15} color={colors.danger} />
-            <Text style={styles.cancelWorkoutBtnText} allowFontScaling>
-              Discard Workout
-            </Text>
-          </Pressable>
-        </ScrollView>
-
-        {/* Floating Auto-Rest Countdown Timer */}
-        {isRestTimerActive && (
+        {restSession ? (
           <FloatingRestTimer
-            key={`${restTimerSeconds}_${restTimerTotal}`}
-            initialSeconds={restTimerSeconds}
-            totalSeconds={restTimerTotal}
+            endsAt={restSession.endsAt}
+            totalSeconds={restSession.total}
             onDismiss={handleDismissRestTimer}
             onAdjust={handleAdjustRestTimer}
             onPreset={handlePresetRestTimer}
           />
-        )}
+        ) : null}
 
-        {/* Add Exercise Modal (FlashList powered) */}
-        <Modal
+        <AddExerciseSheet
           visible={isAddExerciseModalVisible}
-          animationType="slide"
-          transparent
-          onRequestClose={() => setIsAddExerciseModalVisible(false)}
-        >
-          <View style={styles.modalBackdrop}>
-            <View style={styles.modalSheet}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle} allowFontScaling>
-                  Add Exercise
-                </Text>
-                <Pressable
-                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                  onPress={() => setIsAddExerciseModalVisible(false)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Close add exercise modal"
-                >
-                  <Ionicons name="close" size={20} color={colors.textSecondary} />
-                </Pressable>
-              </View>
-
-              {/* Custom Input */}
-              <View style={styles.customExerciseRow}>
-                <TextInput
-                  style={styles.customExerciseInput}
-                  placeholder="Custom exercise name..."
-                  placeholderTextColor={colors.textMuted}
-                  value={customExerciseName}
-                  onChangeText={setCustomExerciseName}
-                  selectionColor={colors.primary}
-                  accessibilityLabel="Custom exercise name input"
-                />
-                <Pressable
-                  style={[
-                    styles.customExerciseSubmitBtn,
-                    !customExerciseName.trim() && { opacity: 0.5 },
-                  ]}
-                  disabled={!customExerciseName.trim()}
-                  onPress={() => handleSelectAddExercise(customExerciseName)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Add custom exercise"
-                >
-                  <Text style={styles.customExerciseSubmitText}>Add</Text>
-                </Pressable>
-              </View>
-
-              <Text style={styles.modalSuggestionsHeader} allowFontScaling>
-                POPULAR EXERCISES
-              </Text>
-
-              <View style={{ height: 260 }}>
-                <FlashList
-                  data={POPULAR_EXERCISES}
-                  keyExtractor={(item) => item}
-                  renderItem={({ item }) => (
-                    <Pressable
-                      style={styles.suggestionRow}
-                      onPress={() => handleSelectAddExercise(item)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Add ${item}`}
-                    >
-                      <Text style={styles.suggestionText} allowFontScaling>
-                        {item}
-                      </Text>
-                      <Ionicons name="add" size={18} color={colors.textSecondary} />
-                    </Pressable>
-                  )}
-                />
-              </View>
-            </View>
-          </View>
-        </Modal>
+          onClose={() => setIsAddExerciseModalVisible(false)}
+          onSelect={handleSelectAddExercise}
+        />
 
         {/* Per-Exercise Progression History Modal */}
-        {selectedHistoryExercise && (
+        {selectedHistoryExercise ? (
           <ExerciseHistoryModal
             visible={!!selectedHistoryExercise}
             exerciseName={selectedHistoryExercise}
-            workouts={workouts}
+            historyIndex={historyIndex}
             onClose={() => setSelectedHistoryExercise(null)}
           />
-        )}
+        ) : null}
       </SafeAreaView>
     );
   }
@@ -856,7 +958,7 @@ export default function WorkoutsScreen() {
       />
 
       {/* Edit Past Workout Modal */}
-      {editingWorkout && (
+      {editingWorkout ? (
         <EditWorkoutModal
           visible={!!editingWorkout}
           workout={editingWorkout}
@@ -864,25 +966,29 @@ export default function WorkoutsScreen() {
           onSave={(id, updates) => updateWorkout(id, updates)}
           onDelete={(w) => handleConfirmDeleteHistory(w)}
         />
-      )}
+      ) : null}
 
       {/* Per-Exercise Progression History Modal */}
-      {selectedHistoryExercise && (
+      {selectedHistoryExercise ? (
         <ExerciseHistoryModal
           visible={!!selectedHistoryExercise}
           exerciseName={selectedHistoryExercise}
-          workouts={workouts}
+          historyIndex={historyIndex}
           onClose={() => setSelectedHistoryExercise(null)}
         />
-      )}
+      ) : null}
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  activeExerciseList: {
+    flex: 1,
   },
 
   // Active Header
@@ -1751,6 +1857,8 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.98 }],
   },
 });
+}
+
 
 /* -------------------------------------------------------------
  * MEMOIZED SUBCOMPONENTS FOR ISOLATED ACTIVE WORKOUT RENDERING
@@ -1762,19 +1870,23 @@ interface WorkoutHistoryCardProps {
   onEdit: (workout: WorkoutSession) => void;
 }
 
+const workoutDateFormatter = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
 const WorkoutHistoryCard = React.memo(function WorkoutHistoryCard({
   session,
   onDelete,
   onEdit,
 }: WorkoutHistoryCardProps) {
-  const dateStr = new Date(
-    session.completedAt || session.startedAt
-  ).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
+  const dateStr = workoutDateFormatter.format(
+    new Date(session.completedAt || session.startedAt)
+  );
   const durationMin = Math.round(session.durationSeconds / 60);
 
   return (
@@ -1863,6 +1975,8 @@ const WorkoutTimerBadge = React.memo(function WorkoutTimerBadge({
 }: {
   startedAt: string;
 }) {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
   const [seconds, setSeconds] = useState<number>(() => {
     return Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
   });
@@ -1890,7 +2004,7 @@ const WorkoutTimerBadge = React.memo(function WorkoutTimerBadge({
  * Survives backgrounding via wall-clock timestamps + schedules OS local notification.
  */
 interface FloatingRestTimerProps {
-  initialSeconds: number;
+  endsAt: number;
   totalSeconds: number;
   onDismiss: () => void;
   onAdjust: (delta: number) => void;
@@ -1898,28 +2012,40 @@ interface FloatingRestTimerProps {
 }
 
 const FloatingRestTimer = React.memo(function FloatingRestTimer({
-  initialSeconds,
+  endsAt,
   totalSeconds,
   onDismiss,
   onAdjust,
   onPreset,
 }: FloatingRestTimerProps) {
-  const [seconds, setSeconds] = useState<number>(initialSeconds);
-  const [isFinished, setIsFinished] = useState<boolean>(false);
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
+  const [trackedEndsAt, setTrackedEndsAt] = useState(endsAt);
+  const [seconds, setSeconds] = useState(() => secondsUntil(endsAt));
+  const [isFinished, setIsFinished] = useState(false);
   const onDismissRef = useRef(onDismiss);
+  const finishTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  if (trackedEndsAt !== endsAt) {
+    setTrackedEndsAt(endsAt);
+    setSeconds(secondsUntil(endsAt));
+    setIsFinished(false);
+  }
 
   // Pulse animation using Reanimated on the native UI thread
   const pulseOpacity = useSharedValue(0.4);
   useEffect(() => {
-    pulseOpacity.value = withRepeat(
-      withTiming(1, { duration: 600, easing: Easing.inOut(Easing.ease) }),
-      -1,
-      true
+    pulseOpacity.set(
+      withRepeat(
+        withTiming(1, { duration: 600, easing: Easing.inOut(Easing.ease) }),
+        -1,
+        true
+      )
     );
   }, [pulseOpacity]);
 
   const animatedPulseStyle = useAnimatedStyle(() => ({
-    opacity: pulseOpacity.value,
+    opacity: pulseOpacity.get(),
   }));
 
   useEffect(() => {
@@ -1927,13 +2053,13 @@ const FloatingRestTimer = React.memo(function FloatingRestTimer({
   }, [onDismiss]);
 
   useEffect(() => {
-    if (initialSeconds <= 0) {
+    const remainingNow = secondsUntil(endsAt);
+    if (remainingNow <= 0) {
       onDismissRef.current();
       return;
     }
 
-    // Schedule background OS notification and listen to foreground returns
-    scheduleRestTimerNotification(initialSeconds);
+    scheduleRestTimerNotification(remainingNow);
     const unsubscribeSync = subscribeToForegroundRestSync((remaining) => {
       setSeconds(remaining);
       if (remaining <= 0) {
@@ -1943,25 +2069,27 @@ const FloatingRestTimer = React.memo(function FloatingRestTimer({
     });
 
     const interval = setInterval(() => {
-      setSeconds((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          setIsFinished(true);
-          safeHaptics.timerFinished();
-          setTimeout(() => {
-            onDismissRef.current();
-          }, 2800);
-          return 0;
-        }
-        return prev - 1;
-      });
+      const left = secondsUntil(endsAt);
+      setSeconds(left);
+      if (left <= 0) {
+        clearInterval(interval);
+        setIsFinished(true);
+        safeHaptics.timerFinished();
+        finishTimeoutRef.current = setTimeout(() => {
+          onDismissRef.current();
+        }, 2800);
+      }
     }, 1000);
 
     return () => {
       clearInterval(interval);
       unsubscribeSync();
+      if (finishTimeoutRef.current) {
+        clearTimeout(finishTimeoutRef.current);
+        finishTimeoutRef.current = null;
+      }
     };
-  }, [initialSeconds]);
+  }, [endsAt]);
 
   const handleDismissTimer = () => {
     cancelRestTimerNotification();
@@ -2097,7 +2225,7 @@ interface ActiveSetRowProps {
   exerciseName: string;
   set: ExerciseSet;
   canDelete: boolean;
-  workouts: WorkoutSession[];
+  historyIndex: ExerciseHistoryIndex;
   onToggleComplete: (exerciseId: string, set: ExerciseSet) => void;
   onEndEditingUpdate: (exerciseId: string, setId: string, updates: Partial<ExerciseSet>) => void;
   onDeleteSet: (exerciseId: string, setId: string) => void;
@@ -2108,11 +2236,13 @@ const ActiveSetRow = React.memo(function ActiveSetRow({
   exerciseName,
   set,
   canDelete,
-  workouts,
+  historyIndex,
   onToggleComplete,
   onEndEditingUpdate,
   onDeleteSet,
 }: ActiveSetRowProps) {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
   const [prevSetValues, setPrevSetValues] = useState({ weight: set.weightKg, reps: set.reps });
   const [weightText, setWeightText] = useState<string>(
     set.weightKg ? set.weightKg.toString() : ''
@@ -2130,8 +2260,12 @@ const ActiveSetRow = React.memo(function ActiveSetRow({
 
   const prInfo = useMemo(() => {
     if (!set.completed) return null;
-    return detectPersonalRecord(exerciseName, set.weightKg, set.reps, workouts);
-  }, [set.completed, set.weightKg, set.reps, exerciseName, workouts]);
+    return personalRecordFromSnapshot(
+      set.weightKg,
+      set.reps,
+      historyIndex.get(normalizeExerciseName(exerciseName))
+    );
+  }, [set.completed, set.weightKg, set.reps, exerciseName, historyIndex]);
 
   const commitChanges = () => {
     const w = Math.max(0, parseFloat(weightText) || 0);
@@ -2238,7 +2372,7 @@ const ActiveSetRow = React.memo(function ActiveSetRow({
  */
 interface ActiveExerciseCardProps {
   exercise: ExerciseItem;
-  workouts: WorkoutSession[];
+  historyIndex: ExerciseHistoryIndex;
   onRemoveExercise: (exerciseId: string) => void;
   onAddSet: (exerciseId: string) => void;
   onToggleComplete: (exerciseId: string, set: ExerciseSet) => void;
@@ -2249,7 +2383,7 @@ interface ActiveExerciseCardProps {
 
 const ActiveExerciseCard = React.memo(function ActiveExerciseCard({
   exercise,
-  workouts,
+  historyIndex,
   onRemoveExercise,
   onAddSet,
   onToggleComplete,
@@ -2257,11 +2391,13 @@ const ActiveExerciseCard = React.memo(function ActiveExerciseCard({
   onDeleteSet,
   onOpenExerciseHistory,
 }: ActiveExerciseCardProps) {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
   const completedSetsCount = exercise.sets.filter((s) => s.completed).length;
 
   const previousValues = useMemo(() => {
-    return getPreviousSessionExerciseValues(exercise.name, workouts);
-  }, [exercise.name, workouts]);
+    return historyIndex.get(normalizeExerciseName(exercise.name))?.previous ?? null;
+  }, [exercise.name, historyIndex]);
 
   return (
     <View style={styles.exerciseCard}>
@@ -2319,7 +2455,7 @@ const ActiveExerciseCard = React.memo(function ActiveExerciseCard({
           exerciseName={exercise.name}
           set={set}
           canDelete={exercise.sets.length > 1}
-          workouts={workouts}
+          historyIndex={historyIndex}
           onToggleComplete={onToggleComplete}
           onEndEditingUpdate={onEndEditingUpdate}
           onDeleteSet={onDeleteSet}

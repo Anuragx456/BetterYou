@@ -8,6 +8,8 @@ import {
   dbGetAllWorkouts,
   dbGetDailyGoals,
   dbGetMealsByDate,
+  dbGetProductSummaries,
+  dbGetScannedProductById,
   dbGetScannedProductsByDate,
   dbGetWorkoutsByDate,
   dbInsertMeal,
@@ -15,6 +17,7 @@ import {
   dbInsertWorkout,
   dbSetDailyGoals,
   getDatabase,
+  invalidateActivityDatesCache,
 } from '../client';
 import { runAsyncStorageToSqliteMigration } from '../migration';
 import {
@@ -40,6 +43,7 @@ describe('SQLite Data Layer & Repository Tests', () => {
       DELETE FROM daily_goals;
       DELETE FROM migrations_meta;
     `);
+    invalidateActivityDatesCache();
   });
 
   it('initializes tables and indexes correctly', async () => {
@@ -107,6 +111,7 @@ describe('SQLite Data Layer & Repository Tests', () => {
     const may10Meals = await dbGetMealsByDate('2026-05-10');
     expect(may10Meals.length).toBe(1);
     expect(may10Meals[0].dishName).toBe('Chicken Rice Bowl');
+    expect(may10Meals[0].date).toBe('2026-05-10');
     expect(may10Meals[0].imageUri).toBe('betteryou_images/meals/bowl.jpg');
     expect(may10Meals[0].ingredientsDetected).toEqual(['Chicken breast', 'White rice', 'Olive oil']);
 
@@ -218,6 +223,29 @@ describe('SQLite Data Layer & Repository Tests', () => {
 
     const byDate = await dbGetScannedProductsByDate('2026-05-12');
     expect(byDate.length).toBe(1);
+
+    const originalParse = JSON.parse;
+    let reportParses = 0;
+    JSON.parse = ((text: string, reviver?: (key: string, value: unknown) => unknown) => {
+      if (text.includes('INS 102')) reportParses += 1;
+      return originalParse(text, reviver);
+    }) as typeof JSON.parse;
+    try {
+      const summaries = await dbGetProductSummaries(3);
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0].reportComplete).toBe(false);
+      expect(summaries[0].report.overallSafetyScore).toBe(78);
+      expect(summaries[0].report.harmfulIngredients).toEqual([]);
+      expect(summaries[0].flaggedCount).toBe(1);
+      expect(reportParses).toBe(0);
+
+      const opened = await dbGetScannedProductById('scan_1');
+      expect(opened?.reportComplete).toBe(true);
+      expect(opened?.report.harmfulIngredients[0].name).toBe('INS 102');
+      expect(reportParses).toBe(1);
+    } finally {
+      JSON.parse = originalParse;
+    }
 
     await dbDeleteScannedProduct('scan_1');
     const remaining = await dbGetAllScannedProducts();

@@ -16,7 +16,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { analyzeProductText } from '../services/aiVisionService';
 import { VoiceInputModal } from './VoiceInputModal';
-import { colors } from '../theme/colors';
+import type { ThemeColors } from '../theme/colors';
+import { useThemeColors, useThemedStyles } from '../theme/theme';
 import { ToxicityReport } from '../types';
 
 interface ManualProductModalProps {
@@ -38,6 +39,8 @@ const QUICK_PRODUCT_SUGGESTIONS = [
 ];
 
 export function ManualProductModal({ visible, onClose, onSubmitResult }: ManualProductModalProps) {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
   const [productName, setProductName] = useState<string>('');
   const [ingredientsText, setIngredientsText] = useState<string>('');
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
@@ -198,7 +201,8 @@ export function ManualProductModal({ visible, onClose, onSubmitResult }: ManualP
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -385,3 +389,5 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
 });
+}
+

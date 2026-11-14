@@ -14,6 +14,15 @@ const MINUTE_LIMIT = 15;
 const DAILY_LIMIT = 150;
 const REPLAY_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_PAYLOAD_BYTES = 5 * 1024 * 1024; // 5MB
+const GEMINI_FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
+
+function geminiModelsInOrder(chosenModel: string): string[] {
+  return [chosenModel, ...GEMINI_FALLBACK_MODELS.filter((model) => model !== chosenModel)];
+}
+
+function isGeminiModelMissingMessage(message: string): boolean {
+  return /not found|not supported|unknown model|invalid model|does not exist|is not available/i.test(message);
+}
 
 export function checkRateLimit(deviceId: string, now: number = Date.now()): {
   allowed: boolean;
@@ -201,8 +210,7 @@ app.post('/v1/vision/analyze', async (c) => {
   }
 
   // Forward to Gemini upstream
-  const candidateModels = [model, 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
-  const uniqueModels = Array.from(new Set(candidateModels));
+  const uniqueModels = geminiModelsInOrder(model);
   let lastError = 'Upstream Gemini error';
   let lastStatus = 502;
 
@@ -229,6 +237,9 @@ app.post('/v1/vision/analyze', async (c) => {
   };
 
   const serializedBody = JSON.stringify(geminiPayload);
+  geminiPayload.contents[0].parts.length = 0;
+  body.imageBase64 = undefined;
+  let realFallbackUsed = false;
 
   for (const m of uniqueModels) {
     const controller = new AbortController();
@@ -250,10 +261,12 @@ app.post('/v1/vision/analyze', async (c) => {
         lastStatus = response.status === 429 ? 429 : 502;
         const errText = await response.text();
         lastError = `Gemini upstream ${response.status}: ${errText.slice(0, 200)}`;
-        // If auth error, don't keep retrying other models with same invalid key
-        if (response.status === 400 || response.status === 401 || response.status === 403) {
+        const modelMissing = response.status === 404 || isGeminiModelMissingMessage(errText);
+        if ((response.status === 400 || response.status === 401 || response.status === 403) && !modelMissing) {
           return c.json({ error: `Gemini API Authentication Error (${response.status})` }, 502);
         }
+        if (!modelMissing && realFallbackUsed) break;
+        if (!modelMissing) realFallbackUsed = true;
         continue;
       }
 
@@ -271,6 +284,8 @@ app.post('/v1/vision/analyze', async (c) => {
 
       if (!text) {
         lastError = 'Gemini returned empty candidate content.';
+        if (realFallbackUsed) break;
+        realFallbackUsed = true;
         continue;
       }
 
@@ -312,8 +327,7 @@ app.post('/v1/chat/analyze', async (c) => {
     return c.json({ error: 'Invalid prompt: must be string <= 4096 chars.' }, 400);
   }
 
-  const candidateModels = [model, 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
-  const uniqueModels = Array.from(new Set(candidateModels));
+  const uniqueModels = geminiModelsInOrder(model);
   let lastError = 'Upstream Gemini error';
   let lastStatus = 502;
 
@@ -331,6 +345,7 @@ app.post('/v1/chat/analyze', async (c) => {
   };
 
   const serializedBody = JSON.stringify(geminiPayload);
+  let realFallbackUsed = false;
 
   for (const m of uniqueModels) {
     const controller = new AbortController();
@@ -352,9 +367,12 @@ app.post('/v1/chat/analyze', async (c) => {
         lastStatus = response.status === 429 ? 429 : 502;
         const errText = await response.text();
         lastError = `Gemini upstream ${response.status}: ${errText.slice(0, 200)}`;
-        if (response.status === 400 || response.status === 401 || response.status === 403) {
+        const modelMissing = response.status === 404 || isGeminiModelMissingMessage(errText);
+        if ((response.status === 400 || response.status === 401 || response.status === 403) && !modelMissing) {
           return c.json({ error: `Gemini API Authentication Error (${response.status})` }, 502);
         }
+        if (!modelMissing && realFallbackUsed) break;
+        if (!modelMissing) realFallbackUsed = true;
         continue;
       }
 
@@ -372,6 +390,8 @@ app.post('/v1/chat/analyze', async (c) => {
 
       if (!text) {
         lastError = 'Gemini returned empty candidate content.';
+        if (realFallbackUsed) break;
+        realFallbackUsed = true;
         continue;
       }
 

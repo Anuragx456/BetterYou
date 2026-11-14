@@ -12,7 +12,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../theme/colors';
+import type { ThemeColors } from '../theme/colors';
+import { useThemeColors, useThemedStyles } from '../theme/theme';
 
 interface EditProductModalProps {
   visible: boolean;
@@ -29,6 +30,8 @@ export function EditProductModal({
   onClose,
   onSave,
 }: EditProductModalProps) {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
   const [prevInitialName, setPrevInitialName] = useState(initialName);
   const [productName, setProductName] = useState(initialName);
   const [ingredientsText, setIngredientsText] = useState(() => initialIngredients.join(', '));
@@ -141,7 +144,7 @@ export function EditProductModal({
             </View>
 
             {/* Live Ingredients Preview */}
-            {detectedIngredients.length > 0 && (
+            {detectedIngredients.length > 0 ? (
               <View style={styles.previewSection}>
                 <Text style={styles.previewTitle}>Detected Ingredients Preview</Text>
                 <View style={styles.previewPillsWrap}>
@@ -153,7 +156,7 @@ export function EditProductModal({
                   ))}
                 </View>
               </View>
-            )}
+            ) : null}
 
             {/* Bottom Save Action Button */}
             <View style={styles.bottomActions}>
@@ -179,7 +182,8 @@ export function EditProductModal({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -384,3 +388,5 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.98 }],
   },
 });
+}
+

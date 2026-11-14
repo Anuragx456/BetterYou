@@ -1,0 +1,22 @@
+# Fly.io deployment config for BetterYou AI Proxy
+app = "betteryou-proxy"
+primary_region = "bom" # Mumbai, India (optimal latency for target market)
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8787"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1

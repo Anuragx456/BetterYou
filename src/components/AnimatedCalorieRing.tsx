@@ -7,7 +7,8 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import Svg, { Circle } from 'react-native-svg';
-import { colors } from '../theme/colors';
+import type { ThemeColors } from '../theme/colors';
+import { useThemeColors, useThemedStyles } from '../theme/theme';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
@@ -27,6 +28,8 @@ export const AnimatedCalorieRing = React.memo(function AnimatedCalorieRing({
   size = 180,
   strokeWidth = 12,
 }: AnimatedCalorieRingProps) {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
 
@@ -34,14 +37,16 @@ export const AnimatedCalorieRing = React.memo(function AnimatedCalorieRing({
   const progress = useSharedValue(0);
 
   useEffect(() => {
-    progress.value = withTiming(targetRatio, {
-      duration: 800,
-      easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-    });
+    progress.set(
+      withTiming(targetRatio, {
+        duration: 800,
+        easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+      })
+    );
   }, [targetRatio, progress]);
 
   const animatedProps = useAnimatedProps(() => {
-    const strokeDashoffset = circumference * (1 - Math.min(1, progress.value));
+    const strokeDashoffset = circumference * (1 - Math.min(1, progress.get()));
     return {
       strokeDashoffset,
     };
@@ -102,7 +107,8 @@ export const AnimatedCalorieRing = React.memo(function AnimatedCalorieRing({
   );
 });
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -141,3 +147,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+}
+

@@ -36,6 +36,27 @@ The proxy will run at `http://localhost:8787`. Health check is available at `htt
 bun test
 ```
 
+## Production Deployment
+
+### Option A: Fly.io (Recommended)
+```bash
+cd server
+fly launch --name betteryou-proxy --region bom
+fly secrets set GEMINI_API_KEY=your_production_gemini_key
+fly deploy
+```
+Copy the assigned URL (e.g. `https://betteryou-proxy.fly.dev`) and set `EXPO_PUBLIC_PROXY_URL` in `eas.json` or `.env`.
+
+### Option B: Docker Container
+```bash
+cd server
+docker build -t betteryou-proxy .
+docker run -p 8787:8787 -e GEMINI_API_KEY=your_key -e PORT=8787 betteryou-proxy
+```
+
+### Option C: Railway / Render
+Connect the repository and set the root directory to `server/`. Specify `bun run src/index.ts` as the start command and add the `GEMINI_API_KEY` secret.
+
 ## App-to-Proxy Authentication & Residual Risk Disclosure
 
 ### Implemented Mechanism

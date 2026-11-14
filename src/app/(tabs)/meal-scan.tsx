@@ -18,13 +18,13 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ManualMealModal } from '../../components/ManualMealModal';
-import { VoiceInputModal } from '../../components/VoiceInputModal';
-import { analyzeMealImage } from '../../services/aiVisionService';
 import { optimizeImageForAiVision } from '../../utils/imageOptimizer';
+import { CAPTURE_JPEG_QUALITY, selectPreferredPictureSize } from '../../utils/cameraPictureSize';
+import { useOnDemandComponent } from '../../utils/useOnDemandComponent';
 import { useFitnessStore } from '../../store/useFitnessStore';
 import { safeHaptics } from '../../utils/haptics';
-import { colors } from '../../theme/colors';
+import type { ThemeColors } from '../../theme/colors';
+import { useThemeColors, useThemedStyles } from '../../theme/theme';
 import { MealAnalysisResult } from '../../types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -34,7 +34,19 @@ type ScanStage = 'viewfinder' | 'analyzing' | 'verifying';
 
 const PORTION_PRESETS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
+const MealPreviewImage = React.memo(function MealPreviewImage({ uri }: { uri: string | null }) {
+  const styles = useThemedStyles(createStyles);
+  if (!uri) return null;
+  return (
+    <View style={styles.previewImageContainer}>
+      <Image source={{ uri }} style={styles.previewImage} contentFit="cover" recyclingKey={uri} />
+    </View>
+  );
+});
+
 export default function MealScanScreen() {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
   const router = useRouter();
   const [isFocused, setIsFocused] = useState<boolean>(true);
   const addMeal = useFitnessStore((state) => state.addMeal);
@@ -57,27 +69,57 @@ export default function MealScanScreen() {
   const [facing] = useState<'back' | 'front'>('back');
   const [enableTorch, setEnableTorch] = useState<boolean>(false);
   const [capturedImageUri, setCapturedImageUri] = useState<string | null>(null);
+  const [capturedThumbUri, setCapturedThumbUri] = useState<string | null>(null);
+  const [pictureSize, setPictureSize] = useState<string | undefined>(undefined);
   const [aiResult, setAiResult] = useState<MealAnalysisResult | null>(null);
   const [portionMultiplier, setPortionMultiplier] = useState<number>(1.0);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isTypeModalVisible, setIsTypeModalVisible] = useState<boolean>(false);
   const [isVoiceModalVisible, setIsVoiceModalVisible] = useState<boolean>(false);
+  const [ManualMeal, loadManualMeal] = useOnDemandComponent(() =>
+    import('../../components/ManualMealModal').then((mod) => mod.ManualMealModal)
+  );
+  const [VoiceMeal, loadVoiceMeal] = useOnDemandComponent(() =>
+    import('../../components/VoiceInputModal').then((mod) => mod.VoiceInputModal)
+  );
+  const openManualMeal = useCallback(() => {
+    loadManualMeal();
+    setIsTypeModalVisible(true);
+  }, [loadManualMeal]);
+  const openVoiceMeal = useCallback(() => {
+    loadVoiceMeal();
+    setIsVoiceModalVisible(true);
+  }, [loadVoiceMeal]);
 
   // Trigger AI analysis on a chosen image
-  const processImageForAnalysis = async (uri: string, base64: string | undefined) => {
-    // Store only the lightweight local file URI to prevent SQLite CursorWindow bloat in AsyncStorage
+  const processImageForAnalysis = async (
+    uri: string,
+    base64: string | undefined,
+    thumbnailUri?: string
+  ) => {
     setCapturedImageUri(uri);
+    setCapturedThumbUri(thumbnailUri ?? null);
     setStage('analyzing');
     setPortionMultiplier(1.0);
 
     try {
       let finalBase64 = base64;
+      let finalThumb = thumbnailUri;
+      let hashUri = uri;
       if (!finalBase64 && uri) {
         const opt = await optimizeImageForAiVision(uri, 1024);
         finalBase64 = opt.base64;
+        finalThumb = opt.thumbnailUri ?? finalThumb;
+        hashUri = opt.uri || uri;
+        setCapturedThumbUri(finalThumb ?? null);
+        if (opt.uri) setCapturedImageUri(opt.uri);
       }
-      // Analyze with Gemini Vision using optimized ephemeral base64 or mock fallback
-      const result = await analyzeMealImage(finalBase64 || '');
+      const vision = await import('../../services/aiVisionService');
+      const imageHash = hashUri ? await vision.hashImageFile(hashUri) : '';
+      const result = await vision.analyzeMealImage(finalBase64 || '', {
+        imageHash: imageHash || undefined,
+        localImagePath: hashUri,
+      });
       setAiResult(result);
       setStage('verifying');
     } catch (err: unknown) {
@@ -99,7 +141,7 @@ export default function MealScanScreen() {
         'Camera is not ready or unavailable on this device. Please select a photo from your gallery or log meal manually.',
         [
           { text: 'Gallery', onPress: handlePickFromGallery },
-          { text: 'Manual Entry', onPress: () => setIsTypeModalVisible(true) },
+          { text: 'Manual Entry', onPress: () => openManualMeal() },
           { text: 'Cancel', style: 'cancel' },
         ]
       );
@@ -109,14 +151,12 @@ export default function MealScanScreen() {
     try {
       safeHaptics.impactHeavy();
       const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.8,
+        quality: CAPTURE_JPEG_QUALITY,
       });
 
       if (photo?.uri) {
-        setCapturedImageUri(photo.uri);
-        setStage('analyzing');
         const optimized = await optimizeImageForAiVision(photo.uri, 1024);
-        await processImageForAnalysis(optimized.uri || photo.uri, optimized.base64);
+        await processImageForAnalysis(optimized.uri || photo.uri, optimized.base64, optimized.thumbnailUri);
       }
     } catch (err: unknown) {
       console.warn('Camera capture error, offering demo sample:', err);
@@ -131,7 +171,7 @@ export default function MealScanScreen() {
         mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [4, 3],
-        quality: 0.8,
+        quality: CAPTURE_JPEG_QUALITY,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
@@ -139,7 +179,7 @@ export default function MealScanScreen() {
         setCapturedImageUri(asset.uri);
         setStage('analyzing');
         const optimized = await optimizeImageForAiVision(asset.uri, 1024);
-        await processImageForAnalysis(optimized.uri || asset.uri, optimized.base64);
+        await processImageForAnalysis(optimized.uri || asset.uri, optimized.base64, optimized.thumbnailUri);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -154,6 +194,7 @@ export default function MealScanScreen() {
     setPortionMultiplier(1.0);
 
     // Call AI vision service with explicit demo flag
+    const { analyzeMealImage } = await import('../../services/aiVisionService');
     const result = await analyzeMealImage('demo_sample', { isExplicitDemo: true });
     setAiResult(result);
     setStage('verifying');
@@ -188,6 +229,7 @@ export default function MealScanScreen() {
       estimatedWeightGrams: scaledGrams,
       portionMultiplier,
       imageUri: capturedImageUri ?? undefined,
+      thumbnailUri: capturedThumbUri ?? undefined,
       ingredientsDetected: aiResult.ingredientsDetected,
     });
 
@@ -292,16 +334,7 @@ export default function MealScanScreen() {
             )}
           </View>
 
-          {/* Captured Image Preview */}
-          {capturedImageUri && (
-            <View style={styles.previewImageContainer}>
-              <Image
-                source={{ uri: capturedImageUri }}
-                style={styles.previewImage}
-                contentFit="cover"
-              />
-            </View>
-          )}
+          <MealPreviewImage uri={capturedImageUri} />
 
           {/* Dish Header & Weight */}
           <View style={styles.dishCardClean}>
@@ -310,16 +343,16 @@ export default function MealScanScreen() {
           </View>
 
           {/* Plausibility Warning Banner */}
-          {!aiResult.isPlausible && aiResult.plausibilityWarning && (
+          {!aiResult.isPlausible && aiResult.plausibilityWarning ? (
             <View style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', padding: 12, borderRadius: 8, marginHorizontal: 20, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.3)' }}>
               <Text style={{ color: '#fca5a5', fontSize: 12, lineHeight: 16 }}>
                 ⚠️ {aiResult.plausibilityWarning}
               </Text>
             </View>
-          )}
+          ) : null}
 
           {/* Fallback to Manual Entry Prompt */}
-          {aiResult.fallbackToManual && (
+          {aiResult.fallbackToManual ? (
             <View style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)', padding: 12, borderRadius: 8, marginHorizontal: 20, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.3)' }}>
               <Text style={{ color: colors.calories, fontSize: 13, fontWeight: '600', marginBottom: 4 }}>
                 Uncertain Vision Estimate
@@ -329,12 +362,12 @@ export default function MealScanScreen() {
               </Text>
               <Pressable
                 style={{ alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 12, backgroundColor: colors.card, borderRadius: 6, borderWidth: 1, borderColor: colors.cardBorder }}
-                onPress={() => setIsTypeModalVisible(true)}
+                onPress={() => openManualMeal()}
               >
                 <Text style={{ color: colors.text, fontSize: 12, fontWeight: '600' }}>Enter Details Manually</Text>
               </Pressable>
             </View>
-          )}
+          ) : null}
 
           {/* Calorie Hero Metric */}
           <View style={styles.calorieHeroContainer}>
@@ -428,7 +461,7 @@ export default function MealScanScreen() {
           </View>
 
           {/* Detected Ingredients Section (Collapsible / Clean) */}
-          {aiResult.ingredientsDetected && aiResult.ingredientsDetected.length > 0 && (
+          {aiResult.ingredientsDetected && aiResult.ingredientsDetected.length > 0 ? (
             <View style={styles.ingredientsCleanCard}>
               <Text style={styles.ingredientsCleanHeader}>Detected Ingredients</Text>
               <View style={styles.ingredientsCleanWrap}>
@@ -439,7 +472,7 @@ export default function MealScanScreen() {
                 ))}
               </View>
             </View>
-          )}
+          ) : null}
 
           {/* Save Action Button */}
           <Pressable
@@ -519,7 +552,7 @@ export default function MealScanScreen() {
 
           <Pressable
             style={({ pressed }) => [styles.galleryFallbackBtn, { marginTop: 10 }, pressed && styles.pressed]}
-            onPress={() => setIsTypeModalVisible(true)}
+            onPress={() => openManualMeal()}
           >
             <Ionicons name="create-outline" size={18} color={colors.primary} />
             <Text style={styles.galleryFallbackText}>Type Meal Manually</Text>
@@ -527,7 +560,7 @@ export default function MealScanScreen() {
 
           <Pressable
             style={({ pressed }) => [styles.galleryFallbackBtn, { marginTop: 10 }, pressed && styles.pressed]}
-            onPress={() => setIsVoiceModalVisible(true)}
+            onPress={() => openVoiceMeal()}
             accessibilityRole="button"
             accessibilityLabel="Speak meal description"
           >
@@ -542,8 +575,8 @@ export default function MealScanScreen() {
             <Text style={styles.demoFallbackText}>Simulate Demo Food Scan</Text>
           </Pressable>
         </View>
-        {isTypeModalVisible && (
-          <ManualMealModal
+        {isTypeModalVisible && ManualMeal ? (
+          <ManualMeal
             visible={isTypeModalVisible}
             onClose={() => setIsTypeModalVisible(false)}
             onSubmitResult={(result) => {
@@ -553,9 +586,9 @@ export default function MealScanScreen() {
               setStage('verifying');
             }}
           />
-        )}
-        {isVoiceModalVisible && (
-          <VoiceInputModal
+        ) : null}
+        {isVoiceModalVisible && VoiceMeal ? (
+          <VoiceMeal
             visible={isVoiceModalVisible}
             mode="meal"
             onClose={() => setIsVoiceModalVisible(false)}
@@ -566,7 +599,7 @@ export default function MealScanScreen() {
               setStage('verifying');
             }}
           />
-        )}
+        ) : null}
       </SafeAreaView>
     );
   }
@@ -576,14 +609,20 @@ export default function MealScanScreen() {
   // -------------------------------------------------------------
   return (
     <View style={styles.cameraContainer}>
-      {isFocused && (
+      {isFocused ? (
         <CameraView
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
           facing={facing}
           enableTorch={enableTorch}
+          pictureSize={pictureSize}
+          onCameraReady={() => {
+            selectPreferredPictureSize(cameraRef.current).then((size) => {
+              if (size) setPictureSize(size);
+            });
+          }}
         />
-      )}
+      ) : null}
 
       {/* Reticle Overlay */}
       <SafeAreaView style={styles.overlayContainer}>
@@ -653,7 +692,7 @@ export default function MealScanScreen() {
             style={({ pressed }) => [styles.sideBarBtn, pressed && styles.pressed]}
             onPress={() => {
               safeHaptics.impactLight();
-              setIsVoiceModalVisible(true);
+              openVoiceMeal();
             }}
             accessibilityRole="button"
             accessibilityLabel="Add meal by speaking"
@@ -676,7 +715,7 @@ export default function MealScanScreen() {
 
           <Pressable
             style={({ pressed }) => [styles.sideBarBtn, pressed && styles.pressed]}
-            onPress={() => setIsTypeModalVisible(true)}
+            onPress={() => openManualMeal()}
             accessibilityRole="button"
             accessibilityLabel="Type meal details manually"
           >
@@ -685,8 +724,8 @@ export default function MealScanScreen() {
           </Pressable>
         </View>
       </SafeAreaView>
-        {isTypeModalVisible && (
-          <ManualMealModal
+        {isTypeModalVisible && ManualMeal ? (
+          <ManualMeal
             visible={isTypeModalVisible}
             onClose={() => setIsTypeModalVisible(false)}
             onSubmitResult={(result) => {
@@ -696,9 +735,9 @@ export default function MealScanScreen() {
               setStage('verifying');
             }}
           />
-        )}
-        {isVoiceModalVisible && (
-          <VoiceInputModal
+        ) : null}
+        {isVoiceModalVisible && VoiceMeal ? (
+          <VoiceMeal
             visible={isVoiceModalVisible}
             mode="meal"
             onClose={() => setIsVoiceModalVisible(false)}
@@ -709,12 +748,13 @@ export default function MealScanScreen() {
               setStage('verifying');
             }}
           />
-        )}
+        ) : null}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -1258,3 +1298,5 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.98 }],
   },
 });
+}
+

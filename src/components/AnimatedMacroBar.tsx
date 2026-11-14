@@ -6,7 +6,8 @@ import Animated, {
   withTiming,
   Easing,
 } from 'react-native-reanimated';
-import { colors } from '../theme/colors';
+import type { ThemeColors } from '../theme/colors';
+import { useThemedStyles } from '../theme/theme';
 
 interface AnimatedMacroBarProps {
   label: string;
@@ -21,20 +22,23 @@ export const AnimatedMacroBar = React.memo(function AnimatedMacroBar({
   targetGrams,
   barColor,
 }: AnimatedMacroBarProps) {
+  const styles = useThemedStyles(createStyles);
   const targetSafe = Math.max(1, targetGrams);
   const ratio = Math.min(1, Math.max(0, consumedGrams / targetSafe));
   const progress = useSharedValue(0);
 
   useEffect(() => {
-    progress.value = withTiming(ratio, {
-      duration: 700,
-      easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-    });
+    progress.set(
+      withTiming(ratio, {
+        duration: 700,
+        easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+      })
+    );
   }, [ratio, progress]);
 
   const animatedStyle = useAnimatedStyle(() => {
     return {
-      width: `${progress.value * 100}%`,
+      transform: [{ scaleX: progress.get() }],
     };
   });
 
@@ -67,7 +71,8 @@ export const AnimatedMacroBar = React.memo(function AnimatedMacroBar({
   );
 });
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: {
     flex: 1,
     alignItems: 'center',
@@ -90,8 +95,10 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   fill: {
+    width: '100%',
     height: '100%',
     borderRadius: 4,
+    transformOrigin: 'left',
   },
   gramText: {
     fontSize: 12,
@@ -106,3 +113,5 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
 });
+}
+

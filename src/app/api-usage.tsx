@@ -11,9 +11,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GeminiUsageSection } from '../components/GeminiUsageSection';
 import { isUsingCustomKey } from '../store/useSettingsStore';
-import { colors } from '../theme/colors';
+import type { ThemeColors } from '../theme/colors';
+import { useThemeColors, useThemedStyles } from '../theme/theme';
 
 export default function ApiUsageScreen() {
+  const colors = useThemeColors();
+  const styles = useThemedStyles(createStyles);
   const router = useRouter();
   const hasCustom = isUsingCustomKey();
 
@@ -69,7 +72,8 @@ export default function ApiUsageScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -152,3 +156,5 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
 });
+}
+
