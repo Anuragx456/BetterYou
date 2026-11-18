@@ -75,7 +75,8 @@
           "microphonePermission": "BetterYou uses speech recognition to let you dictate meals and search product ingredients by voice.",
           "speechRecognitionPermission": "BetterYou uses speech recognition to transcribe your spoken meals and products."
         }
-      ]
+      ],
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": true,
