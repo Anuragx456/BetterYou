@@ -3,7 +3,6 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import {
   Alert,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -239,7 +238,7 @@ export default function SettingsScreen() {
               accessibilityRole="button"
               accessibilityLabel="Edit daily nutrition targets"
             >
-              <View style={[styles.iconBadge, { backgroundColor: 'rgba(245, 158, 11, 0.12)' }]}>
+              <View style={[styles.iconBadge, { backgroundColor: colors.softOrange }]}>
                 <Ionicons name="flame" size={18} color={colors.calories} />
               </View>
               <View style={styles.navRowMeta}>
@@ -274,8 +273,8 @@ export default function SettingsScreen() {
               accessibilityRole="button"
               accessibilityLabel="Configure Gemini API settings and model"
             >
-              <View style={[styles.iconBadge, { backgroundColor: 'rgba(16, 185, 129, 0.12)' }]}>
-                <Ionicons name="sparkles" size={18} color={colors.primary} />
+              <View style={[styles.iconBadge, { backgroundColor: colors.softGreen }]}>
+                <Ionicons name="hardware-chip-outline" size={18} color={colors.primary} />
               </View>
               <View style={styles.navRowMeta}>
                 <Text style={styles.navRowTitle} allowFontScaling>
@@ -301,7 +300,7 @@ export default function SettingsScreen() {
               accessibilityRole="button"
               accessibilityLabel="View detailed Gemini API usage and quota"
             >
-              <View style={[styles.iconBadge, { backgroundColor: 'rgba(56, 189, 248, 0.12)' }]}>
+              <View style={[styles.iconBadge, { backgroundColor: colors.softBlue }]}>
                 <Ionicons name="speedometer-outline" size={18} color={colors.protein} />
               </View>
               <View style={styles.navRowMeta}>
@@ -336,7 +335,7 @@ export default function SettingsScreen() {
               accessibilityRole="button"
               accessibilityLabel="Export workouts data to CSV spreadsheet"
             >
-              <View style={[styles.iconBadge, { backgroundColor: 'rgba(0, 229, 255, 0.12)' }]}>
+              <View style={[styles.iconBadge, { backgroundColor: colors.primaryMuted }]}>
                 <Ionicons name="barbell-outline" size={18} color={colors.primary} />
               </View>
               <View style={styles.navRowMeta}>
@@ -356,7 +355,7 @@ export default function SettingsScreen() {
               accessibilityRole="button"
               accessibilityLabel="Export meals data to CSV spreadsheet"
             >
-              <View style={[styles.iconBadge, { backgroundColor: 'rgba(245, 158, 11, 0.12)' }]}>
+              <View style={[styles.iconBadge, { backgroundColor: colors.softOrange }]}>
                 <Ionicons name="restaurant-outline" size={18} color={colors.calories} />
               </View>
               <View style={styles.navRowMeta}>
@@ -376,8 +375,8 @@ export default function SettingsScreen() {
               accessibilityRole="button"
               accessibilityLabel="Export complete JSON database backup"
             >
-              <View style={[styles.iconBadge, { backgroundColor: 'rgba(168, 85, 247, 0.12)' }]}>
-                <Ionicons name="server-outline" size={18} color="#A855F7" />
+              <View style={[styles.iconBadge, { backgroundColor: colors.surfaceSubtle }]}>
+                <Ionicons name="server-outline" size={18} color={colors.secondary} />
               </View>
               <View style={styles.navRowMeta}>
                 <Text style={styles.navRowTitle} allowFontScaling>
@@ -387,7 +386,7 @@ export default function SettingsScreen() {
                   Export workouts, meals, and goals for backup
                 </Text>
               </View>
-              <Ionicons name="download-outline" size={18} color="#A855F7" />
+              <Ionicons name="download-outline" size={18} color={colors.secondary} />
             </Pressable>
           </View>
         </View>
@@ -404,7 +403,7 @@ export default function SettingsScreen() {
               accessibilityRole="button"
               accessibilityLabel="Open diagnostics and system health screen"
             >
-              <View style={[styles.iconBadge, { backgroundColor: 'rgba(99, 102, 241, 0.12)' }]}>
+              <View style={[styles.iconBadge, { backgroundColor: colors.softBlue }]}>
                 <Ionicons name="pulse" size={18} color={colors.secondary} />
               </View>
               <View style={styles.navRowMeta}>
@@ -493,16 +492,16 @@ function createStyles(colors: ThemeColors) {
     borderColor: colors.cardBorder,
   },
   statusPillLive: {
-    borderColor: 'rgba(16, 185, 129, 0.3)',
-    backgroundColor: 'rgba(16, 185, 129, 0.08)',
+    borderColor: colors.softGreenBorder,
+    backgroundColor: colors.softGreen,
   },
   statusPillEnv: {
-    borderColor: 'rgba(99, 102, 241, 0.3)',
-    backgroundColor: 'rgba(99, 102, 241, 0.08)',
+    borderColor: colors.softBlueBorder,
+    backgroundColor: colors.softBlue,
   },
   statusPillDemo: {
-    borderColor: 'rgba(245, 158, 11, 0.3)',
-    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+    borderColor: colors.softOrangeBorder,
+    backgroundColor: colors.softOrange,
   },
   statusDot: {
     width: 6,
@@ -543,7 +542,7 @@ function createStyles(colors: ThemeColors) {
   },
   langBtnActive: {
     borderColor: colors.primary,
-    backgroundColor: 'rgba(0, 229, 255, 0.08)',
+    backgroundColor: colors.primaryMuted,
   },
   langBtnText: {
     fontSize: 13,
@@ -563,7 +562,7 @@ function createStyles(colors: ThemeColors) {
   },
   cardGroup: {
     backgroundColor: colors.card,
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: colors.cardBorder,
     overflow: 'hidden',
@@ -571,16 +570,17 @@ function createStyles(colors: ThemeColors) {
   navRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     paddingVertical: 14,
   },
   pressed: {
-    opacity: 0.7,
+    opacity: 0.8,
+    transform: [{ scale: 0.98 }],
   },
   iconBadge: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -604,18 +604,18 @@ function createStyles(colors: ThemeColors) {
     gap: 8,
   },
   valueBadge: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 8,
-    backgroundColor: colors.cardHover,
+    borderRadius: 10,
+    backgroundColor: colors.surfaceSubtle,
     borderWidth: 1,
     borderColor: colors.cardBorder,
   },
   valueBadgeText: {
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '700',
     color: colors.textSecondary,
-    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
+    fontVariant: ['tabular-nums'],
   },
   resetBtn: {
     flexDirection: 'row',
@@ -624,9 +624,9 @@ function createStyles(colors: ThemeColors) {
     gap: 8,
     paddingVertical: 14,
     borderRadius: 14,
-    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    backgroundColor: colors.fatMuted,
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.2)',
+    borderColor: colors.cardBorder,
   },
   resetBtnText: {
     fontSize: 13,

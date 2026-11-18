@@ -123,7 +123,7 @@ export function ExerciseHistoryModal({
           <View style={styles.prCard}>
             <View style={styles.prItem}>
               <View style={styles.prBadge}>
-                <Ionicons name="trophy" size={14} color="#F59E0B" />
+                <Ionicons name="trophy" size={14} color={colors.warning} />
                 <Text style={styles.prBadgeText}>WEIGHT PR</Text>
               </View>
               <Text style={styles.prValue}>
@@ -136,7 +136,7 @@ export function ExerciseHistoryModal({
 
             <View style={styles.prItem}>
               <View style={styles.prBadge}>
-                <Ionicons name="flame" size={14} color="#EF4444" />
+                <Ionicons name="flame" size={14} color={colors.danger} />
                 <Text style={styles.prBadgeText}>BEST SET</Text>
               </View>
               <Text style={styles.prValue}>
@@ -360,7 +360,7 @@ function createStyles(colors: ThemeColors) {
   },
   sessionCard: {
     backgroundColor: colors.card,
-    borderRadius: 14,
+    borderRadius: 18,
     padding: 14,
     borderWidth: 1,
     borderColor: colors.cardBorder,
@@ -377,7 +377,7 @@ function createStyles(colors: ThemeColors) {
     color: colors.text,
   },
   volumeBadge: {
-    backgroundColor: 'rgba(0, 229, 255, 0.1)',
+    backgroundColor: colors.primaryMuted,
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
@@ -386,6 +386,7 @@ function createStyles(colors: ThemeColors) {
     fontSize: 11,
     fontWeight: '700',
     color: colors.primary,
+    fontVariant: ['tabular-nums'],
   },
   setsWrap: {
     flexDirection: 'row',

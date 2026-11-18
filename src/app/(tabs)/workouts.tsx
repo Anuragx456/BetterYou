@@ -704,8 +704,8 @@ export default function WorkoutsScreen() {
               accessibilityRole="button"
               accessibilityLabel="Start Push Day routine template"
             >
-              <View style={[styles.templateIconBox, { backgroundColor: 'rgba(244, 63, 94, 0.1)' }]}>
-                <Ionicons name="flame-outline" size={20} color="#F43F5E" />
+              <View style={[styles.templateIconBox, { backgroundColor: colors.fatMuted }]}>
+                <Ionicons name="flame-outline" size={20} color={colors.fat} />
               </View>
               <View style={styles.templateCardInfo}>
                 <Text style={styles.templateCardTitle}>Push Day</Text>
@@ -727,8 +727,8 @@ export default function WorkoutsScreen() {
               accessibilityRole="button"
               accessibilityLabel="Start Pull Day routine template"
             >
-              <View style={[styles.templateIconBox, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }]}>
-                <Ionicons name="barbell-outline" size={20} color="#38BDF8" />
+              <View style={[styles.templateIconBox, { backgroundColor: colors.softBlue }]}>
+                <Ionicons name="barbell-outline" size={20} color={colors.secondary} />
               </View>
               <View style={styles.templateCardInfo}>
                 <Text style={styles.templateCardTitle}>Pull Day</Text>
@@ -750,8 +750,8 @@ export default function WorkoutsScreen() {
               accessibilityRole="button"
               accessibilityLabel="Start Leg Day routine template"
             >
-              <View style={[styles.templateIconBox, { backgroundColor: 'rgba(16, 185, 129, 0.1)' }]}>
-                <Ionicons name="fitness-outline" size={20} color="#10B981" />
+              <View style={[styles.templateIconBox, { backgroundColor: colors.softGreen }]}>
+                <Ionicons name="fitness-outline" size={20} color={colors.carbs} />
               </View>
               <View style={styles.templateCardInfo}>
                 <Text style={styles.templateCardTitle}>Leg Day</Text>
@@ -1139,11 +1139,12 @@ function createStyles(colors: ThemeColors) {
   exercisePrevPill: {
     fontSize: 10,
     color: colors.primary,
-    backgroundColor: 'rgba(0, 229, 255, 0.08)',
+    backgroundColor: colors.primaryMuted,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
     fontWeight: '600',
+    fontVariant: ['tabular-nums'],
   },
   setColumnsHeader: {
     flexDirection: 'row',
@@ -1171,8 +1172,8 @@ function createStyles(colors: ThemeColors) {
     minHeight: 48,
   },
   setRowCompleted: {
-    borderColor: 'rgba(16, 185, 129, 0.25)',
-    backgroundColor: 'rgba(16, 185, 129, 0.04)',
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryMuted,
   },
   setNumberBadge: {
     width: 28,
@@ -1193,21 +1194,21 @@ function createStyles(colors: ThemeColors) {
   },
   numericInput: {
     backgroundColor: colors.card,
-    borderRadius: 8,
-    paddingVertical: 7,
+    borderRadius: 10,
+    paddingVertical: 8,
     paddingHorizontal: 10,
     color: colors.text,
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
     textAlign: 'center',
     borderWidth: 1,
     borderColor: colors.hairline,
     fontVariant: ['tabular-nums'],
-    minHeight: 40,
+    minHeight: 42,
   },
   numericInputCompleted: {
     color: colors.primary,
-    borderColor: 'rgba(16, 185, 129, 0.3)',
+    borderColor: colors.primary,
   },
   setCheckCircle: {
     width: 44,
@@ -1228,7 +1229,9 @@ function createStyles(colors: ThemeColors) {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    backgroundColor: colors.softOrange,
+    borderWidth: 1,
+    borderColor: colors.softOrangeBorder,
     paddingHorizontal: 5,
     paddingVertical: 2,
     borderRadius: 4,
@@ -1238,7 +1241,9 @@ function createStyles(colors: ThemeColors) {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    backgroundColor: colors.fatMuted,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
     paddingHorizontal: 5,
     paddingVertical: 2,
     borderRadius: 4,
@@ -1247,7 +1252,7 @@ function createStyles(colors: ThemeColors) {
   prBadgeSmallText: {
     fontSize: 9,
     fontWeight: '800',
-    color: '#F59E0B',
+    color: colors.softOrangeText,
   },
   addSetButton: {
     flexDirection: 'row',
@@ -1305,11 +1310,11 @@ function createStyles(colors: ThemeColors) {
     bottom: Platform.OS === 'ios' ? 24 : 16,
     left: 16,
     right: 16,
-    backgroundColor: '#161922',
+    backgroundColor: colors.cardElevated,
     borderRadius: 18,
     padding: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderColor: colors.cardBorder,
     shadowColor: colors.black,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
@@ -1317,8 +1322,8 @@ function createStyles(colors: ThemeColors) {
     elevation: 8,
   },
   floatingRestTimerFinished: {
-    backgroundColor: '#0A2519',
-    borderColor: '#10B981',
+    backgroundColor: colors.softGreen,
+    borderColor: colors.safetyClean,
     borderWidth: 1.5,
   },
   restFinishedRow: {
@@ -1330,14 +1335,14 @@ function createStyles(colors: ThemeColors) {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    backgroundColor: colors.softGreenBorder,
     alignItems: 'center',
     justifyContent: 'center',
   },
   restFinishedTitle: {
     fontSize: 13,
     fontWeight: '800',
-    color: '#10B981',
+    color: colors.safetyClean,
     letterSpacing: 0.5,
   },
   restFinishedSub: {
@@ -1400,7 +1405,7 @@ function createStyles(colors: ThemeColors) {
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: colors.surfaceSubtle,
     minHeight: 36,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1426,7 +1431,7 @@ function createStyles(colors: ThemeColors) {
     minHeight: 36,
   },
   restPresetBtnActive: {
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    backgroundColor: colors.primaryMuted,
     borderColor: colors.primary,
   },
   restPresetBtnText: {
@@ -1601,8 +1606,8 @@ function createStyles(colors: ThemeColors) {
     justifyContent: 'center',
   },
   segmentedTabActive: {
-    backgroundColor: '#FF7A59',
-    shadowColor: '#FF7A59',
+    backgroundColor: colors.primary,
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.25,
     shadowRadius: 6,
@@ -1614,24 +1619,26 @@ function createStyles(colors: ThemeColors) {
     color: colors.textSecondary,
   },
   segmentedTabTextActive: {
-    color: '#FFFFFF',
+    color: colors.textInverse,
     fontWeight: '700',
   },
 
   // Interval Timer Dark Widget
   intervalTimerCard: {
-    backgroundColor: colors.charcoalWidget,
-    borderRadius: 24,
+    backgroundColor: colors.cardElevated,
+    borderRadius: 20,
     padding: 18,
     marginBottom: 20,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    shadowColor: '#181A20',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 14,
-    elevation: 4,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    shadowColor: colors.black,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 3,
   },
   timerCardLeft: {
     flexDirection: 'row',
@@ -1640,10 +1647,10 @@ function createStyles(colors: ThemeColors) {
     flex: 1,
   },
   timerIconBadge: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#2A2E39',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.surfaceSubtle,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 2,
@@ -1654,33 +1661,33 @@ function createStyles(colors: ThemeColors) {
   timerTitle: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#FFFFFF',
+    color: colors.text,
     marginBottom: 2,
   },
   timerSubtitle: {
     fontSize: 11,
-    color: '#9CA3AF',
+    color: colors.textSecondary,
     marginBottom: 8,
   },
   timerDurationBig: {
     fontSize: 26,
     fontWeight: '800',
-    color: '#FFFFFF',
+    color: colors.text,
     letterSpacing: -0.5,
     fontVariant: ['tabular-nums'],
   },
   timerPlayButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     borderWidth: 2,
-    borderColor: '#52B788',
-    backgroundColor: '#242730',
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryMuted,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#52B788',
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.25,
     shadowRadius: 6,
     elevation: 2,
   },
@@ -1703,7 +1710,7 @@ function createStyles(colors: ThemeColors) {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.card,
-    borderRadius: 22,
+    borderRadius: 20,
     padding: 16,
     borderWidth: 1,
     borderColor: colors.cardBorder,

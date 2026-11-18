@@ -110,26 +110,26 @@ export default function TabsLayout() {
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  tabBar: {
-    backgroundColor: colors.backgroundSecondary,
-    borderTopColor: colors.borderSubtle,
-    borderTopWidth: 1,
-    paddingTop: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -3 },
-    shadowOpacity: 0.03,
-    shadowRadius: 10,
-    elevation: 8,
-  },
-  tabBarItem: {
-    paddingVertical: 2,
-  },
-  tabBarLabel: {
-    fontSize: 11,
-    fontWeight: '500',
-    marginTop: 2,
-    letterSpacing: 0.2,
-  },
-});
+    tabBar: {
+      backgroundColor: colors.backgroundSecondary,
+      borderTopColor: colors.hairline,
+      borderTopWidth: 1,
+      paddingTop: 6,
+      shadowColor: colors.black,
+      shadowOffset: { width: 0, height: -4 },
+      shadowOpacity: 0.05,
+      shadowRadius: 12,
+      elevation: 8,
+    },
+    tabBarItem: {
+      paddingVertical: 2,
+    },
+    tabBarLabel: {
+      fontSize: 11,
+      fontWeight: '600',
+      marginTop: 3,
+      letterSpacing: 0.1,
+    },
+  });
 }
 

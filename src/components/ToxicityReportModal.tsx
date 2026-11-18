@@ -1,6 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import React, { useEffect, useState } from 'react';
+import Svg, { Circle } from 'react-native-svg';
 import {
   Alert,
   Linking,
@@ -63,15 +64,15 @@ export function ToxicityReportModal({
   const getExposureMeta = (exposure?: TargetExposure) => {
     switch (exposure) {
       case 'Inhalation':
-        return { icon: 'cloud-outline' as const, label: 'Inhalation Exposure', color: '#EF4444' };
+        return { icon: 'cloud-outline' as const, label: 'Inhalation Exposure', color: colors.danger };
       case 'Dermal Absorption':
-        return { icon: 'hand-left-outline' as const, label: 'Dermal Absorption', color: '#F472B6' };
+        return { icon: 'hand-left-outline' as const, label: 'Dermal Absorption', color: colors.fat };
       case 'Mucous Membrane':
-        return { icon: 'alert-circle-outline' as const, label: 'Mucous Membrane', color: '#F59E0B' };
+        return { icon: 'alert-circle-outline' as const, label: 'Mucous Membrane', color: colors.warning };
       case 'Ingestion':
-        return { icon: 'restaurant-outline' as const, label: 'Oral Ingestion', color: '#10B981' };
+        return { icon: 'restaurant-outline' as const, label: 'Oral Ingestion', color: colors.success };
       default:
-        return { icon: 'shield-outline' as const, label: 'General Household', color: '#9CA3AF' };
+        return { icon: 'shield-outline' as const, label: 'General Household', color: colors.textMuted };
     }
   };
 
@@ -93,15 +94,15 @@ export function ToxicityReportModal({
   const getNutriscoreColor = (grade: NutriscoreGrade | null | undefined): string => {
     switch (grade) {
       case 'a':
-        return '#059669';
+        return colors.success;
       case 'b':
-        return '#10B981';
+        return colors.nova1;
       case 'c':
-        return '#F59E0B';
+        return colors.warning;
       case 'd':
-        return '#F97316';
+        return colors.primary;
       case 'e':
-        return '#EF4444';
+        return colors.danger;
       default:
         return colors.textMuted;
     }
@@ -206,7 +207,7 @@ export function ToxicityReportModal({
             </View>
           ) : (
             <View style={styles.provenanceVerifiedBadge}>
-              <Ionicons name="sparkles" size={13} color={colors.primary} />
+              <Ionicons name="scan-outline" size={13} color={colors.primary} />
               <Text style={styles.provenanceVerifiedText}>
                 AI Vision Analyzed ({report.generatedBy || 'Multimodal'})
               </Text>
@@ -215,17 +216,30 @@ export function ToxicityReportModal({
 
           {/* Circular Safety Score Gauge Hero */}
           <View style={styles.gaugeHeroCard}>
-            <View style={styles.gaugeOuter}>
-              <View
-                style={[
-                  styles.gaugeArc,
-                  {
-                    borderColor: scoreColor,
-                    opacity: 0.9,
-                  },
-                ]}
-              />
-              <View style={styles.gaugeInner}>
+            <View style={styles.gaugeRingWrapper}>
+              <Svg width={156} height={156}>
+                <Circle
+                  cx={78}
+                  cy={78}
+                  r={68}
+                  stroke={colors.surfaceSubtle}
+                  strokeWidth={10}
+                  fill="none"
+                />
+                <Circle
+                  cx={78}
+                  cy={78}
+                  r={68}
+                  stroke={scoreColor}
+                  strokeWidth={10}
+                  strokeDasharray={`${(2 * Math.PI * 68).toFixed(2)} ${(2 * Math.PI * 68).toFixed(2)}`}
+                  strokeDashoffset={(2 * Math.PI * 68 * (1 - Math.min(1, Math.max(0, score / 100)))).toFixed(2)}
+                  strokeLinecap="round"
+                  fill="none"
+                  transform="rotate(-90 78 78)"
+                />
+              </Svg>
+              <View style={styles.gaugeCenterAbsolute} pointerEvents="none">
                 <Text style={[styles.gaugeScoreHuge, { color: scoreColor }]}>{score}</Text>
                 <Text style={styles.gaugeRiskLabel}>
                   {report.riskLevel === 'Safe' ? 'Safe & Clean' : report.riskLevel}
@@ -453,11 +467,11 @@ function createStyles(colors: ThemeColors) {
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    backgroundColor: colors.fatMuted,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.25)',
+    borderColor: colors.cardBorder,
   },
   headerTitleCol: {
     alignItems: 'center',
@@ -505,15 +519,15 @@ function createStyles(colors: ThemeColors) {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    backgroundColor: colors.softOrange,
     borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.3)',
+    borderColor: colors.softOrangeBorder,
     marginBottom: 12,
   },
   provenanceDemoText: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.warning,
+    color: colors.softOrangeText,
     letterSpacing: 0.2,
   },
   provenanceVerifiedBadge: {
@@ -524,49 +538,36 @@ function createStyles(colors: ThemeColors) {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
-    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    backgroundColor: colors.softGreen,
     borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.3)',
+    borderColor: colors.softGreenBorder,
     marginBottom: 12,
   },
   provenanceVerifiedText: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.primary,
+    color: colors.softGreenText,
     letterSpacing: 0.2,
   },
   gaugeHeroCard: {
     backgroundColor: colors.card,
-    borderRadius: 22,
+    borderRadius: 20,
     padding: 20,
     marginBottom: 14,
     borderWidth: 1,
     borderColor: colors.cardBorder,
     alignItems: 'center',
   },
-  gaugeOuter: {
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: colors.surfaceSubtle,
-    borderWidth: 6,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
+  gaugeRingWrapper: {
+    width: 156,
+    height: 156,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
     marginVertical: 8,
   },
-  gaugeArc: {
+  gaugeCenterAbsolute: {
     position: 'absolute',
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    borderWidth: 6,
-    borderTopColor: 'transparent',
-    borderRightColor: 'transparent',
-    transform: [{ rotate: '45deg' }],
-  },
-  gaugeInner: {
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -641,17 +642,17 @@ function createStyles(colors: ThemeColors) {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 8,
-    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+    backgroundColor: colors.softOrange,
     borderRadius: 14,
     padding: 12,
     marginBottom: 14,
     borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.25)',
+    borderColor: colors.softOrangeBorder,
   },
   indianAlertTextClean: {
     flex: 1,
     fontSize: 12,
-    color: colors.warning,
+    color: colors.softOrangeText,
     lineHeight: 17,
     fontWeight: '500',
   },
@@ -659,7 +660,7 @@ function createStyles(colors: ThemeColors) {
   // Clean Ingredients Breakdown
   ingredientsSectionClean: {
     backgroundColor: colors.card,
-    borderRadius: 18,
+    borderRadius: 20,
     padding: 16,
     marginBottom: 14,
     borderWidth: 1,
@@ -721,12 +722,12 @@ function createStyles(colors: ThemeColors) {
     lineHeight: 15,
   },
   severityBadgeClean: {
-    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    backgroundColor: colors.fatMuted,
     paddingHorizontal: 7,
     paddingVertical: 3,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.25)',
+    borderColor: colors.cardBorder,
   },
   severityBadgeText: {
     fontSize: 10,
@@ -770,8 +771,8 @@ function createStyles(colors: ThemeColors) {
   harmfulRankTag: {
     fontSize: 10,
     fontWeight: '700',
-    color: colors.warning,
-    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+    color: colors.softOrangeText,
+    backgroundColor: colors.softOrange,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
@@ -782,7 +783,7 @@ function createStyles(colors: ThemeColors) {
     gap: 6,
   },
   deductionBadge: {
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    backgroundColor: colors.fatMuted,
     paddingHorizontal: 6,
     paddingVertical: 3,
     borderRadius: 6,
@@ -791,9 +792,10 @@ function createStyles(colors: ThemeColors) {
     fontSize: 10,
     fontWeight: '700',
     color: colors.danger,
+    fontVariant: ['tabular-nums'],
   },
   rationaleBox: {
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    backgroundColor: colors.surfaceSubtle,
     borderRadius: 8,
     padding: 8,
     marginTop: 8,

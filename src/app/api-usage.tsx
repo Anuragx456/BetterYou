@@ -123,18 +123,18 @@ function createStyles(colors: ThemeColors) {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
     borderWidth: 1,
   },
   statusPillLive: {
     backgroundColor: colors.primaryMuted,
-    borderColor: 'rgba(16, 185, 129, 0.3)',
+    borderColor: colors.primary,
   },
   statusPillEnv: {
     backgroundColor: colors.caloriesMuted,
-    borderColor: 'rgba(245, 158, 11, 0.3)',
+    borderColor: colors.calories,
   },
   statusDot: {
     width: 6,
@@ -153,7 +153,8 @@ function createStyles(colors: ThemeColors) {
     color: colors.text,
   },
   pressed: {
-    opacity: 0.7,
+    opacity: 0.8,
+    transform: [{ scale: 0.98 }],
   },
 });
 }

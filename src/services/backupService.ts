@@ -136,13 +136,17 @@ export async function shareOrCopyData(
 ): Promise<'shared' | 'copied'> {
   if (typeof window !== 'undefined' || (globalThis as any).nativeCallSyncHook) {
     try {
-      const { Share } = await import('react-native');
-      const result = await Share.share({
-        message: content,
-        title,
-      });
-      if (result.action === Share.sharedAction) {
-        return 'shared';
+      // Direct require avoids dynamic import('react-native') which enumerates deprecated getters
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const Share = typeof require !== 'undefined' ? require('react-native').Share : null;
+      if (Share) {
+        const result = await Share.share({
+          message: content,
+          title,
+        });
+        if (result.action === Share.sharedAction) {
+          return 'shared';
+        }
       }
     } catch {
       // Fallback to clipboard

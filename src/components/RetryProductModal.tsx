@@ -307,11 +307,11 @@ function createStyles(colors: ThemeColors) {
     paddingBottom: 24,
   },
   contextCard: {
-    backgroundColor: colors.card,
-    borderRadius: 14,
+    backgroundColor: colors.softOrange,
+    borderRadius: 16,
     padding: 14,
     borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.2)',
+    borderColor: colors.softOrangeBorder,
     marginBottom: 16,
   },
   contextHeader: {
@@ -323,7 +323,7 @@ function createStyles(colors: ThemeColors) {
   contextLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.warning,
+    color: colors.softOrangeText,
     letterSpacing: 0.5,
   },
   currentNameText: {
@@ -350,8 +350,8 @@ function createStyles(colors: ThemeColors) {
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: 12,
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: colors.cardBorder,
     paddingHorizontal: 14,
@@ -424,7 +424,7 @@ function createStyles(colors: ThemeColors) {
   cancelBtn: {
     flex: 1,
     height: 48,
-    borderRadius: 12,
+    borderRadius: 14,
     backgroundColor: colors.surfaceSubtle,
     alignItems: 'center',
     justifyContent: 'center',
@@ -437,7 +437,7 @@ function createStyles(colors: ThemeColors) {
   submitBtn: {
     flex: 2,
     height: 48,
-    borderRadius: 12,
+    borderRadius: 14,
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',

@@ -10,7 +10,6 @@ import {
   Text,
   TextInput,
   View,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFitnessStore } from '../store/useFitnessStore';
@@ -366,19 +365,19 @@ export default function NutritionTargetScreen() {
 
               {/* Macro Pills */}
               <View style={styles.recMacroPills}>
-                <View style={[styles.macroPill, { borderColor: 'rgba(59, 130, 246, 0.3)' }]}>
+                <View style={[styles.macroPill, { borderColor: colors.softBlueBorder }]}>
                   <Text style={[styles.macroPillVal, { color: colors.protein }]}>
                     {suggestedNutrition.protein}g
                   </Text>
                   <Text style={styles.macroPillTag}>Protein</Text>
                 </View>
-                <View style={[styles.macroPill, { borderColor: 'rgba(16, 185, 129, 0.3)' }]}>
+                <View style={[styles.macroPill, { borderColor: colors.softGreenBorder }]}>
                   <Text style={[styles.macroPillVal, { color: colors.carbs }]}>
                     {suggestedNutrition.carbs}g
                   </Text>
                   <Text style={styles.macroPillTag}>Carbs</Text>
                 </View>
-                <View style={[styles.macroPill, { borderColor: 'rgba(239, 68, 68, 0.3)' }]}>
+                <View style={[styles.macroPill, { borderColor: colors.cardBorder }]}>
                   <Text style={[styles.macroPillVal, { color: colors.fat }]}>
                     {suggestedNutrition.fat}g
                   </Text>
@@ -576,10 +575,10 @@ function createStyles(colors: ThemeColors) {
   },
   heroCard: {
     backgroundColor: colors.card,
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: colors.cardBorder,
-    padding: 16,
+    padding: 18,
     marginBottom: 24,
   },
   heroTopRow: {
@@ -592,7 +591,7 @@ function createStyles(colors: ThemeColors) {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    backgroundColor: colors.softOrange,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -607,9 +606,9 @@ function createStyles(colors: ThemeColors) {
   },
   heroValue: {
     fontSize: 26,
-    fontWeight: '700',
+    fontWeight: '800',
     color: colors.text,
-    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
+    fontVariant: ['tabular-nums'],
     marginTop: 2,
   },
   heroUnit: {
@@ -640,10 +639,10 @@ function createStyles(colors: ThemeColors) {
   },
   cardGroup: {
     backgroundColor: colors.card,
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: colors.cardBorder,
-    padding: 14,
+    padding: 16,
   },
   inputRow: {
     flexDirection: 'row',
@@ -680,9 +679,9 @@ function createStyles(colors: ThemeColors) {
   },
   numberInput: {
     fontSize: 18,
-    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
     fontWeight: '700',
     color: colors.text,
+    fontVariant: ['tabular-nums'],
     minWidth: 54,
     textAlign: 'right',
     padding: 0,
@@ -707,15 +706,15 @@ function createStyles(colors: ThemeColors) {
   optionCard: {
     flex: 1,
     backgroundColor: colors.cardHover,
-    borderRadius: 10,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: colors.cardBorder,
     padding: 10,
     alignItems: 'center',
   },
   optionCardActive: {
-    backgroundColor: 'rgba(99, 102, 241, 0.15)',
-    borderColor: colors.secondary,
+    backgroundColor: colors.primaryMuted,
+    borderColor: colors.primary,
   },
   optionHeader: {
     flexDirection: 'row',
@@ -729,7 +728,7 @@ function createStyles(colors: ThemeColors) {
     color: colors.textSecondary,
   },
   optionTitleActive: {
-    color: colors.secondary,
+    color: colors.primary,
     fontWeight: '700',
   },
   optionBadge: {
@@ -748,26 +747,26 @@ function createStyles(colors: ThemeColors) {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.cardHover,
-    borderRadius: 10,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: colors.cardBorder,
-    padding: 10,
+    padding: 12,
     gap: 12,
   },
   activityRowActive: {
-    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+    backgroundColor: colors.softOrange,
     borderColor: colors.calories,
   },
   activityIconBox: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: colors.card,
     alignItems: 'center',
     justifyContent: 'center',
   },
   activityIconBoxActive: {
-    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    backgroundColor: colors.softOrange,
   },
   activityTextCol: {
     flex: 1,
@@ -805,8 +804,8 @@ function createStyles(colors: ThemeColors) {
   },
   recommendationBox: {
     marginTop: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.02)',
-    borderRadius: 12,
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: colors.cardBorder,
     padding: 12,
@@ -825,8 +824,8 @@ function createStyles(colors: ThemeColors) {
   },
   recCals: {
     fontSize: 20,
-    fontWeight: '700',
-    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
     color: colors.calories,
   },
   recUnit: {
@@ -842,21 +841,22 @@ function createStyles(colors: ThemeColors) {
   macroPill: {
     flex: 1,
     backgroundColor: colors.card,
-    borderRadius: 8,
+    borderRadius: 10,
     borderWidth: 1,
-    paddingVertical: 6,
+    borderColor: colors.cardBorder,
+    paddingVertical: 8,
     alignItems: 'center',
   },
   macroPillVal: {
     fontSize: 14,
     fontWeight: '700',
-    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
+    fontVariant: ['tabular-nums'],
   },
   macroPillTag: {
     fontSize: 9,
     fontWeight: '600',
     color: colors.textMuted,
-    marginTop: 1,
+    marginTop: 2,
   },
   recExplanation: {
     fontSize: 11,
@@ -869,9 +869,9 @@ function createStyles(colors: ThemeColors) {
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: colors.secondary,
-    paddingVertical: 10,
-    borderRadius: 10,
+    backgroundColor: colors.primary,
+    paddingVertical: 12,
+    borderRadius: 12,
   },
   applyBtnText: {
     fontSize: 13,
@@ -883,7 +883,7 @@ function createStyles(colors: ThemeColors) {
     fontWeight: '700',
     letterSpacing: 1,
     color: colors.textMuted,
-    marginTop: 12,
+    marginTop: 14,
     marginBottom: 8,
   },
   presetsRow: {
@@ -893,24 +893,24 @@ function createStyles(colors: ThemeColors) {
   },
   presetChip: {
     paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
+    paddingVertical: 9,
+    borderRadius: 12,
     backgroundColor: colors.cardHover,
     borderWidth: 1,
     borderColor: colors.cardBorder,
   },
   presetChipActive: {
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
-    borderColor: colors.calories,
+    backgroundColor: colors.primaryMuted,
+    borderColor: colors.primary,
   },
   presetChipText: {
     fontSize: 13,
     fontWeight: '600',
     color: colors.textSecondary,
-    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
+    fontVariant: ['tabular-nums'],
   },
   presetChipTextActive: {
-    color: colors.calories,
+    color: colors.primary,
     fontWeight: '700',
   },
   macroRow: {
@@ -929,13 +929,13 @@ function createStyles(colors: ThemeColors) {
   },
   macroInput: {
     backgroundColor: colors.cardHover,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.cardBorder,
     color: colors.text,
-    fontSize: 14,
-    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
     paddingVertical: 10,
     textAlign: 'center',
   },
@@ -945,12 +945,12 @@ function createStyles(colors: ThemeColors) {
     justifyContent: 'center',
     gap: 8,
     backgroundColor: colors.primary,
-    paddingVertical: 14,
-    borderRadius: 12,
-    marginTop: 4,
+    height: 52,
+    borderRadius: 16,
+    marginTop: 8,
   },
   saveBtnText: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
     color: colors.textInverse,
   },
@@ -959,18 +959,18 @@ function createStyles(colors: ThemeColors) {
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-    borderRadius: 10,
-    marginTop: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: colors.softGreen,
+    borderRadius: 14,
+    marginTop: 14,
     borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.25)',
+    borderColor: colors.softGreenBorder,
   },
   feedbackText: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.success,
+    color: colors.softGreenText,
   },
 });
 }

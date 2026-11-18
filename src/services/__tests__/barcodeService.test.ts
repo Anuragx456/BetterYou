@@ -33,9 +33,9 @@ describe('Barcode Resolver & Risk Screening Service (barcodeService.ts)', () => 
       expect(report.harmfulIngredients.length).toBeGreaterThan(0);
     });
 
-    it('resolves offline preset for Coca-Cola without network fetch', async () => {
-      const report = await fetchProductByBarcode('5449000000996');
-      expect(report.productName).toContain('Coca-Cola');
+    it('resolves offline preset for Kurkure without network fetch', async () => {
+      const report = await fetchProductByBarcode('8901030383749');
+      expect(report.productName).toContain('Kurkure');
       expect(report.category).toBe('Food & Beverages');
       expect(report.novaGroup).toBe(4);
     });

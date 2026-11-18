@@ -140,31 +140,8 @@ function withDate(dates: string[], date: string): string[] {
 let loadDataInFlight: Promise<void> | null = null;
 
 function scheduleIdleTask(task: () => void): void {
-  const isNative =
-    typeof window !== 'undefined' ||
-    Boolean((globalThis as Record<string, unknown>).nativeCallSyncHook);
-  if (!isNative) {
-    setTimeout(task, 0);
-    return;
-  }
-  void import('react-native')
-    .then((reactNative) => {
-      const interactionManager = (
-        reactNative as unknown as {
-          InteractionManager?: {
-            runAfterInteractions?: (task: () => void) => void;
-          };
-        }
-      ).InteractionManager;
-      if (interactionManager?.runAfterInteractions) {
-        interactionManager.runAfterInteractions(task);
-        return;
-      }
-      task();
-    })
-    .catch(() => {
-      task();
-    });
+  // Run idle tasks cleanly after initial render without enumerating the react-native module namespace
+  setTimeout(task, 1000);
 }
 
 export const useFitnessStore = create<FitnessState>()(

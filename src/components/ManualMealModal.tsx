@@ -135,7 +135,7 @@ export function ManualMealModal({ visible, onClose, onSubmitResult }: ManualMeal
               onPress={() => setTabMode('ai')}
             >
               <Ionicons
-                name="sparkles"
+                name="restaurant-outline"
                 size={14}
                 color={tabMode === 'ai' ? colors.primary : colors.textMuted}
               />
@@ -218,7 +218,7 @@ export function ManualMealModal({ visible, onClose, onSubmitResult }: ManualMeal
                     </View>
                   ) : (
                     <View style={styles.actionBtnInner}>
-                      <Ionicons name="sparkles" size={16} color={colors.textInverse} />
+                      <Ionicons name="flash-outline" size={16} color={colors.textInverse} />
                       <Text style={styles.actionBtnText}>Estimate with Gemini AI</Text>
                     </View>
                   )}
@@ -388,8 +388,8 @@ function createStyles(colors: ThemeColors) {
     marginTop: 16,
     marginBottom: 8,
     padding: 4,
-    borderRadius: 12,
-    backgroundColor: colors.card,
+    borderRadius: 14,
+    backgroundColor: colors.surfaceSubtle,
     borderWidth: 1,
     borderColor: colors.cardBorder,
   },
@@ -400,10 +400,10 @@ function createStyles(colors: ThemeColors) {
     justifyContent: 'center',
     gap: 6,
     paddingVertical: 9,
-    borderRadius: 9,
+    borderRadius: 10,
   },
   segmentBtnActive: {
-    backgroundColor: colors.cardHover,
+    backgroundColor: colors.card,
   },
   segmentText: {
     fontSize: 13,
@@ -420,7 +420,7 @@ function createStyles(colors: ThemeColors) {
   },
   cardGroup: {
     backgroundColor: colors.card,
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: colors.cardBorder,
     padding: 16,
@@ -436,17 +436,17 @@ function createStyles(colors: ThemeColors) {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: colors.primaryMuted,
+    backgroundColor: colors.softGreen,
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.3)',
+    borderColor: colors.softGreenBorder,
   },
   speakInlineText: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.primary,
+    color: colors.softGreenText,
   },
   inputLabel: {
     fontSize: 10,
@@ -456,8 +456,8 @@ function createStyles(colors: ThemeColors) {
     marginBottom: 0,
   },
   textArea: {
-    backgroundColor: colors.cardHover,
-    borderRadius: 12,
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: colors.cardBorder,
     color: colors.text,
@@ -482,8 +482,8 @@ function createStyles(colors: ThemeColors) {
   chip: {
     paddingHorizontal: 12,
     paddingVertical: 7,
-    borderRadius: 20,
-    backgroundColor: colors.cardHover,
+    borderRadius: 16,
+    backgroundColor: colors.surfaceSubtle,
     borderWidth: 1,
     borderColor: colors.cardBorder,
   },
@@ -495,8 +495,8 @@ function createStyles(colors: ThemeColors) {
     width: '100%',
   },
   textInput: {
-    backgroundColor: colors.cardHover,
-    borderRadius: 10,
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.cardBorder,
     color: colors.text,
@@ -505,7 +505,7 @@ function createStyles(colors: ThemeColors) {
     fontSize: 14,
   },
   monoInput: {
-    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
+    fontVariant: ['tabular-nums'],
     fontWeight: '600',
   },
   fieldsRow: {
@@ -524,8 +524,8 @@ function createStyles(colors: ThemeColors) {
   },
   actionBtn: {
     backgroundColor: colors.primary,
-    borderRadius: 12,
-    paddingVertical: 13,
+    borderRadius: 14,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 8,

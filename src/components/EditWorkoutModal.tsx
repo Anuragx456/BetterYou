@@ -126,7 +126,7 @@ export function EditWorkoutModal({
           <View style={styles.fieldSection}>
             <Text style={styles.inputLabel}>DURATION (MINUTES)</Text>
             <TextInput
-              style={styles.textInput}
+              style={[styles.textInput, styles.numInput]}
               value={durationMin}
               onChangeText={setDurationMin}
               keyboardType="number-pad"
@@ -215,7 +215,7 @@ function createStyles(colors: ThemeColors) {
     backgroundColor: colors.primary,
     paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 12,
+    borderRadius: 14,
     minHeight: 44,
     minWidth: 64,
     alignItems: 'center',
@@ -241,7 +241,7 @@ function createStyles(colors: ThemeColors) {
     letterSpacing: 0.6,
   },
   textInput: {
-    backgroundColor: colors.card,
+    backgroundColor: colors.surfaceSubtle,
     borderRadius: 14,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -251,8 +251,12 @@ function createStyles(colors: ThemeColors) {
     borderColor: colors.cardBorder,
     minHeight: 48,
   },
+  numInput: {
+    fontVariant: ['tabular-nums'],
+    fontWeight: '600',
+  },
   textArea: {
-    backgroundColor: colors.card,
+    backgroundColor: colors.surfaceSubtle,
     borderRadius: 14,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -270,11 +274,11 @@ function createStyles(colors: ThemeColors) {
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    backgroundColor: colors.fatMuted,
     borderRadius: 14,
     paddingVertical: 14,
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.25)',
+    borderColor: colors.cardBorder,
     minHeight: 48,
   },
   deleteBtnText: {

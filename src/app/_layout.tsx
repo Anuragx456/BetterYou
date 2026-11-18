@@ -1,7 +1,7 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect } from 'react';
-import { AppState } from 'react-native';
+import { AppState, LogBox } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { ThemeProvider, useTheme } from '../theme/theme';
@@ -10,6 +10,19 @@ import { initNetInfoQueueListener, stopNetInfoQueueListener } from '../services/
 import { initTelemetry } from '../services/telemetryService';
 import { flushActiveWorkoutPersist } from '../utils/debouncedStorage';
 import { ensureFileSystemReady } from '../utils/imageManager';
+
+// Suppress known upstream React Native 0.88 deprecation warnings triggered by ecosystem libraries
+// (e.g. react-native-drawer-layout / @react-navigation namespace evaluation)
+LogBox.ignoreLogs([
+  'DrawerLayoutAndroid is deprecated',
+  'ImageBackground is deprecated',
+  'InputAccessoryView is deprecated',
+  'ProgressBarAndroid has been extracted',
+  'SafeAreaView has been deprecated',
+  'Clipboard has been extracted',
+  'PushNotificationIOS has been extracted',
+  'UTFSequence has been deprecated',
+]);
 
 // Initialize privacy-safe telemetry early in lifecycle
 initTelemetry();

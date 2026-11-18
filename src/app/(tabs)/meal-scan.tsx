@@ -317,9 +317,9 @@ export default function MealScanScreen() {
             </Pressable>
 
             {aiResult.generatedBy === 'offline-demo-mock' ? (
-              <View style={[styles.confidenceBadge, { backgroundColor: 'rgba(245, 158, 11, 0.15)', borderColor: colors.calories }]}>
-                <Ionicons name="flask-outline" size={14} color={colors.calories} />
-                <Text style={[styles.confidenceText, { color: colors.calories }]}>Offline Demo Simulation</Text>
+              <View style={[styles.confidenceBadge, { backgroundColor: colors.softOrange, borderColor: colors.softOrangeBorder }]}>
+                <Ionicons name="flask-outline" size={14} color={colors.softOrangeText} />
+                <Text style={[styles.confidenceText, { color: colors.softOrangeText }]}>Offline Demo Simulation</Text>
               </View>
             ) : aiResult.isPlausible ? (
               <View style={styles.confidenceBadge}>
@@ -327,9 +327,9 @@ export default function MealScanScreen() {
                 <Text style={styles.confidenceText}>Macro Balanced (4P+4C+9F)</Text>
               </View>
             ) : (
-              <View style={[styles.confidenceBadge, { backgroundColor: 'rgba(239, 68, 68, 0.15)', borderColor: '#ef4444' }]}>
-                <Ionicons name="warning-outline" size={14} color="#ef4444" />
-                <Text style={[styles.confidenceText, { color: '#ef4444' }]}>Macro Discrepancy</Text>
+              <View style={[styles.confidenceBadge, { backgroundColor: colors.fatMuted, borderColor: colors.danger }]}>
+                <Ionicons name="warning-outline" size={14} color={colors.danger} />
+                <Text style={[styles.confidenceText, { color: colors.danger }]}>Macro Discrepancy</Text>
               </View>
             )}
           </View>
@@ -344,8 +344,8 @@ export default function MealScanScreen() {
 
           {/* Plausibility Warning Banner */}
           {!aiResult.isPlausible && aiResult.plausibilityWarning ? (
-            <View style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', padding: 12, borderRadius: 8, marginHorizontal: 20, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.3)' }}>
-              <Text style={{ color: '#fca5a5', fontSize: 12, lineHeight: 16 }}>
+            <View style={{ backgroundColor: colors.fatMuted, padding: 12, borderRadius: 14, marginHorizontal: 20, marginBottom: 12, borderWidth: 1, borderColor: colors.cardBorder }}>
+              <Text style={{ color: colors.danger, fontSize: 12, lineHeight: 16 }}>
                 ⚠️ {aiResult.plausibilityWarning}
               </Text>
             </View>
@@ -353,15 +353,15 @@ export default function MealScanScreen() {
 
           {/* Fallback to Manual Entry Prompt */}
           {aiResult.fallbackToManual ? (
-            <View style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)', padding: 12, borderRadius: 8, marginHorizontal: 20, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.3)' }}>
-              <Text style={{ color: colors.calories, fontSize: 13, fontWeight: '600', marginBottom: 4 }}>
+            <View style={{ backgroundColor: colors.softOrange, padding: 12, borderRadius: 14, marginHorizontal: 20, marginBottom: 12, borderWidth: 1, borderColor: colors.softOrangeBorder }}>
+              <Text style={{ color: colors.softOrangeText, fontSize: 13, fontWeight: '700', marginBottom: 4 }}>
                 Uncertain Vision Estimate
               </Text>
               <Text style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 16, marginBottom: 8 }}>
                 Visual recognition could not confirm high-confidence macros. You can adjust the numbers below or switch to manual entry.
               </Text>
               <Pressable
-                style={{ alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 12, backgroundColor: colors.card, borderRadius: 6, borderWidth: 1, borderColor: colors.cardBorder }}
+                style={{ alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 14, backgroundColor: colors.card, borderRadius: 10, borderWidth: 1, borderColor: colors.cardBorder }}
                 onPress={() => openManualMeal()}
               >
                 <Text style={{ color: colors.text, fontSize: 12, fontWeight: '600' }}>Enter Details Manually</Text>
@@ -637,8 +637,8 @@ export default function MealScanScreen() {
           </Pressable>
 
           <View style={styles.modeIndicator}>
-            <Ionicons name="sparkles" size={14} color={colors.primary} />
-            <Text style={styles.modeIndicatorText}>AI Plate Vision</Text>
+            <Ionicons name="scan-outline" size={15} color={colors.primary} />
+            <Text style={styles.modeIndicatorText}>AI Food Vision</Text>
           </View>
 
           <Pressable
@@ -816,11 +816,11 @@ function createStyles(colors: ThemeColors) {
     height: RETICLE_SIZE,
     borderRadius: 24,
     borderWidth: 1.5,
-    borderColor: 'rgba(16, 185, 129, 0.35)',
+    borderColor: 'rgba(255, 255, 255, 0.25)',
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.1)',
+    backgroundColor: 'rgba(0,0,0,0.12)',
   },
   cornerBracket: {
     position: 'absolute',
@@ -880,12 +880,12 @@ function createStyles(colors: ThemeColors) {
     minWidth: 54,
   },
   voiceBtnCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: colors.primaryMuted,
     borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.4)',
+    borderColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -895,9 +895,9 @@ function createStyles(colors: ThemeColors) {
     fontWeight: '600',
   },
   shutterOuterRing: {
-    width: 78,
-    height: 78,
-    borderRadius: 39,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     borderWidth: 4,
     borderColor: colors.white,
     alignItems: 'center',
@@ -905,9 +905,9 @@ function createStyles(colors: ThemeColors) {
     backgroundColor: 'transparent',
   },
   shutterInnerCircle: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: colors.primary,
   },
 
@@ -1070,7 +1070,7 @@ function createStyles(colors: ThemeColors) {
   },
   portionCleanCard: {
     backgroundColor: colors.card,
-    borderRadius: 18,
+    borderRadius: 20,
     padding: 16,
     marginVertical: 12,
     borderWidth: 1,
@@ -1084,9 +1084,9 @@ function createStyles(colors: ThemeColors) {
     marginBottom: 14,
   },
   portionStepBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: colors.surfaceSubtle,
     borderWidth: 1,
     borderColor: colors.cardBorder,
@@ -1098,15 +1098,16 @@ function createStyles(colors: ThemeColors) {
     minWidth: 70,
   },
   portionValueClean: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: '800',
     color: colors.text,
     fontVariant: ['tabular-nums'],
   },
   portionLabelClean: {
     fontSize: 11,
+    fontWeight: '500',
     color: colors.textSecondary,
-    marginTop: 1,
+    marginTop: 2,
   },
   presetCleanRow: {
     flexDirection: 'row',
@@ -1114,8 +1115,8 @@ function createStyles(colors: ThemeColors) {
   },
   presetCleanBtn: {
     flex: 1,
-    paddingVertical: 8,
-    borderRadius: 8,
+    paddingVertical: 10,
+    borderRadius: 10,
     backgroundColor: colors.surfaceSubtle,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1127,7 +1128,7 @@ function createStyles(colors: ThemeColors) {
     borderColor: colors.primary,
   },
   presetCleanBtnText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     color: colors.textSecondary,
     fontVariant: ['tabular-nums'],
@@ -1237,7 +1238,7 @@ function createStyles(colors: ThemeColors) {
     backgroundColor: colors.primary,
     paddingHorizontal: 24,
     paddingVertical: 14,
-    borderRadius: 12,
+    borderRadius: 14,
     width: '100%',
     alignItems: 'center',
     marginBottom: 12,
@@ -1256,7 +1257,7 @@ function createStyles(colors: ThemeColors) {
     width: '100%',
     marginBottom: 10,
     backgroundColor: colors.surfaceSubtle,
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: colors.hairline,
   },
@@ -1272,7 +1273,7 @@ function createStyles(colors: ThemeColors) {
     gap: 8,
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 12,
+    borderRadius: 14,
     width: '100%',
     borderWidth: 1,
     borderColor: colors.cardBorder,

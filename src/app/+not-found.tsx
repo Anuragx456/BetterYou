@@ -12,10 +12,15 @@ export default function NotFoundScreen() {
     <>
       <Stack.Screen options={{ title: 'Screen Not Found' }} />
       <View style={styles.container}>
-        <Ionicons name="alert-circle-outline" size={48} color={colors.primary} />
-        <Text style={styles.title}>This screen does not exist.</Text>
+        <View style={styles.iconCircle}>
+          <Ionicons name="compass-outline" size={36} color={colors.primary} />
+        </View>
+        <Text style={styles.title}>Screen Not Found</Text>
+        <Text style={styles.subtitle}>
+          The screen you are looking for has been moved or doesn&apos;t exist.
+        </Text>
         <Link href="/" style={styles.link}>
-          <Text style={styles.linkText}>Go to Dashboard</Text>
+          <Text style={styles.linkText}>Return to Dashboard</Text>
         </Link>
       </View>
     </>
@@ -24,32 +29,50 @@ export default function NotFoundScreen() {
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
-    backgroundColor: colors.background,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.text,
-    marginTop: 16,
-    marginBottom: 12,
-  },
-  link: {
-    marginTop: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    backgroundColor: colors.primaryMuted,
-  },
-  linkText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-});
+    container: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 24,
+      backgroundColor: colors.background,
+    },
+    iconCircle: {
+      width: 72,
+      height: 72,
+      borderRadius: 36,
+      backgroundColor: colors.primaryMuted,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+    },
+    title: {
+      fontSize: 22,
+      fontWeight: '800',
+      color: colors.text,
+      textAlign: 'center',
+    },
+    subtitle: {
+      fontSize: 13,
+      color: colors.textSecondary,
+      textAlign: 'center',
+      marginTop: 6,
+      marginBottom: 24,
+      maxWidth: 280,
+      lineHeight: 18,
+    },
+    link: {
+      paddingVertical: 14,
+      paddingHorizontal: 24,
+      borderRadius: 14,
+      backgroundColor: colors.primary,
+    },
+    linkText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.textInverse,
+    },
+  });
 }
 
