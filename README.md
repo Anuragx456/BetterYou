@@ -34,38 +34,56 @@
 
 ```mermaid
 flowchart TD
-    subgraph UI ["User Interface (Expo Router v58 / React 19)"]
+    subgraph UI ["User Interface (Expo SDK 58 / Expo Router v58 / React 19)"]
         Dashboard["Dashboard (app/index.tsx)"]
         PlateScan["Plate AI Vision (app/meal-scan.tsx)"]
         ToxScan["Ingredient Lab (app/toxicity-scan.tsx)"]
         Workouts["Workout Tracker (app/workouts.tsx)"]
-        AISettings["AI Settings (app/ai-settings.tsx)"]
+        Settings["Settings & Preferences (app/settings.tsx)"]
+        Onboarding["Onboarding & BMR/TDEE (app/onboarding.tsx)"]
     end
 
-    subgraph StateManagement ["State & Persistence (Zustand v5)"]
-        FitStore["useFitnessStore (Meals, History, Goals)"]
-        ActiveWorkoutPartition["Dedicated Storage Partition (Active Workout Sets/Reps)"]
-        SetStore["useSettingsStore (API Key, Model Selection)"]
-        SafeStorage["safeAsyncStorage (AsyncStorage with SSR/Headless Fallbacks)"]
+    subgraph StateManagement ["State & Session Cache (Zustand v5)"]
+        FitStore["useFitnessStore (Transient Session State, Active Workout)"]
+        SetStore["useSettingsStore (Selected Model, Reminders, Preferences)"]
+        SecureKeyStore["expo-secure-store (Hardware-Backed Keystore / Keychain)"]
     end
 
-    subgraph ProcessingEngines ["Processing & Service Engines"]
-        ImgOpt["Image Optimizer (expo-image-manipulator 1024px/0.7q)"]
-        GeminiVision["Gemini Vision REST API (3.6 Flash / Fallbacks)"]
+    subgraph Persistence ["Persistence Layer (Single Source of Truth)"]
+        DrizzleSQLite[("Local SQLite Database (betteryou.db via Drizzle ORM)
+• meals, workouts, exercises, sets
+• scanned_products, daily_goals
+• user_profile, body_measurements
+• corrections, vision_cache")]
+        DocumentStorage["Sandboxed Filesystem (documentDirectory)
+• Relative path image storage
+• Automated orphan cleanup"]
+    end
+
+    subgraph ProcessingEngines ["Engines & Network Proxy"]
+        ImgOpt["Image Optimizer (1024px @ 0.7 JPEG Quality)"]
+        EdgeProxy["Stateless Edge Proxy Server (Hono)
+• Per-device random registration secret
+• HMAC-SHA256 request signing & replay cache
+• Upstash Redis / In-Memory rate limiter
+• AttestationVerifier interface"]
+        GeminiVision["Gemini Vision REST API (3.6 Flash / Managed)"]
         BarcodeService["Barcode Multi-DB Resolver (OFF & OBF APIs)"]
-        OfflinePresets["Offline Preset Database (Curated Indian Catalog)"]
+        IndianFoodDB["Curated Indian Food DB (IFCT 2017) & Feedback Loop"]
         ToxEngine["Deterministic Toxicological Scoring Engine"]
     end
 
-    PlateScan --> ImgOpt --> GeminiVision --> FitStore
+    PlateScan --> ImgOpt --> EdgeProxy --> GeminiVision
+    EdgeProxy -.-> GeminiVision
     ToxScan --> BarcodeService
-    ToxScan --> ImgOpt --> GeminiVision
-    BarcodeService --> OfflinePresets
-    BarcodeService --> ToxEngine --> FitStore
-    Workouts --> ActiveWorkoutPartition --> FitStore
-    FitStore --> SafeStorage
-    SetStore --> SafeStorage
+    ToxScan --> ImgOpt --> EdgeProxy
+    BarcodeService --> ToxEngine
+    PlateScan --> IndianFoodDB
+    FitStore <--> DrizzleSQLite
+    SetStore <--> SecureKeyStore
+    DrizzleSQLite --> DocumentStorage
     Dashboard --> FitStore
+    Workouts --> FitStore
 ```
 
 ---
@@ -247,13 +265,12 @@ The toxicological scoring engine computes an objective safety score on a 0–100
 
 ---
 
-### High-Frequency Workout State Partitioning
+### Single Source of Truth & Local SQLite Architecture
 
-During a workout, users rapidly modify weights, reps, and set completion checkboxes. Storing the entire application state (meals, historical workouts, scanned products) in a single storage key causes serialization bottlenecks on every keystroke.
-
-BetterYou solves this with **state partitioning**:
-- **Historical Data**: Persisted under `betteryou-fitness-storage`.
-- **Active Workout Partition**: Serialized to an isolated, lightweight key (`betteryou-active-workout`). Mutations to the active workout never re-serialize historical meal or workout records.
+All user data (meals, workouts, exercises, sets, scanned products, user profile, bodyweight measurements, and corrections) is persisted in an embedded SQLite database (`betteryou.db`) via `expo-sqlite` and `drizzle-orm`:
+- **Atomic Operations**: Nested entities (workouts with sets, meals with ingredients) execute in atomic transactions with foreign-key cascade deletes.
+- **Transient UI State**: Zustand v5 manages active session states (e.g. running rest timers, draft sets), completely isolated from persisted database rows.
+- **Document Sandboxing**: Images are saved with relative paths in `documentDirectory` (`meals/`, `scans/`). No raw base64 or ephemeral cache paths are stored in the database.
 
 ---
 
@@ -270,49 +287,74 @@ All date comparisons utilize local calendar calculations:
 ```
 BetterYou/
 ├── src/
-│   ├── app/                           # Expo Router Screens & Layouts
-│   │   ├── (tabs)/                    # Bottom Tab Navigator
-│   │   │   ├── _layout.tsx            # Tab bar setup & obsidian theme icons
-│   │   │   ├── index.tsx              # Daily Dashboard, Calorie Rings, Calendar Strip
+│   ├── app/                           # Expo Router Screens & Navigators
+│   │   ├── (tabs)/                    # 5 Core Bottom Tabs (decomposed orchestrators)
+│   │   │   ├── _layout.tsx            # Tab bar navigator & Obsidian theme tokens
+│   │   │   ├── index.tsx              # Daily Dashboard, Calorie Hero, Week Strip
 │   │   │   ├── meal-scan.tsx          # Plate AI Vision viewfinder & macro estimation
-│   │   │   ├── toxicity-scan.tsx      # Barcode Scanner & Ingredient Lab OCR
+│   │   │   ├── toxicity-scan.tsx      # Barcode Scanner & Ingredient Lab screening
 │   │   │   ├── workouts.tsx           # Strength tracking, sets/reps & rest timer
-│   │   │   └── settings.tsx           # General app settings & navigation
+│   │   │   └── settings.tsx           # Preferences, backups, AI config, health
 │   │   ├── _layout.tsx                # Root layout & Stack navigator
 │   │   ├── ai-settings.tsx            # Gemini model selection & custom API key
+│   │   ├── api-usage.tsx              # API call telemetry & token counter
 │   │   ├── diagnostics.tsx            # Live API latency & model connection tester
 │   │   ├── nutrition-target.tsx       # Custom daily calorie & macro goals
+│   │   ├── onboarding.tsx             # 4-step BMR/TDEE setup & tour
 │   │   └── +not-found.tsx             # 404 handler
-│   ├── components/                    # Reusable Modals & UI Components
-│   │   ├── EditProductModal.tsx       # Interactive ingredient list editor
-│   │   ├── ErrorBoundary.tsx          # React error boundary component
-│   │   ├── ManualMealModal.tsx        # Natural language meal input dialog
-│   │   ├── ManualProductModal.tsx     # Custom product & ingredient entry dialog
-│   │   └── ToxicityReportModal.tsx    # Detailed forensic toxicological report sheet
+│   ├── components/                    # Modular Components (strictly <= 600 lines)
+│   │   ├── dashboard/                 # CalorieHeroCard, WeekStrip, TrainingCard, MealFeed, BodyweightCard
+│   │   ├── workouts/                  # ActiveWorkoutView, RoutineTemplates, FloatingRestTimer, ActiveSetRow
+│   │   ├── scan/                      # ScanViewfinder, ScannedProductReportView, SafetyScoreGaugeHero
+│   │   ├── meal/                      # MealViewfinder, MealVerificationCard, MealMacroPills, MealDeviationCard
+│   │   ├── settings/                  # AppearanceSection, NutritionGoalsSection, DataBackupSection, AiSection
+│   │   ├── charts/                    # WeightTrendSvgChart, CalorieIntakeSvgChart
+│   │   ├── ManualMealModal.tsx        # Natural language / manual meal entry dialog
+│   │   ├── ToxicityReportModal.tsx    # Ingredient risk screening report sheet
+│   │   └── WeeklySummaryModal.tsx     # Sunday weekly nutrition & training review card
 │   ├── constants/                     # Legal & Privacy Disclaimers
-│   │   └── disclaimers.ts             # AI and medical disclaimer copy
-│   ├── services/                      # Business Logic & External APIs
-│   │   ├── aiVisionService.ts         # Gemini Multimodal REST integration & prompts
-│   │   ├── barcodeService.ts          # OpenFoodFacts/OpenBeautyFacts & scoring engine
-│   │   └── __tests__/                 # Scoring engine unit tests
-│   │       └── scoringEngine.test.ts
-│   ├── store/                         # State Management (Zustand v5)
-│   │   ├── useFitnessStore.ts         # Meals, workouts, volume, streaks, goals
-│   │   └── useSettingsStore.ts        # API keys, active model, diagnostic tests
-│   ├── theme/                         # Design System
-│   │   └── colors.ts                  # Obsidian Dark palette & semantic colors
-│   ├── types/                         # TypeScript Interface Definitions
-│   │   └── index.ts                   # Core data models and enum definitions
-│   └── utils/                         # Helper Utilities
-│       ├── date.ts                    # Timezone-safe local calendar arithmetic
-│       ├── haptics.ts                 # Safe Expo Haptics wrapper
-│       ├── imageOptimizer.ts          # Resolution scaling & compression pipeline
-│       ├── storage.ts                 # SSR/headless-safe AsyncStorage wrapper
-│       └── __tests__/                 # Date and fitness calculation tests
-│           └── dateAndFitness.test.ts
-├── app.json                           # Expo application manifest
+│   │   └── disclaimers.ts             # Non-diagnostic ingredient risk disclaimers
+│   ├── data/                          # Bundled Catalogs & Databases
+│   │   ├── additiveRules.v1.json      # Curated additive risk evaluation rules
+│   │   └── indianFoodDb.json          # 50 verified Indian dishes (IFCT 2017)
+│   ├── db/                            # SQLite Persistence Layer (Drizzle ORM)
+│   │   ├── client.ts                  # Database client facade & connection pool
+│   │   ├── schema.ts                  # Drizzle table schemas, indexes & relations
+│   │   ├── migration.ts               # Idempotent resumable migration engine
+│   │   └── repositories/              # Modular repositories (meals, workouts, products, goals, etc.)
+│   ├── hooks/                         # Custom React Hooks (scanner, active workout, rest timer)
+│   ├── i18n/                          # Internationalization Engine
+│   │   ├── index.ts                   # Language loader & t() translation helper
+│   │   └── locales/                   # Complete English & Hindi parity (en.json, hi.json)
+│   ├── services/                      # Business Logic & Infrastructure
+│   │   ├── ai/                        # Prompt builders, response parsers, gemini transport, vision cache
+│   │   ├── aiVisionService.ts         # Facade for Gemini Multimodal REST integration
+│   │   ├── backupService.ts           # JSON & CSV export + atomic transactional restore
+│   │   ├── barcodeService.ts          # Barcode resolver & deterministic scoring engine
+│   │   ├── notificationService.ts     # Meal reminders & Sunday weekly review notifications
+│   │   └── weeklySummaryService.ts    # Aggregator for weekly training & nutrition progress
+│   ├── store/                         # Transient Session State (Zustand v5)
+│   │   ├── useFitnessStore.ts         # Active workout state, UI filters, streak cache
+│   │   ├── useSettingsStore.ts        # Model choice, theme, notification schedules
+│   │   └── useGeminiUsageStore.ts     # Daily API call counters & latency tracker
+│   ├── theme/                         # Design System & Semantic Color Tokens
+│   ├── types/                         # TypeScript Strict Interfaces
+│   └── utils/                         # Pure Utilities (date, haptics, crypto signing, BMR/TDEE, Epley 1RM)
+├── server/                            # Hono Reverse Proxy & Rate Limiter
+│   ├── src/index.ts                   # Device registration, HMAC verification, Gemini proxy
+│   ├── src/rateLimiter.ts             # In-memory & Upstash Redis rate limiters
+│   └── src/attestation.ts             # Play Integrity / App Attest verifier slots
+├── .maestro/                          # Maestro E2E Golden Path Test Flows
+│   ├── log-meal.yaml                  # Meal scan, macro verification & dashboard reflection
+│   ├── workout-session.yaml           # Workout template, exercise logging & history
+│   └── scan-barcode.yaml              # Barcode & ingredient lab screening flow
+├── evals/                             # Empirical Evaluation Harness
+│   ├── run-eval.ts                    # Benchmark scoring script (MAE, OCR recall)
+│   ├── COLLECTING.md                  # Ground-truth photography collection protocol
+│   └── dataset/                       # Manifest & images directory
+├── app.json                           # Expo application manifest & updates config
 ├── package.json                       # Dependencies & scripts
-└── tsconfig.json                      # TypeScript configuration
+└── tsconfig.json                      # TypeScript strict configuration
 ```
 
 ---
@@ -321,7 +363,7 @@ BetterYou/
 
 ### Prerequisites
 
-- **Bun** (recommended) or **Node.js** (v18+)
+- **Bun** (v1.2+ recommended)
 - **Expo Go** or an iOS/Android simulator / physical device
 
 ### Installation
@@ -332,26 +374,44 @@ Clone the repository and install dependencies using Bun:
 git clone https://github.com/Anuragx456/BetterYou.git
 cd BetterYou
 bun install
+
+# Install edge proxy dependencies
+cd server
+bun install
+cd ..
 ```
 
 ### Environment Configuration
 
-Create a `.env` file in the project root:
+1. **Client Configuration (`.env`)**:
+   ```env
+   EXPO_PUBLIC_PROXY_URL=http://localhost:8787
+   ```
 
-```env
-EXPO_PUBLIC_GEMINI_API_KEY=your_gemini_api_key_here
-```
+2. **Server Configuration (`server/.env`)**:
+   ```env
+   PORT=8787
+   GEMINI_API_KEY=your_gemini_api_key_here
+   # Optional: Distributed Redis Rate Limiting
+   # UPSTASH_REDIS_REST_URL=https://...
+   # UPSTASH_REDIS_REST_TOKEN=...
+   ```
 
 > [!TIP]
-> You can obtain a free Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey). If no environment variable is provided, you can enter the key directly within the in-app **AI Settings** screen.
+> **BYOK (Bring Your Own Key) Mode**: If you prefer not running the proxy, enter your personal Gemini API key directly in the app via **Settings > AI & Intelligence > Custom API Key**. The key is stored securely in hardware keystores (`expo-secure-store`) and communicates directly with Google's API.
 
-### Running the App
+### Running the App & Server
 
-Start the Expo development server:
+1. **Start the local proxy server**:
+   ```bash
+   cd server
+   bun run dev
+   ```
 
-```bash
-bunx expo start
-```
+2. **Start the Expo development client** (in a separate terminal):
+   ```bash
+   bunx expo start
+   ```
 
 - Press `a` to open on an Android emulator or connected device.
 - Press `i` to open on an iOS simulator.
@@ -359,17 +419,30 @@ bunx expo start
 
 ### Testing & Quality Assurance
 
-Run the automated test suite, typechecker, and linter:
+Run the automated verification suite:
 
 ```bash
-# Run unit tests (scoring engine, date utilities, volume calculations)
+# Run client unit & repository tests (232 tests)
 bun test
 
-# TypeScript typecheck
+# Run edge proxy server tests (13 tests)
+cd server && bun test && cd ..
+
+# TypeScript typecheck (zero any)
 bunx tsc --noEmit
 
 # ESLint check
 bunx expo lint
+
+# Expo configuration and dependency diagnosis
+bunx expo-doctor
+
+# Run evaluation harness
+bun run eval
+
+# Run Maestro E2E golden path flows (on active emulator)
+maestro test .maestro/
+```
 
 # Expo configuration and dependency diagnosis
 bunx expo-doctor
