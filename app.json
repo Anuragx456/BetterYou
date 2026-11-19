@@ -7,6 +7,12 @@
     "icon": "./assets/images/icon.png",
     "scheme": "betteryou",
     "userInterfaceStyle": "automatic",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/YOUR_EAS_PROJECT_ID_HERE"
+    },
     "ios": {
       "icon": "./assets/expo.icon",
       "bundleIdentifier": "com.betteryou.app",
@@ -76,8 +82,14 @@
           "speechRecognitionPermission": "BetterYou uses speech recognition to transcribe your spoken meals and products."
         }
       ],
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-updates"
     ],
+    "extra": {
+      "eas": {
+        "projectId": "YOUR_EAS_PROJECT_ID_HERE"
+      }
+    },
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
