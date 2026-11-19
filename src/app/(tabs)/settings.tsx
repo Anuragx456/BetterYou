@@ -1,16 +1,19 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import {
   Alert,
-  Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { AiIntelligenceSection } from '../../components/settings/AiIntelligenceSection';
+import { AppearanceSection } from '../../components/settings/AppearanceSection';
+import { DataBackupSection } from '../../components/settings/DataBackupSection';
+import { NutritionGoalsSection } from '../../components/settings/NutritionGoalsSection';
+import { RemindersSection } from '../../components/settings/RemindersSection';
+import { SystemHealthSection } from '../../components/settings/SystemHealthSection';
 import {
   dbClearCorrections,
   dbGetAllMeals,
@@ -37,17 +40,15 @@ import {
 import { getAppLanguage, setAppLanguage, SupportedLanguage } from '../../i18n';
 import { useFitnessStore } from '../../store/useFitnessStore';
 import {
-  AVAILABLE_GEMINI_MODELS,
   getActiveModelDisplayName,
   useSettingsStore,
 } from '../../store/useSettingsStore';
 import { safeHaptics } from '../../utils/haptics';
 import { useGeminiUsageStore } from '../../store/useGeminiUsageStore';
 import type { ThemeColors } from '../../theme/colors';
-import { useThemeColors, useThemedStyles } from '../../theme/theme';
+import { useThemedStyles } from '../../theme/theme';
 
 export default function SettingsScreen() {
-  const colors = useThemeColors();
   const styles = useThemedStyles(createStyles);
   const router = useRouter();
 
@@ -149,7 +150,7 @@ export default function SettingsScreen() {
   const handleChangeWeeklyReviewTime = () => {
     Alert.alert(
       'Sunday Review Time',
-      'Choose when to receive your Sunday weekly recap:',
+      'Choose when to receive your weekly fitness & nutrition summary on Sundays:',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -177,121 +178,119 @@ export default function SettingsScreen() {
     );
   };
 
-  const [currentLang, setCurrentLangState] = useState<SupportedLanguage>(getAppLanguage());
-
-  const hasCustom = Boolean(customApiKey?.trim());
-  const activeModelTitle = getActiveModelDisplayName();
+  const [currentLang, setCurrentLanguageState] = useState<SupportedLanguage>(getAppLanguage());
+  const [isRestoring, setIsRestoring] = useState(false);
 
   const handleToggleLanguage = (lang: SupportedLanguage) => {
+    safeHaptics.selection();
     setAppLanguage(lang);
-    setCurrentLangState(lang);
-    Alert.alert(
-      lang === 'hi' ? 'भाषा बदली गई' : 'Language Changed',
-      lang === 'hi' ? 'ऐप भाषा अब हिंदी में सेट है।' : 'App language is now set to English.'
-    );
+    setCurrentLanguageState(lang);
   };
 
-  const handleExportWorkoutsCsv = async () => {
-    const workouts = await dbGetAllWorkouts();
-    const csv = generateWorkoutsCsv(workouts);
-    const status = await shareOrCopyData(csv, 'BetterYou_Workouts.csv');
-    Alert.alert(
-      status === 'shared' ? 'Workouts Exported' : 'CSV Copied',
-      `Exported ${workouts.length} workout sessions.`
-    );
+  const hasCustom = Boolean(customApiKey && customApiKey.trim().length > 0);
+  const activeModelTitle = getActiveModelDisplayName();
+
+  const refreshLoadedData = async () => {
+    await useFitnessStore.getState().refreshLoadedData();
   };
 
-  const handleExportMealsCsv = async () => {
-    const meals = await dbGetAllMeals();
-    const csv = generateMealsCsv(meals);
-    const status = await shareOrCopyData(csv, 'BetterYou_Meals.csv');
-    Alert.alert(
-      status === 'shared' ? 'Meals Exported' : 'CSV Copied',
-      `Exported ${meals.length} meal logs.`
-    );
-  };
+  // Export Workouts as CSV
+  const handleExportWorkoutsCsv = useCallback(async () => {
+    try {
+      safeHaptics.selection();
+      const workouts = await dbGetAllWorkouts();
+      if (workouts.length === 0) {
+        Alert.alert('No Data', 'You have not logged any workouts yet.');
+        return;
+      }
+      const csv = generateWorkoutsCsv(workouts);
+      const filename = `betteryou_workouts_${new Date().toISOString().slice(0, 10)}.csv`;
+      await shareOrCopyData(csv, filename);
+    } catch {
+      Alert.alert('Export Failed', 'Unable to export workouts. Please try again.');
+    }
+  }, []);
 
-  const [isRestoring, setIsRestoring] = useState(false);
-  const refreshLoadedData = useFitnessStore((state) => state.refreshLoadedData);
+  // Export Meals as CSV
+  const handleExportMealsCsv = useCallback(async () => {
+    try {
+      safeHaptics.selection();
+      const meals = await dbGetAllMeals();
+      if (meals.length === 0) {
+        Alert.alert('No Data', 'You have not logged any meals yet.');
+        return;
+      }
+      const csv = generateMealsCsv(meals);
+      const filename = `betteryou_meals_${new Date().toISOString().slice(0, 10)}.csv`;
+      await shareOrCopyData(csv, filename);
+    } catch {
+      Alert.alert('Export Failed', 'Unable to export meals. Please try again.');
+    }
+  }, []);
 
-  const handleExportJsonBackup = async () => {
-    const [workouts, meals, products] = await Promise.all([
-      dbGetAllWorkouts(),
-      dbGetAllMeals(),
-      dbGetAllScannedProducts(),
-    ]);
-    const json = generateJsonBackup(workouts, meals, dailyGoals, products);
-    const status = await shareOrCopyData(json, 'BetterYou_Backup.json');
-    Alert.alert(
-      status === 'shared' ? 'Backup Shared' : 'Backup Copied',
-      'Complete JSON database backup exported.'
-    );
-  };
+  // Export Full JSON Backup
+  const handleExportJsonBackup = useCallback(async () => {
+    try {
+      safeHaptics.selection();
+      const [workouts, meals, products] = await Promise.all([
+        dbGetAllWorkouts(),
+        dbGetAllMeals(),
+        dbGetAllScannedProducts(),
+      ]);
+      const json = generateJsonBackup(workouts, meals, dailyGoals ?? undefined, products);
+      const filename = `betteryou_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      await shareOrCopyData(json, filename);
+    } catch {
+      Alert.alert('Export Failed', 'Unable to generate backup file. Please try again.');
+    }
+  }, [dailyGoals]);
 
+  // Restore Backup
   const handleRestoreBackup = async () => {
     try {
-      const res = await DocumentPicker.getDocumentAsync({
-        type: 'application/json',
+      safeHaptics.selection();
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/json', 'text/json', '*/*'],
         copyToCacheDirectory: true,
       });
 
-      if (res.canceled || !res.assets || res.assets.length === 0) {
+      if (result.canceled || !result.assets || result.assets.length === 0) {
         return;
       }
 
-      const fileAsset = res.assets[0];
-      let rawContent = '';
-      try {
-        if (fileAsset.uri) {
-          const file = new ExpoFile(fileAsset.uri);
-          rawContent = await file.text();
-        }
-      } catch {
-        const response = await fetch(fileAsset.uri);
-        rawContent = await response.text();
-      }
+      const fileAsset = result.assets[0];
+      const file = new ExpoFile(fileAsset.uri);
+      const content = await file.text();
 
-      const validation = parseAndValidateBackup(rawContent);
+      const validation = parseAndValidateBackup(content);
       if (!validation.success) {
-        safeHaptics.error();
-        Alert.alert('Invalid Backup File', validation.error);
+        Alert.alert('Invalid Backup', validation.error);
         return;
       }
 
-      const { payload } = validation;
-      const exportDate = payload.exportedAt ? new Date(payload.exportedAt).toLocaleDateString() : 'Unknown';
-      const wCount = payload.workouts?.length ?? 0;
-      const mCount = payload.meals?.length ?? 0;
-      const pCount = payload.scannedProducts?.length ?? 0;
-      const hasGoals = Boolean(payload.dailyGoals);
-
-      const summaryMessage =
-        `Backup Exported: ${exportDate}\n` +
-        `• ${wCount} Workouts\n` +
-        `• ${mCount} Meals\n` +
-        `• ${pCount} Products\n` +
-        `• Daily Goals: ${hasGoals ? 'Included' : 'None'}\n\n` +
-        `Notice: Photos and scan images are stored locally and are NOT included in backups.\n\n` +
-        `Choose restore strategy:`;
+      const payload = validation.payload;
+      const mealCountImport = payload.meals.length;
+      const workoutCountImport = payload.workouts.length;
+      const productCountImport = payload.scannedProducts?.length ?? 0;
 
       Alert.alert(
-        'Restore from Backup',
-        summaryMessage,
+        'Restore Backup',
+        `Backup dated: ${new Date(payload.exportedAt).toLocaleDateString()}\n\nContains:\n• ${workoutCountImport} workouts\n• ${mealCountImport} meals\n• ${productCountImport} scanned products\n\nNote: Scanned product & meal photos are local-only and not stored in backups.\n\nChoose restore strategy:`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
-            text: 'Merge (Keep Existing)',
+            text: 'Merge',
             onPress: async () => {
               await executeRestore(payload, 'merge');
             },
           },
           {
-            text: 'Replace All (Wipe)',
+            text: 'Replace All Data',
             style: 'destructive',
             onPress: () => {
               Alert.alert(
-                'Destructive Action Warning',
-                'Are you sure you want to replace all data? All current meals, workouts, and products on this device will be permanently deleted and replaced with this backup.',
+                'Confirm Replace',
+                'This will permanently delete your existing local workouts, meals, and scans, and replace them with this backup. This cannot be undone.',
                 [
                   { text: 'Cancel', style: 'cancel' },
                   {
@@ -355,7 +354,6 @@ export default function SettingsScreen() {
     );
   }, []);
 
-  // Reset all settings
   const handleResetSettings = useCallback(() => {
     Alert.alert(
       'Reset Settings',
@@ -408,555 +406,65 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionHeader} allowFontScaling>
-            APPEARANCE
-          </Text>
-          <View style={styles.cardGroup}>
-            <View style={styles.navRow}>
-              <View style={[styles.iconBadge, { backgroundColor: colors.primaryMuted }]}>
-                <Ionicons
-                  name={colorScheme === 'dark' ? 'moon' : 'sunny-outline'}
-                  size={18}
-                  color={colors.primary}
-                />
-              </View>
-              <View style={styles.navRowMeta}>
-                <Text style={styles.navRowTitle} allowFontScaling>
-                  Dark mode
-                </Text>
-                <Text style={styles.navRowSubtitle} allowFontScaling>
-                  Dim the dashboard, scans, and workouts
-                </Text>
-              </View>
-              <Switch
-                value={colorScheme === 'dark'}
-                onValueChange={(enabled) => setColorScheme(enabled ? 'dark' : 'light')}
-                trackColor={{ false: colors.hairline, true: colors.primary }}
-                thumbColor={colors.white}
-                accessibilityLabel="Dark mode"
-              />
-            </View>
-          </View>
-        </View>
-
-        {/* Section: Language Selection */}
-        <View style={styles.section}>
-          <Text style={styles.sectionHeader} allowFontScaling>
-            LANGUAGE / भाषा
-          </Text>
-          <View style={styles.langRow}>
-            <Pressable
-              style={({ pressed }) => [
-                styles.langBtn,
-                currentLang === 'en' && styles.langBtnActive,
-                pressed && styles.pressed,
-              ]}
-              onPress={() => handleToggleLanguage('en')}
-              accessibilityRole="button"
-              accessibilityLabel="Select English language"
-            >
-              <Text
-                style={[
-                  styles.langBtnText,
-                  currentLang === 'en' && styles.langBtnTextActive,
-                ]}
-                allowFontScaling
-              >
-                English
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={({ pressed }) => [
-                styles.langBtn,
-                currentLang === 'hi' && styles.langBtnActive,
-                pressed && styles.pressed,
-              ]}
-              onPress={() => handleToggleLanguage('hi')}
-              accessibilityRole="button"
-              accessibilityLabel="हिंदी भाषा चुनें"
-            >
-              <Text
-                style={[
-                  styles.langBtnText,
-                  currentLang === 'hi' && styles.langBtnTextActive,
-                ]}
-                allowFontScaling
-              >
-                हिंदी (Hindi)
-              </Text>
-            </Pressable>
-          </View>
-        </View>
+        {/* Section: Appearance & Language */}
+        <AppearanceSection
+          colorScheme={colorScheme}
+          onToggleColorScheme={setColorScheme}
+          currentLang={currentLang}
+          onSelectLanguage={handleToggleLanguage}
+        />
 
         {/* Section: Nutrition & Goals */}
-        <View style={styles.section}>
-          <Text style={styles.sectionHeader} allowFontScaling>
-            NUTRITION & GOALS
-          </Text>
-          <View style={styles.cardGroup}>
-            <Pressable
-              style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
-              onPress={() => router.push('/nutrition-target')}
-              accessibilityRole="button"
-              accessibilityLabel="Edit daily nutrition targets"
-            >
-              <View style={[styles.iconBadge, { backgroundColor: colors.softOrange }]}>
-                <Ionicons name="flame" size={18} color={colors.calories} />
-              </View>
-              <View style={styles.navRowMeta}>
-                <Text style={styles.navRowTitle} allowFontScaling>
-                  Daily Nutrition Target
-                </Text>
-                <Text style={styles.navRowSubtitle} allowFontScaling>
-                  Calorie and macronutrient goals
-                </Text>
-              </View>
-              <View style={styles.navRight}>
-                <View style={styles.valueBadge}>
-                  <Text style={[styles.valueBadgeText, { color: colors.calories }]} allowFontScaling>
-                    {dailyGoals?.calorieTarget?.toLocaleString() ?? 2200} kcal
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-              </View>
-            </Pressable>
-
-            <View style={styles.rowDivider} />
-
-            <Pressable
-              style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
-              onPress={() => router.push('/onboarding?recalculate=true')}
-              accessibilityRole="button"
-              accessibilityLabel="Recalculate targets using BMR and TDEE"
-            >
-              <View style={[styles.iconBadge, { backgroundColor: colors.softBlue }]}>
-                <Ionicons name="calculator" size={18} color={colors.primary} />
-              </View>
-              <View style={styles.navRowMeta}>
-                <Text style={styles.navRowTitle} allowFontScaling>
-                  Recalculate Targets (BMR / TDEE)
-                </Text>
-                <Text style={styles.navRowSubtitle} allowFontScaling>
-                  Update weight, activity & Mifflin-St Jeor formula
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-            </Pressable>
-          </View>
-        </View>
+        <NutritionGoalsSection
+          calorieTarget={dailyGoals?.calorieTarget ?? 2200}
+          onNavigateNutritionTarget={() => router.push('/nutrition-target')}
+          onNavigateRecalculateBmr={() => router.push('/onboarding?recalculate=true')}
+        />
 
         {/* Section: Reminders & Notifications */}
-        <View style={styles.section}>
-          <Text style={styles.sectionHeader} allowFontScaling>
-            REMINDERS & NOTIFICATIONS
-          </Text>
-          <View style={styles.cardGroup}>
-            {/* Daily Meal Log Reminder */}
-            <View style={styles.navRow}>
-              <View style={[styles.iconBadge, { backgroundColor: colors.softOrange }]}>
-                <Ionicons name="notifications-outline" size={18} color={colors.calories} />
-              </View>
-              <View style={styles.navRowMeta}>
-                <Text style={styles.navRowTitle} allowFontScaling>
-                  Daily Meal Log Reminder
-                </Text>
-                <Text style={styles.navRowSubtitle} allowFontScaling>
-                  {dailyReminderEnabled ? `Active daily at ${dailyReminderTime}` : 'Disabled (opt-in only)'}
-                </Text>
-              </View>
-              <Switch
-                value={dailyReminderEnabled}
-                onValueChange={handleToggleDailyReminder}
-                trackColor={{ false: colors.cardBorder, true: colors.primary }}
-                thumbColor={colors.white}
-                accessibilityRole="switch"
-                accessibilityLabel="Toggle daily meal log reminder"
-              />
-            </View>
-
-            {dailyReminderEnabled && (
-              <>
-                <View style={styles.rowDivider} />
-                <Pressable
-                  style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
-                  onPress={handleChangeDailyReminderTime}
-                  accessibilityRole="button"
-                  accessibilityLabel="Change daily reminder time"
-                >
-                  <View style={[styles.iconBadge, { backgroundColor: colors.surfaceSubtle }]}>
-                    <Ionicons name="time-outline" size={18} color={colors.textSecondary} />
-                  </View>
-                  <View style={styles.navRowMeta}>
-                    <Text style={styles.navRowTitle} allowFontScaling>
-                      Reminder Time
-                    </Text>
-                    <Text style={styles.navRowSubtitle} allowFontScaling>
-                      Scheduled for {dailyReminderTime}
-                    </Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-                </Pressable>
-              </>
-            )}
-
-            <View style={styles.rowDivider} />
-
-            {/* Sunday Weekly Review */}
-            <View style={styles.navRow}>
-              <View style={[styles.iconBadge, { backgroundColor: colors.softGreen }]}>
-                <Ionicons name="calendar-outline" size={18} color={colors.success} />
-              </View>
-              <View style={styles.navRowMeta}>
-                <Text style={styles.navRowTitle} allowFontScaling>
-                  Sunday Weekly Recap
-                </Text>
-                <Text style={styles.navRowSubtitle} allowFontScaling>
-                  {weeklyReviewEnabled ? `Sundays at ${weeklyReviewTime}` : 'Disabled (opt-in only)'}
-                </Text>
-              </View>
-              <Switch
-                value={weeklyReviewEnabled}
-                onValueChange={handleToggleWeeklyReview}
-                trackColor={{ false: colors.cardBorder, true: colors.success }}
-                thumbColor={colors.white}
-                accessibilityRole="switch"
-                accessibilityLabel="Toggle Sunday weekly recap reminder"
-              />
-            </View>
-
-            {weeklyReviewEnabled && (
-              <>
-                <View style={styles.rowDivider} />
-                <Pressable
-                  style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
-                  onPress={handleChangeWeeklyReviewTime}
-                  accessibilityRole="button"
-                  accessibilityLabel="Change weekly review reminder time"
-                >
-                  <View style={[styles.iconBadge, { backgroundColor: colors.surfaceSubtle }]}>
-                    <Ionicons name="time-outline" size={18} color={colors.textSecondary} />
-                  </View>
-                  <View style={styles.navRowMeta}>
-                    <Text style={styles.navRowTitle} allowFontScaling>
-                      Review Prompt Time
-                    </Text>
-                    <Text style={styles.navRowSubtitle} allowFontScaling>
-                      Scheduled for {weeklyReviewTime}
-                    </Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-                </Pressable>
-              </>
-            )}
-          </View>
-        </View>
+        <RemindersSection
+          dailyReminderEnabled={dailyReminderEnabled}
+          dailyReminderTime={dailyReminderTime}
+          weeklyReviewEnabled={weeklyReviewEnabled}
+          weeklyReviewTime={weeklyReviewTime}
+          onToggleDailyReminder={handleToggleDailyReminder}
+          onChangeDailyReminderTime={handleChangeDailyReminderTime}
+          onToggleWeeklyReview={handleToggleWeeklyReview}
+          onChangeWeeklyReviewTime={handleChangeWeeklyReviewTime}
+        />
 
         {/* Section: AI Intelligence */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionHeader} allowFontScaling>
-              AI & INTELLIGENCE
-            </Text>
-            <View style={styles.modelHeaderBadge}>
-              <Ionicons name="sparkles" size={11} color={colors.primary} />
-              <Text style={styles.modelHeaderBadgeText}>{activeModelTitle}</Text>
-            </View>
-          </View>
-
-          {/* Direct Model Selection in Settings */}
-          <View style={styles.modelPickerCard}>
-            <Text style={styles.modelPickerSubtext}>
-              Select active Gemini model for Meal Vision & Product Screening:
-            </Text>
-            <View style={styles.modelChipsGrid}>
-              {AVAILABLE_GEMINI_MODELS.map((model) => {
-                const isSelected = !isCustomModel && selectedModel === model.id;
-                return (
-                  <Pressable
-                    key={model.id}
-                    style={({ pressed }) => [
-                      styles.modelChip,
-                      isSelected && styles.modelChipActive,
-                      pressed && styles.pressed,
-                    ]}
-                    onPress={() => {
-                      safeHaptics.selection();
-                      setSelectedModel(model.id);
-                    }}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: isSelected }}
-                    accessibilityLabel={`Select ${model.name} for meal vision and product screening`}
-                  >
-                    <View style={styles.modelChipTop}>
-                      <View style={[styles.modelRadio, isSelected && styles.modelRadioActive]}>
-                        {isSelected && <View style={styles.modelRadioDot} />}
-                      </View>
-                      <Text
-                        style={[styles.modelChipTitle, isSelected && styles.modelChipTitleActive]}
-                        numberOfLines={1}
-                      >
-                        {model.name}
-                      </Text>
-                    </View>
-                    <View style={styles.modelChipMeta}>
-                      <View style={styles.modelBadgeWrap}>
-                        <Text style={styles.modelChipBadge}>{model.badge}</Text>
-                      </View>
-                      <Text style={styles.modelChipSpeed}>{model.speed}</Text>
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </View>
-            {isCustomModel && customModelName ? (
-              <View style={styles.customModelNotice}>
-                <Ionicons name="code-slash" size={13} color={colors.primary} />
-                <Text style={styles.customModelNoticeText}>
-                  Custom Model Active: {customModelName}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-
-          <View style={styles.cardGroup}>
-            <Pressable
-              style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
-              onPress={() => router.push('/ai-settings')}
-              accessibilityRole="button"
-              accessibilityLabel="Configure Gemini API settings and model"
-            >
-              <View style={[styles.iconBadge, { backgroundColor: colors.softGreen }]}>
-                <Ionicons name="hardware-chip-outline" size={18} color={colors.primary} />
-              </View>
-              <View style={styles.navRowMeta}>
-                <Text style={styles.navRowTitle} allowFontScaling>
-                  API Key & Custom Model (BYOK)
-                </Text>
-                <Text style={styles.navRowSubtitle} allowFontScaling>
-                  {hasCustom ? 'Hardware-backed custom key active' : 'Managed Proxy (Google AI Studio)'}
-                </Text>
-              </View>
-              <View style={styles.navRight}>
-                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-              </View>
-            </Pressable>
-
-            <Pressable
-              style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
-              onPress={() => router.push('/api-usage')}
-              accessibilityRole="button"
-              accessibilityLabel="View detailed Gemini API usage and quota"
-            >
-              <View style={[styles.iconBadge, { backgroundColor: colors.softBlue }]}>
-                <Ionicons name="speedometer-outline" size={18} color={colors.protein} />
-              </View>
-              <View style={styles.navRowMeta}>
-                <Text style={styles.navRowTitle} allowFontScaling>
-                  API Key Usage & Quota
-                </Text>
-                <Text style={styles.navRowSubtitle} allowFontScaling>
-                  Scans, tokens, costs & rate limits
-                </Text>
-              </View>
-              <View style={styles.navRight}>
-                <View style={styles.valueBadge}>
-                  <Text style={[styles.valueBadgeText, { color: colors.protein }]} allowFontScaling>
-                    {totalCalls > 0 ? `${totalCalls} scans` : 'Free Tier'}
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-              </View>
-            </Pressable>
-          </View>
-        </View>
+        <AiIntelligenceSection
+          activeModelTitle={activeModelTitle}
+          selectedModel={selectedModel}
+          isCustomModel={isCustomModel}
+          customModelName={customModelName}
+          hasCustom={hasCustom}
+          totalCalls={totalCalls}
+          onSelectModel={(modelId) => setSelectedModel(modelId)}
+          onNavigateAiSettings={() => router.push('/ai-settings')}
+          onNavigateApiUsage={() => router.push('/api-usage')}
+        />
 
         {/* Section: Data Backup & Export */}
-        <View style={styles.section}>
-          <Text style={styles.sectionHeader} allowFontScaling>
-            DATA BACKUP & EXPORT
-          </Text>
-          <View style={styles.cardGroup}>
-            <Pressable
-              style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
-              onPress={handleExportWorkoutsCsv}
-              accessibilityRole="button"
-              accessibilityLabel="Export workouts data to CSV spreadsheet"
-            >
-              <View style={[styles.iconBadge, { backgroundColor: colors.primaryMuted }]}>
-                <Ionicons name="barbell-outline" size={18} color={colors.primary} />
-              </View>
-              <View style={styles.navRowMeta}>
-                <Text style={styles.navRowTitle} allowFontScaling>
-                  Export Workouts (CSV)
-                </Text>
-                <Text style={styles.navRowSubtitle} allowFontScaling>
-                  Excel / Sheets compatible log ({workoutCount} sessions)
-                </Text>
-              </View>
-              <Ionicons name="download-outline" size={18} color={colors.primary} />
-            </Pressable>
+        <DataBackupSection
+          workoutCount={workoutCount}
+          mealCount={mealCount}
+          isRestoring={isRestoring}
+          onExportWorkoutsCsv={handleExportWorkoutsCsv}
+          onExportMealsCsv={handleExportMealsCsv}
+          onExportJsonBackup={handleExportJsonBackup}
+          onRestoreBackup={handleRestoreBackup}
+          onClearCorrections={handleClearCorrections}
+        />
 
-            <Pressable
-              style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
-              onPress={handleExportMealsCsv}
-              accessibilityRole="button"
-              accessibilityLabel="Export meals data to CSV spreadsheet"
-            >
-              <View style={[styles.iconBadge, { backgroundColor: colors.softOrange }]}>
-                <Ionicons name="restaurant-outline" size={18} color={colors.calories} />
-              </View>
-              <View style={styles.navRowMeta}>
-                <Text style={styles.navRowTitle} allowFontScaling>
-                  Export Meals (CSV)
-                </Text>
-                <Text style={styles.navRowSubtitle} allowFontScaling>
-                  Nutrition & macro history ({mealCount} meals)
-                </Text>
-              </View>
-              <Ionicons name="download-outline" size={18} color={colors.calories} />
-            </Pressable>
-
-            <Pressable
-              style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
-              onPress={handleExportJsonBackup}
-              accessibilityRole="button"
-              accessibilityLabel="Export complete JSON database backup"
-            >
-              <View style={[styles.iconBadge, { backgroundColor: colors.surfaceSubtle }]}>
-                <Ionicons name="server-outline" size={18} color={colors.secondary} />
-              </View>
-              <View style={styles.navRowMeta}>
-                <Text style={styles.navRowTitle} allowFontScaling>
-                  Full Database Backup (JSON)
-                </Text>
-                <Text style={styles.navRowSubtitle} allowFontScaling>
-                  Export workouts, meals, and goals for backup
-                </Text>
-              </View>
-              <Ionicons name="download-outline" size={18} color={colors.secondary} />
-            </Pressable>
-
-            <Pressable
-              style={({ pressed }) => [styles.navRow, (pressed || isRestoring) && styles.pressed]}
-              onPress={handleRestoreBackup}
-              disabled={isRestoring}
-              accessibilityRole="button"
-              accessibilityLabel="Restore meals and workouts from JSON backup file"
-            >
-              <View style={[styles.iconBadge, { backgroundColor: colors.softGreen }]}>
-                <Ionicons name="cloud-upload-outline" size={18} color={colors.primary} />
-              </View>
-              <View style={styles.navRowMeta}>
-                <Text style={styles.navRowTitle} allowFontScaling>
-                  {isRestoring ? 'Restoring Backup...' : 'Restore from Backup (JSON)'}
-                </Text>
-                <Text style={styles.navRowSubtitle} allowFontScaling>
-                  Import meals, workouts & goals (Merge or Replace)
-                </Text>
-              </View>
-              <Ionicons name="arrow-up-circle-outline" size={18} color={colors.primary} />
-            </Pressable>
-
-            <Pressable
-              style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
-              onPress={handleClearCorrections}
-              accessibilityRole="button"
-              accessibilityLabel="Clear learned food macro corrections"
-            >
-              <View style={[styles.iconBadge, { backgroundColor: colors.surfaceSubtle }]}>
-                <Ionicons name="trash-outline" size={18} color={colors.warning} />
-              </View>
-              <View style={styles.navRowMeta}>
-                <Text style={styles.navRowTitle} allowFontScaling>
-                  Clear Learned Corrections
-                </Text>
-                <Text style={styles.navRowSubtitle} allowFontScaling>
-                  Reset custom meal macro adjustments & priors
-                </Text>
-              </View>
-              <Ionicons name="refresh-outline" size={18} color={colors.warning} />
-            </Pressable>
-          </View>
-        </View>
-
-        {/* Section: Diagnostics & System */}
-        <View style={styles.section}>
-          <Text style={styles.sectionHeader} allowFontScaling>
-            SYSTEM HEALTH
-          </Text>
-          <View style={styles.cardGroup}>
-            <Pressable
-              style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
-              onPress={() => router.push('/onboarding')}
-              accessibilityRole="button"
-              accessibilityLabel="View app introduction tour and onboarding walkthrough"
-            >
-              <View style={[styles.iconBadge, { backgroundColor: colors.softGreen }]}>
-                <Ionicons name="sparkles-outline" size={18} color={colors.primary} />
-              </View>
-              <View style={styles.navRowMeta}>
-                <Text style={styles.navRowTitle} allowFontScaling>
-                  App Tour & Onboarding
-                </Text>
-                <Text style={styles.navRowSubtitle} allowFontScaling>
-                  Feature walkthrough and setup guide
-                </Text>
-              </View>
-              <View style={styles.navRight}>
-                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-              </View>
-            </Pressable>
-
-            <Pressable
-              style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
-              onPress={() => router.push('/diagnostics')}
-              accessibilityRole="button"
-              accessibilityLabel="Open diagnostics and system health screen"
-            >
-              <View style={[styles.iconBadge, { backgroundColor: colors.softBlue }]}>
-                <Ionicons name="pulse" size={18} color={colors.secondary} />
-              </View>
-              <View style={styles.navRowMeta}>
-                <Text style={styles.navRowTitle} allowFontScaling>
-                  Diagnostics
-                </Text>
-                <Text style={styles.navRowSubtitle} allowFontScaling>
-                  API latency test & connection ping
-                </Text>
-              </View>
-              <View style={styles.navRight}>
-                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-              </View>
-            </Pressable>
-          </View>
-        </View>
-
-        {/* Section: Reset */}
-        <View style={styles.section}>
-          <Pressable
-            style={({ pressed }) => [styles.resetBtn, pressed && styles.pressed]}
-            onPress={handleResetSettings}
-            accessibilityRole="button"
-            accessibilityLabel="Reset all settings to defaults"
-          >
-            <Ionicons name="refresh-outline" size={16} color={colors.danger} />
-            <Text style={styles.resetBtnText} allowFontScaling>
-              Reset to Default Settings
-            </Text>
-          </Pressable>
-        </View>
-
-        {/* Footer */}
-        <View style={styles.footerContainer}>
-          <Text style={styles.footerVersion} allowFontScaling>
-            BetterYou v1.0.0 • Obsidian Theme
-          </Text>
-          <Text style={styles.footerSub} allowFontScaling>
-            Powered by {activeModelTitle}
-          </Text>
-        </View>
+        {/* Section: Diagnostics & System Health */}
+        <SystemHealthSection
+          activeModelTitle={activeModelTitle}
+          onNavigateOnboarding={() => router.push('/onboarding')}
+          onNavigateDiagnostics={() => router.push('/diagnostics')}
+          onResetSettings={handleResetSettings}
+        />
       </ScrollView>
     </SafeAreaView>
   );
@@ -964,329 +472,68 @@ export default function SettingsScreen() {
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 48,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  screenTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.text,
-    letterSpacing: -0.5,
-  },
-  screenTag: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-    color: colors.primary,
-    marginTop: 2,
-  },
-  statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 20,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  statusPillLive: {
-    borderColor: colors.softGreenBorder,
-    backgroundColor: colors.softGreen,
-  },
-  statusPillEnv: {
-    borderColor: colors.softBlueBorder,
-    backgroundColor: colors.softBlue,
-  },
-  statusPillDemo: {
-    borderColor: colors.softOrangeBorder,
-    backgroundColor: colors.softOrange,
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  statusDotLive: {
-    backgroundColor: colors.success,
-  },
-  statusDotEnv: {
-    backgroundColor: colors.secondary,
-  },
-  statusDotDemo: {
-    backgroundColor: colors.warning,
-  },
-  statusPillText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.textSecondary,
-  },
-  section: {
-    marginBottom: 20,
-  },
-  langRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  langBtn: {
-    flex: 1,
-    backgroundColor: colors.card,
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    minHeight: 48,
-  },
-  langBtnActive: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primaryMuted,
-  },
-  langBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.textSecondary,
-  },
-  langBtnTextActive: {
-    color: colors.primary,
-  },
-  sectionHeader: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1,
-    color: colors.textMuted,
-    marginBottom: 8,
-    paddingHorizontal: 4,
-  },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-    paddingHorizontal: 4,
-  },
-  modelHeaderBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: colors.surfaceSubtle,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  modelHeaderBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-  modelPickerCard: {
-    backgroundColor: colors.card,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    padding: 12,
-    marginBottom: 10,
-  },
-  modelPickerSubtext: {
-    fontSize: 11,
-    color: colors.textSecondary,
-    marginBottom: 10,
-    fontWeight: '500',
-  },
-  modelChipsGrid: {
-    gap: 8,
-  },
-  modelChip: {
-    backgroundColor: colors.surfaceSubtle,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-  },
-  modelChipActive: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primaryMuted,
-  },
-  modelChipTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  modelRadio: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    borderWidth: 1.5,
-    borderColor: colors.textMuted,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modelRadioActive: {
-    borderColor: colors.primary,
-  },
-  modelRadioDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.primary,
-  },
-  modelChipTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.text,
-    flex: 1,
-  },
-  modelChipTitleActive: {
-    color: colors.primary,
-  },
-  modelChipMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 6,
-    paddingLeft: 22,
-  },
-  modelBadgeWrap: {
-    backgroundColor: colors.card,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  modelChipBadge: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: colors.textSecondary,
-  },
-  modelChipSpeed: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: colors.textMuted,
-  },
-  customModelNotice: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: colors.cardBorder,
-  },
-  customModelNoticeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  cardGroup: {
-    backgroundColor: colors.card,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    overflow: 'hidden',
-  },
-  rowDivider: {
-    height: 1,
-    backgroundColor: colors.cardBorder,
-  },
-  navRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  pressed: {
-    opacity: 0.8,
-    transform: [{ scale: 0.98 }],
-  },
-  iconBadge: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  navRowMeta: {
-    flex: 1,
-  },
-  navRowTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  navRowSubtitle: {
-    fontSize: 11,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  navRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  valueBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
-    backgroundColor: colors.surfaceSubtle,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  valueBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.textSecondary,
-    fontVariant: ['tabular-nums'],
-  },
-  resetBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 14,
-    borderRadius: 14,
-    backgroundColor: colors.fatMuted,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  resetBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.danger,
-  },
-  footerContainer: {
-    alignItems: 'center',
-    paddingTop: 12,
-    paddingBottom: 24,
-  },
-  footerVersion: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textSecondary,
-  },
-  footerSub: {
-    fontSize: 11,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-});
+    safeArea: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    scrollContent: {
+      paddingHorizontal: 20,
+      paddingTop: 16,
+      paddingBottom: 48,
+    },
+    headerRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 24,
+    },
+    screenTitle: {
+      fontSize: 28,
+      fontWeight: '700',
+      color: colors.text,
+      letterSpacing: -0.5,
+    },
+    screenTag: {
+      fontSize: 10,
+      fontWeight: '700',
+      letterSpacing: 1.2,
+      color: colors.primary,
+      marginTop: 2,
+    },
+    statusPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 20,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+    },
+    statusPillLive: {
+      borderColor: colors.softGreenBorder,
+      backgroundColor: colors.softGreen,
+    },
+    statusPillEnv: {
+      borderColor: colors.softBlueBorder,
+      backgroundColor: colors.softBlue,
+    },
+    statusDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+    },
+    statusDotLive: {
+      backgroundColor: colors.success,
+    },
+    statusDotEnv: {
+      backgroundColor: colors.secondary,
+    },
+    statusPillText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.textSecondary,
+    },
+  });
 }
-

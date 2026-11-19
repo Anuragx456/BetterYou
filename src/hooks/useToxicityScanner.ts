@@ -3,10 +3,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { Alert } from 'react-native';
-import {
-  CAPTURE_JPEG_QUALITY,
-  selectPreferredPictureSize,
-} from '../utils/cameraPictureSize';
+import { CAPTURE_JPEG_QUALITY } from '../utils/cameraPictureSize';
 import { createBarcodeScanGuard } from '../utils/barcodeScanGuard';
 import { optimizeImageForAiVision } from '../utils/imageOptimizer';
 import { useFitnessStore } from '../store/useFitnessStore';
