@@ -380,6 +380,28 @@ export default function SettingsScreen() {
                 <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </View>
             </Pressable>
+
+            <View style={styles.rowDivider} />
+
+            <Pressable
+              style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
+              onPress={() => router.push('/onboarding?recalculate=true')}
+              accessibilityRole="button"
+              accessibilityLabel="Recalculate targets using BMR and TDEE"
+            >
+              <View style={[styles.iconBadge, { backgroundColor: colors.softBlue }]}>
+                <Ionicons name="calculator" size={18} color={colors.primary} />
+              </View>
+              <View style={styles.navRowMeta}>
+                <Text style={styles.navRowTitle} allowFontScaling>
+                  Recalculate Targets (BMR / TDEE)
+                </Text>
+                <Text style={styles.navRowSubtitle} allowFontScaling>
+                  Update weight, activity & Mifflin-St Jeor formula
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+            </Pressable>
           </View>
         </View>
 
@@ -911,6 +933,10 @@ function createStyles(colors: ThemeColors) {
     borderWidth: 1,
     borderColor: colors.cardBorder,
     overflow: 'hidden',
+  },
+  rowDivider: {
+    height: 1,
+    backgroundColor: colors.cardBorder,
   },
   navRow: {
     flexDirection: 'row',

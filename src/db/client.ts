@@ -276,6 +276,17 @@ export async function getDatabase(): Promise<DatabaseAdapter> {
       updated_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS user_profile (
+      id TEXT PRIMARY KEY NOT NULL,
+      age INTEGER NOT NULL,
+      sex TEXT NOT NULL,
+      height_cm REAL NOT NULL,
+      weight_kg REAL NOT NULL,
+      activity_level TEXT NOT NULL,
+      goal_type TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS migrations_meta (
       id TEXT PRIMARY KEY NOT NULL,
       applied_at INTEGER NOT NULL
@@ -948,3 +959,81 @@ export async function dbSetDailyGoals(goals: Partial<DailyGoals>): Promise<Daily
 
   return updated;
 }
+
+// -------------------------------------------------------------
+// USER PROFILE REPOSITORY
+// -------------------------------------------------------------
+
+export interface UserProfileData {
+  id: string;
+  age: number;
+  sex: 'male' | 'female';
+  heightCm: number;
+  weightKg: number;
+  activityLevel: 'sedentary' | 'light' | 'moderate' | 'very_active' | 'extra_active';
+  goalType: 'cut' | 'maintain' | 'bulk';
+  updatedAt: string;
+}
+
+export async function dbGetUserProfile(): Promise<UserProfileData | null> {
+  const db = await getDatabase();
+  const row = await db.getFirstAsync<{
+    id: string;
+    age: number;
+    sex: string;
+    height_cm: number;
+    weight_kg: number;
+    activity_level: string;
+    goal_type: string;
+    updated_at: string;
+  }>('SELECT * FROM user_profile WHERE id = ?', ['default']);
+
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    age: row.age,
+    sex: row.sex as 'male' | 'female',
+    heightCm: row.height_cm,
+    weightKg: row.weight_kg,
+    activityLevel: row.activity_level as UserProfileData['activityLevel'],
+    goalType: row.goal_type as UserProfileData['goalType'],
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function dbUpsertUserProfile(
+  profile: Omit<UserProfileData, 'id' | 'updatedAt'> & { id?: string; updatedAt?: string }
+): Promise<UserProfileData> {
+  const db = await getDatabase();
+  const id = profile.id || 'default';
+  const updatedAt = profile.updatedAt || new Date().toISOString();
+
+  await db.runAsync(
+    `INSERT OR REPLACE INTO user_profile (
+      id, age, sex, height_cm, weight_kg, activity_level, goal_type, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      profile.age,
+      profile.sex,
+      profile.heightCm,
+      profile.weightKg,
+      profile.activityLevel,
+      profile.goalType,
+      updatedAt,
+    ]
+  );
+
+  return {
+    id,
+    age: profile.age,
+    sex: profile.sex,
+    heightCm: profile.heightCm,
+    weightKg: profile.weightKg,
+    activityLevel: profile.activityLevel,
+    goalType: profile.goalType,
+    updatedAt,
+  };
+}
+

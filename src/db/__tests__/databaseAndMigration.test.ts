@@ -7,6 +7,8 @@ import {
   dbGetAllScannedProducts,
   dbGetAllWorkouts,
   dbGetDailyGoals,
+  dbGetUserProfile,
+  dbUpsertUserProfile,
   dbGetMealsByDate,
   dbGetProductSummaries,
   dbGetScannedProductById,
@@ -59,6 +61,7 @@ describe('SQLite Data Layer & Repository Tests', () => {
     expect(tableNames).toContain('sets');
     expect(tableNames).toContain('scanned_products');
     expect(tableNames).toContain('daily_goals');
+    expect(tableNames).toContain('user_profile');
     expect(tableNames).toContain('migrations_meta');
 
     const indexes = await db.getAllAsync<{ name: string }>(
@@ -268,6 +271,47 @@ describe('SQLite Data Layer & Repository Tests', () => {
     const refreshed = await dbGetDailyGoals();
     expect(refreshed.calorieTarget).toBe(2500);
     expect(refreshed.proteinTargetGrams).toBe(180);
+  });
+
+  it('manages user profile persistence correctly', async () => {
+    const initial = await dbGetUserProfile();
+    expect(initial).toBeNull();
+
+    const created = await dbUpsertUserProfile({
+      age: 28,
+      sex: 'male',
+      heightCm: 178,
+      weightKg: 76,
+      activityLevel: 'moderate',
+      goalType: 'cut',
+    });
+
+    expect(created.id).toBe('default');
+    expect(created.age).toBe(28);
+    expect(created.sex).toBe('male');
+    expect(created.heightCm).toBe(178);
+    expect(created.weightKg).toBe(76);
+    expect(created.activityLevel).toBe('moderate');
+    expect(created.goalType).toBe('cut');
+
+    const fetched = await dbGetUserProfile();
+    expect(fetched).not.toBeNull();
+    expect(fetched?.weightKg).toBe(76);
+    expect(fetched?.goalType).toBe('cut');
+
+    // Update weight and goal
+    await dbUpsertUserProfile({
+      age: 28,
+      sex: 'male',
+      heightCm: 178,
+      weightKg: 74,
+      activityLevel: 'moderate',
+      goalType: 'maintain',
+    });
+
+    const updated = await dbGetUserProfile();
+    expect(updated?.weightKg).toBe(74);
+    expect(updated?.goalType).toBe('maintain');
   });
 });
 

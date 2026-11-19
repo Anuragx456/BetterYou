@@ -131,6 +131,20 @@ export const dailyGoals = sqliteTable('daily_goals', {
 });
 
 /**
+ * User Profile Table (for BMR, TDEE, and personalized nutrition targets)
+ */
+export const userProfile = sqliteTable('user_profile', {
+  id: text('id').primaryKey(), // 'default'
+  age: integer('age').notNull(),
+  sex: text('sex').notNull(), // 'male' | 'female'
+  heightCm: real('height_cm').notNull(),
+  weightKg: real('weight_kg').notNull(),
+  activityLevel: text('activity_level').notNull(), // 'sedentary' | 'light' | 'moderate' | 'very_active' | 'extra_active'
+  goalType: text('goal_type').notNull(), // 'cut' | 'maintain' | 'bulk'
+  updatedAt: text('updated_at').notNull(), // ISO-8601 string
+});
+
+/**
  * Migrations Metadata Table (for tracking one-time migrations)
  */
 export const migrationsMeta = sqliteTable('migrations_meta', {
@@ -164,3 +178,6 @@ export type InsertScannedProductRecord = typeof scannedProducts.$inferInsert;
 
 export type DailyGoalsRecord = typeof dailyGoals.$inferSelect;
 export type InsertDailyGoalsRecord = typeof dailyGoals.$inferInsert;
+
+export type UserProfileRecord = typeof userProfile.$inferSelect;
+export type InsertUserProfileRecord = typeof userProfile.$inferInsert;
