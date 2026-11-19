@@ -1,0 +1,56 @@
+appId: com.betteryou.app
+---
+# Flow 2: Golden Path - Workout Session & History
+# 1. Launch app
+- launchApp:
+    clearState: false
+
+# Handle onboarding tour if first launch
+- runFlow:
+    when:
+      visible: "Get Started"
+    commands:
+      - tapOn: "Get Started"
+- runFlow:
+    when:
+      visible: "Skip"
+    commands:
+      - tapOn: "Skip"
+
+# 2. Navigate to Workouts tab
+- tapOn: "Workouts"
+- assertVisible: "Workouts"
+
+# 3. Start an empty workout session
+- tapOn: "Start Empty Workout"
+
+# 4. Verify Active Workout view is visible
+- assertVisible: "Active Workout"
+- assertVisible: "Add Exercise"
+
+# 5. Add an exercise
+- tapOn: "Add Exercise"
+- runFlow:
+    when:
+      visible: "Barbell Bench Press"
+    commands:
+      - tapOn: "Barbell Bench Press"
+
+# 6. Complete set 1
+- runFlow:
+    when:
+      visible: "60"
+    commands:
+      - tapOn: "60"
+
+# 7. Finish session
+- tapOn: "Finish Session"
+- runFlow:
+    when:
+      visible: "Finish"
+    commands:
+      - tapOn: "Finish"
+
+# 8. Assert return to workouts history
+- assertVisible: "Workouts"
+- assertVisible: "PAST WORKOUTS"

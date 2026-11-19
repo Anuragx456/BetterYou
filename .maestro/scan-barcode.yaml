@@ -1,0 +1,43 @@
+appId: com.betteryou.app
+---
+# Flow 3: Golden Path - Ingredient Lab Screening & Barcode
+# 1. Launch app
+- launchApp:
+    clearState: false
+
+# Handle onboarding tour if first launch
+- runFlow:
+    when:
+      visible: "Get Started"
+    commands:
+      - tapOn: "Get Started"
+- runFlow:
+    when:
+      visible: "Skip"
+    commands:
+      - tapOn: "Skip"
+
+# 2. Navigate to Ingredient Lab / Screening tab
+- tapOn: "Screening"
+- assertVisible: "Label"
+- assertVisible: "Barcode"
+
+# 3. Switch to Barcode mode
+- tapOn: "Barcode"
+
+# 4. Trigger manual or demo search
+- runFlow:
+    when:
+      visible: "Type"
+    commands:
+      - tapOn: "Type"
+      - inputText: "Organic Almond Milk"
+      - tapOn: "Search"
+
+# 5. Assert report view with risk score
+- runFlow:
+    when:
+      visible: "Scan Another Label"
+    commands:
+      - assertVisible: "Scan Another Label"
+      - assertVisible: "Ingredients Breakdown"

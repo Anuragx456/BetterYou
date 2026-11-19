@@ -1,0 +1,57 @@
+appId: com.betteryou.app
+---
+# Flow 1: Golden Path - Log Meal & Verify Dashboard
+# 1. Launch app
+- launchApp:
+    clearState: false
+
+# Handle onboarding tour if first launch
+- runFlow:
+    when:
+      visible: "Get Started"
+    commands:
+      - tapOn: "Get Started"
+- runFlow:
+    when:
+      visible: "Skip"
+    commands:
+      - tapOn: "Skip"
+
+# 2. Navigate to Meal Vision tab
+- tapOn: "Meal AI"
+
+# 3. Enter meal via manual / type modal or capture
+- runFlow:
+    when:
+      visible: "Log Meal Manually"
+    commands:
+      - tapOn: "Log Meal Manually"
+
+- runFlow:
+    when:
+      visible: "Type"
+    commands:
+      - tapOn: "Type"
+
+# 4. Fill in meal details
+- runFlow:
+    when:
+      visible: "Type Meal"
+    commands:
+      - tapOn: "Direct Numbers"
+      - tapOn: "e.g. Scrambled Eggs & Toast"
+      - inputText: "Grilled Chicken & Rice"
+      - tapOn: "500"
+      - inputText: "650"
+      - tapOn: "Log Meal"
+
+# 5. Verify macro verification card renders
+- assertVisible: "Log to Today"
+
+# 6. Save meal to today's log
+- tapOn: "Log to Today"
+
+# 7. Return to Dashboard and assert updated log
+- tapOn: "Dashboard"
+- assertVisible: "Dashboard"
+- assertVisible: "TODAY'S CALORIES"
