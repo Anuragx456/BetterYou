@@ -52,7 +52,14 @@ describe('AI Vision Service Hardening (aiVisionService.ts)', () => {
     it('serves a repeated meal photo from the persisted cache without a second fetch', async () => {
       const originalFetch = globalThis.fetch;
       let calls = 0;
-      globalThis.fetch = (async () => {
+      globalThis.fetch = (async (input: RequestInfo | URL) => {
+        const urlStr = String(input);
+        if (urlStr.includes('/v1/devices/register')) {
+          return new Response(
+            JSON.stringify({ deviceId: 'test_dev_cache', deviceSecret: 'c'.repeat(64) }),
+            { status: 201, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
         calls += 1;
         const body = {
           text: JSON.stringify({
@@ -114,6 +121,64 @@ describe('AI Vision Service Hardening (aiVisionService.ts)', () => {
       });
       expect(retriedReport.productName).toBe('Bajaj Almond Drops Non-Sticky Hair Oil');
       expect(retriedReport.category).toBe('Hair Care');
+    });
+
+    it('uses the model selected in settings for product screening analysis and isolates cache across models', async () => {
+      const { useSettingsStore } = await import('../../store/useSettingsStore');
+      const originalFetch = globalThis.fetch;
+      const requestedModels: string[] = [];
+
+      globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+        let sentModel = 'unknown';
+        if (init?.body) {
+          try {
+            const parsedBody = JSON.parse(String(init.body));
+            sentModel = parsedBody.model || 'unknown';
+          } catch {
+            // ignore
+          }
+        }
+        requestedModels.push(sentModel);
+
+        const body = {
+          text: JSON.stringify({
+            productName: 'Screened Green Tea',
+            category: 'Food & Beverages',
+            allIngredients: ['Green Tea Leaves'],
+            harmfulIngredients: [],
+            overallSafetyScore: 95,
+            cleanSummary: 'Pure clean green tea.',
+          }),
+          usedModel: sentModel,
+        };
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as unknown as typeof fetch;
+
+      try {
+        const testImage = 'B'.repeat(600);
+
+        // 1. Scan with Default Model (gemini-3.6-flash)
+        useSettingsStore.getState().setSelectedModel('gemini-3.6-flash');
+        const report1 = await analyzeIngredientsImage(testImage);
+        expect(report1.generatedBy).toBe('gemini-3.6-flash');
+        expect(requestedModels[0]).toBe('gemini-3.6-flash');
+
+        // 2. User switches to Gemini 3.5 Flash Lite in Settings
+        useSettingsStore.getState().setSelectedModel('gemini-3.5-flash-lite');
+
+        // 3. Scan same item under new model: must invoke the new model, NOT return stale gemini-3.6-flash cache
+        const report2 = await analyzeIngredientsImage(testImage);
+        expect(report2.generatedBy).toBe('gemini-3.5-flash-lite');
+        expect(requestedModels[1]).toBe('gemini-3.5-flash-lite');
+
+        // Restore default
+        useSettingsStore.getState().resetSettings();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
     });
   });
 });

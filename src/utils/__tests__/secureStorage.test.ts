@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  computeHmacSha256Hex,
+  computeRequestHmac,
+  computeSha256Hex,
   deleteSecureItem,
   getOrCreateDeviceId,
   getOrCreateDeviceSecret,
@@ -8,6 +11,7 @@ import {
   SECURE_KEYS,
   setSecureItem,
 } from '../secureStorage';
+import { createHmac } from 'crypto';
 
 describe('Secure Storage & Device Signing Utilities', () => {
   it('correctly persists and retrieves secure items in fallback memory store', async () => {
@@ -37,8 +41,27 @@ describe('Secure Storage & Device Signing Utilities', () => {
     const secret2 = await getOrCreateDeviceSecret();
 
     expect(typeof secret1).toBe('string');
-    expect(secret1.length).toBeGreaterThan(10);
+    expect(secret1.length).toBe(64);
     expect(secret1).toBe(secret2);
+  });
+
+  it('produces a stable, verifiable HMAC for a fixed test secret/body/timestamp', async () => {
+    const testSecret = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+    const method = 'POST';
+    const path = '/v1/vision/analyze';
+    const timestamp = 1700000000000;
+    const body = JSON.stringify({ prompt: 'test food scan', imageBase64: 'abc123xyz' });
+
+    // Client calculation
+    const clientHmac = await computeRequestHmac(testSecret, method, path, timestamp, body);
+
+    // Expected independent server HMAC
+    const expectedBodyHash = await computeSha256Hex(body);
+    const canonical = `${method}\n${path}\n${timestamp}\n${expectedBodyHash}`;
+    const expectedHmac = createHmac('sha256', testSecret).update(canonical).digest('hex');
+
+    expect(clientHmac).toBe(expectedHmac);
+    expect(clientHmac.length).toBe(64);
   });
 
   it('generates valid signed device headers for request authentication', async () => {
@@ -51,6 +74,6 @@ describe('Secure Storage & Device Signing Utilities', () => {
     const timestampNum = parseInt(headers['x-timestamp'], 10);
     expect(isNaN(timestampNum)).toBe(false);
     expect(Math.abs(Date.now() - timestampNum)).toBeLessThan(5000); // within 5 seconds of now
-    expect(headers['x-signature'].length).toBeGreaterThanOrEqual(32);
+    expect(headers['x-signature'].length).toBe(64); // 64 hex characters (32 bytes HMAC-SHA256)
   });
 });

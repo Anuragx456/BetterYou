@@ -36,6 +36,8 @@ yarn-error.*
 server/.env
 server/.env*
 *.env
+!.env.example
+!server/.env.example
 
 
 # typescript

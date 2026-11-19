@@ -1,94 +1,71 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
+import { createRateLimiter, RateLimiter } from './rateLimiter';
+import { createDeviceStore, DeviceStore } from './deviceStore';
+import { createAttestationVerifier } from './attestation';
 
-export interface RateLimitEntry {
-  windowStart: number;
-  count: number;
-  dailyWindowStart: number;
-  dailyCount: number;
-}
-
-// In-memory rate limiting state per device ID
-const rateLimitStore = new Map<string, RateLimitEntry>();
-const MINUTE_LIMIT = 15;
-const DAILY_LIMIT = 150;
 const REPLAY_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_PAYLOAD_BYTES = 5 * 1024 * 1024; // 5MB
 const GEMINI_FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
 
-function geminiModelsInOrder(chosenModel: string): string[] {
-  return [chosenModel, ...GEMINI_FALLBACK_MODELS.filter((model) => model !== chosenModel)];
-}
+export const rateLimiter: RateLimiter = createRateLimiter();
+export const deviceStore: DeviceStore = createDeviceStore();
+export const attestationVerifier = createAttestationVerifier();
+
+// Replay cache: signature -> timestamp
+export const seenSignatures = new Map<string, number>();
+
+// Registration rate limiter: IP/device -> count
+const registrationRateLimits = new Map<string, { count: number; windowStart: number }>();
 
 function isGeminiModelMissingMessage(message: string): boolean {
   return /not found|not supported|unknown model|invalid model|does not exist|is not available/i.test(message);
 }
 
-export function checkRateLimit(deviceId: string, now: number = Date.now()): {
-  allowed: boolean;
-  retryAfterSeconds?: number;
-  reason?: string;
-} {
-  // Periodic cleanup of stale devices older than 24h to prevent memory leaks
-  if (rateLimitStore.size > 1000) {
-    const expiredCutoff = now - 24 * 60 * 60 * 1000;
-    for (const [id, e] of rateLimitStore.entries()) {
-      if (e.dailyWindowStart < expiredCutoff) {
-        rateLimitStore.delete(id);
-      }
-    }
-  }
+function geminiModelsInOrder(chosenModel: string): string[] {
+  return [chosenModel, ...GEMINI_FALLBACK_MODELS.filter((model) => model !== chosenModel)];
+}
 
-  let entry = rateLimitStore.get(deviceId);
-  if (!entry) {
-    entry = {
-      windowStart: now,
-      count: 0,
-      dailyWindowStart: now,
-      dailyCount: 0,
-    };
-    rateLimitStore.set(deviceId, entry);
-  }
-
-  // Reset 1-minute window
-  if (now - entry.windowStart > 60 * 1000) {
-    entry.windowStart = now;
-    entry.count = 0;
-  }
-
-  // Reset 24-hour window
-  if (now - entry.dailyWindowStart > 24 * 60 * 60 * 1000) {
-    entry.dailyWindowStart = now;
-    entry.dailyCount = 0;
-  }
-
-  // Check 1-minute rate limit
-  if (entry.count >= MINUTE_LIMIT) {
-    const retryAfter = Math.ceil((60 * 1000 - (now - entry.windowStart)) / 1000);
-    return {
-      allowed: false,
-      retryAfterSeconds: Math.max(1, retryAfter),
-      reason: 'Rate limit exceeded: 15 requests per minute allowed per device.',
-    };
-  }
-
-  // Check 24-hour quota
-  if (entry.dailyCount >= DAILY_LIMIT) {
-    const retryAfter = Math.ceil((24 * 60 * 60 * 1000 - (now - entry.dailyWindowStart)) / 1000);
-    return {
-      allowed: false,
-      retryAfterSeconds: Math.max(1, retryAfter),
-      reason: 'Daily quota exceeded: 150 requests per day allowed per device.',
-    };
-  }
-
-  entry.count += 1;
-  entry.dailyCount += 1;
-  return { allowed: true };
+export function checkRateLimit(deviceId: string, now: number = Date.now()) {
+  return rateLimiter.check(deviceId, now);
 }
 
 export function resetRateLimits() {
-  rateLimitStore.clear();
+  rateLimiter.reset();
+  deviceStore.reset();
+  seenSignatures.clear();
+  registrationRateLimits.clear();
+}
+
+/**
+ * Constant-time hex signature verification to prevent timing attacks.
+ */
+export function verifySignatureConstantTime(expectedHex: string, actualHex: string): boolean {
+  if (expectedHex.length !== actualHex.length) return false;
+  try {
+    const expectedBuf = Buffer.from(expectedHex, 'hex');
+    const actualBuf = Buffer.from(actualHex, 'hex');
+    if (expectedBuf.length !== actualBuf.length) return false;
+    return timingSafeEqual(expectedBuf, actualBuf);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Computes canonical request HMAC-SHA256 signature
+ */
+export function computeCanonicalSignature(
+  secret: string,
+  method: string,
+  path: string,
+  timestamp: string | number,
+  bodyString: string = ''
+): string {
+  const bodyHash = createHash('sha256').update(bodyString).digest('hex');
+  const canonicalString = `${method.toUpperCase()}\n${path}\n${timestamp}\n${bodyHash}`;
+  return createHmac('sha256', secret).update(canonicalString).digest('hex');
 }
 
 export const app = new Hono();
@@ -106,8 +83,105 @@ app.get('/health', (c) => {
   });
 });
 
-// Device Auth & Rate-Limit Middleware for /v1/* routes
+// Device Registration Endpoint
+// Issues a random cryptographically secure per-device secret (≥32 bytes)
+app.post('/v1/devices/register', async (c) => {
+  const now = Date.now();
+
+  // 1. Configurable shared bootstrap check
+  const configuredBootstrapSecret = process.env.BOOTSTRAP_SECRET?.trim();
+  if (configuredBootstrapSecret) {
+    const incomingBootstrap =
+      c.req.header('x-bootstrap-secret') ||
+      (await c.req.raw
+        .clone()
+        .json()
+        .then((b) => b?.bootstrapSecret)
+        .catch(() => ''));
+
+    if (incomingBootstrap !== configuredBootstrapSecret) {
+      return c.json(
+        { error: 'Unauthorized: Invalid or missing registration bootstrap secret.' },
+        401
+      );
+    }
+  }
+
+  // 2. Strict Rate Limiting for Device Registration (max 5 per minute per client)
+  const clientIdentifier =
+    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+    c.req.header('cf-connecting-ip') ||
+    'local_client';
+
+  let regEntry = registrationRateLimits.get(clientIdentifier);
+  if (!regEntry || now - regEntry.windowStart > 60000) {
+    regEntry = { count: 0, windowStart: now };
+    registrationRateLimits.set(clientIdentifier, regEntry);
+  }
+
+  if (regEntry.count >= 5) {
+    c.header('Retry-After', '60');
+    return c.json(
+      { error: 'Too many device registration requests. Please wait 1 minute.' },
+      429
+    );
+  }
+  regEntry.count += 1;
+
+  // 3. Platform Attestation verification (if enabled)
+  let body: {
+    deviceId?: string;
+    platform?: 'android' | 'ios' | 'web';
+    attestationToken?: string;
+    bootstrapSecret?: string;
+  } = {};
+
+  try {
+    body = await c.req.json();
+  } catch {
+    // Body is optional
+  }
+
+  const attestationResult = await attestationVerifier.verify(
+    body.attestationToken,
+    body.deviceId || 'register'
+  );
+  if (!attestationResult.valid) {
+    return c.json(
+      { error: `Platform attestation failed: ${attestationResult.error || 'untrusted environment'}` },
+      403
+    );
+  }
+
+  // 4. Generate device ID and cryptographically secure secret (32 bytes = 64 hex chars)
+  const deviceId =
+    body.deviceId && /^[a-zA-Z0-9_-]{8,64}$/.test(body.deviceId)
+      ? body.deviceId
+      : `dev_${randomUUID ? randomUUID() : randomBytes(16).toString('hex')}`;
+
+  const secretBytes = randomBytes(32);
+  const deviceSecret = secretBytes.toString('hex');
+
+  // Register in device store (stores secret and secret hash)
+  // Crucially: never echoes or returns another device's existing secret
+  await deviceStore.registerDevice(deviceId, deviceSecret);
+
+  return c.json(
+    {
+      deviceId,
+      deviceSecret,
+      issuedAt: new Date(now).toISOString(),
+    },
+    201
+  );
+});
+
+// Device Auth & Rate-Limit Middleware for /v1/* routes (excluding /v1/devices/register)
 app.use('/v1/*', async (c, next) => {
+  if (c.req.path === '/v1/devices/register') {
+    return next();
+  }
+
   const deviceId = c.req.header('x-device-id');
   const timestampStr = c.req.header('x-timestamp');
   const signature = c.req.header('x-signature');
@@ -137,13 +211,62 @@ app.use('/v1/*', async (c, next) => {
     );
   }
 
-  // Signature minimum length validation (HMAC SHA-256 is 64 hex characters)
-  if (signature.length < 32) {
-    return c.json({ error: 'Invalid device signature format.' }, 401);
+  // Signature format: HMAC-SHA256 hex string must be exactly 64 hex characters
+  if (signature.length !== 64 || !/^[0-9a-fA-F]{64}$/.test(signature)) {
+    return c.json({ error: 'Invalid device signature format (must be 64 hex characters).' }, 401);
   }
 
+  // Replay check: reject already-seen signatures
+  if (seenSignatures.has(signature)) {
+    return c.json(
+      { error: 'Replay attack detected: request signature has already been used.' },
+      401
+    );
+  }
+
+  // Periodic pruning of seen signatures older than replay window
+  if (seenSignatures.size > 2000) {
+    const cutoff = now - REPLAY_WINDOW_MS;
+    for (const [sig, t] of seenSignatures.entries()) {
+      if (t < cutoff) {
+        seenSignatures.delete(sig);
+      }
+    }
+  }
+
+  // Lookup registered device
+  const device = await deviceStore.getDevice(deviceId);
+  if (!device) {
+    return c.json(
+      { error: 'Device not registered. Please register device via POST /v1/devices/register.' },
+      401
+    );
+  }
+
+  // Extract raw body to verify signature
+  const rawBody =
+    c.req.method === 'GET' || c.req.method === 'HEAD'
+      ? ''
+      : await c.req.raw.clone().text().catch(() => '');
+
+  const expectedSignature = computeCanonicalSignature(
+    device.secret,
+    c.req.method,
+    c.req.path,
+    timestampStr,
+    rawBody
+  );
+
+  const isValid = verifySignatureConstantTime(expectedSignature, signature);
+  if (!isValid) {
+    return c.json({ error: 'Invalid device signature: verification failed.' }, 401);
+  }
+
+  // Mark signature as seen for replay protection
+  seenSignatures.set(signature, now);
+
   // Enforce device rate limits
-  const rateResult = checkRateLimit(deviceId, now);
+  const rateResult = await rateLimiter.check(deviceId, now);
   if (!rateResult.allowed) {
     c.header('Retry-After', String(rateResult.retryAfterSeconds ?? 60));
     return c.json(
