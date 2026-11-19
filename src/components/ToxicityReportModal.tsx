@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { recalculateToxicityReport } from '../services/barcodeService';
 import { getFullImageUri } from '../utils/imageManager';
 import { useFitnessStore } from '../store/useFitnessStore';
+import { getModelDisplayName } from '../store/useSettingsStore';
 import type { ThemeColors } from '../theme/colors';
 import { useThemeColors, useThemedStyles } from '../theme/theme';
 import {
@@ -209,7 +210,7 @@ export function ToxicityReportModal({
             <View style={styles.provenanceVerifiedBadge}>
               <Ionicons name="scan-outline" size={13} color={colors.primary} />
               <Text style={styles.provenanceVerifiedText}>
-                AI Vision Analyzed ({report.generatedBy || 'Multimodal'})
+                AI Vision Analyzed ({getModelDisplayName(report.generatedBy) || report.generatedBy || 'Multimodal'})
               </Text>
             </View>
           )}

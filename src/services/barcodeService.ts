@@ -1137,6 +1137,9 @@ export function recalculateToxicityReport(
   if (originalReport?.barcode) {
     newReport.barcode = originalReport.barcode;
   }
+  if (originalReport?.generatedBy) {
+    newReport.generatedBy = originalReport.generatedBy;
+  }
   newReport.allIngredients = cleanIngredients;
 
   return newReport;

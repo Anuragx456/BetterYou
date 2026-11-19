@@ -110,6 +110,7 @@ export interface SettingsState {
   isCustomModel: boolean;
   customModelName: string;
   colorScheme: ColorScheme;
+  hasCompletedOnboarding: boolean;
 
   // Actions
   setCustomApiKey: (key: string) => void;
@@ -118,7 +119,19 @@ export interface SettingsState {
   setIsCustomModel: (isCustom: boolean) => void;
   setCustomModelName: (modelName: string) => void;
   setColorScheme: (scheme: ColorScheme) => void;
+  setHasCompletedOnboarding: (completed: boolean) => void;
   resetSettings: () => void;
+}
+
+/**
+ * Invalidate vision and screening caches when model selection changes
+ */
+function invalidateVisionCaches() {
+  import('../services/aiVisionService')
+    .then((vision) => {
+      vision.clearAiVisionCaches();
+    })
+    .catch(() => {});
 }
 
 /**
@@ -133,10 +146,12 @@ export const useSettingsStore = create<SettingsState>()(
       isCustomModel: false,
       customModelName: '',
       colorScheme: 'light',
+      hasCompletedOnboarding: false,
 
       setCustomApiKey: (key: string) => {
         const trimmed = key.trim();
         set({ customApiKey: trimmed });
+        invalidateVisionCaches();
         if (trimmed) {
           setSecureItem(SECURE_KEYS.GEMINI_API_KEY, trimmed);
         } else {
@@ -146,23 +161,31 @@ export const useSettingsStore = create<SettingsState>()(
 
       clearCustomApiKey: () => {
         set({ customApiKey: '' });
+        invalidateVisionCaches();
         deleteSecureItem(SECURE_KEYS.GEMINI_API_KEY);
       },
 
       setSelectedModel: (modelId: string) => {
         set({ selectedModel: modelId, isCustomModel: false });
+        invalidateVisionCaches();
       },
 
       setIsCustomModel: (isCustom: boolean) => {
         set({ isCustomModel: isCustom });
+        invalidateVisionCaches();
       },
 
       setCustomModelName: (modelName: string) => {
         set({ customModelName: modelName.trim(), isCustomModel: true });
+        invalidateVisionCaches();
       },
 
       setColorScheme: (scheme) => {
         set({ colorScheme: scheme });
+      },
+
+      setHasCompletedOnboarding: (completed: boolean) => {
+        set({ hasCompletedOnboarding: completed });
       },
 
       resetSettings: () => {
@@ -173,6 +196,7 @@ export const useSettingsStore = create<SettingsState>()(
           isCustomModel: false,
           customModelName: '',
         });
+        invalidateVisionCaches();
       },
     }),
     {
@@ -184,6 +208,7 @@ export const useSettingsStore = create<SettingsState>()(
         isCustomModel: state.isCustomModel,
         customModelName: state.customModelName,
         colorScheme: state.colorScheme,
+        hasCompletedOnboarding: state.hasCompletedOnboarding,
       }),
       onRehydrateStorage: () => () => {
         // Hydrate custom API key from secure hardware-backed storage
@@ -259,6 +284,14 @@ export function getEffectiveModel(): string {
  */
 export function getActiveModelDisplayName(): string {
   const modelId = getEffectiveModel();
+  return getModelDisplayName(modelId);
+}
+
+/**
+ * Returns human-readable label for any given model identifier
+ */
+export function getModelDisplayName(modelId?: string): string {
+  if (!modelId) return '';
   const found = AVAILABLE_GEMINI_MODELS.find((m) => m.id === modelId);
   if (found) {
     return found.name;

@@ -24,6 +24,11 @@ import { createBarcodeScanGuard } from '../../utils/barcodeScanGuard';
 import { useOnDemandComponent } from '../../utils/useOnDemandComponent';
 import { useFitnessStore } from '../../store/useFitnessStore';
 import { safeHaptics } from '../../utils/haptics';
+import {
+  getActiveModelDisplayName,
+  getModelDisplayName,
+  useSettingsStore,
+} from '../../store/useSettingsStore';
 import type { ThemeColors } from '../../theme/colors';
 import { useThemeColors, useThemedStyles } from '../../theme/theme';
 import {
@@ -63,6 +68,10 @@ export default function ToxicityScanScreen() {
   const router = useRouter();
   const [isFocused, setIsFocused] = useState<boolean>(true);
   const addScannedProduct = useFitnessStore((state) => state.addScannedProduct);
+  // Re-render when active model settings change
+  useSettingsStore((state) => state.selectedModel);
+  useSettingsStore((state) => state.customModelName);
+  const activeModelName = getActiveModelDisplayName();
 
   useFocusEffect(
     useCallback(() => {
@@ -440,7 +449,7 @@ export default function ToxicityScanScreen() {
             <View style={styles.provenanceVerifiedBadge}>
               <Ionicons name="shield-checkmark" size={13} color={colors.primary} />
               <Text style={styles.provenanceVerifiedText}>
-                AI Forensic Analysis ({report.generatedBy || 'Multimodal'})
+                AI Forensic Analysis ({getModelDisplayName(report.generatedBy) || report.generatedBy || activeModelName})
               </Text>
             </View>
           )}
@@ -866,6 +875,18 @@ export default function ToxicityScanScreen() {
             </View>
 
             <Pressable
+              style={({ pressed }) => [styles.activeModelViewfinderPill, pressed && styles.pressed]}
+              onPress={() => router.push('/(tabs)/settings')}
+              accessibilityRole="button"
+              accessibilityLabel={`AI model: ${activeModelName}. Tap to change in settings.`}
+            >
+              <Ionicons name="sparkles" size={11} color={colors.primary} />
+              <Text style={styles.activeModelViewfinderText} numberOfLines={1}>
+                {activeModelName}
+              </Text>
+            </Pressable>
+
+            <Pressable
               style={({ pressed }) => [
                 styles.topIconBtn,
                 enableTorch && styles.topIconBtnActive,
@@ -1040,6 +1061,23 @@ function createStyles(colors: ThemeColors) {
     borderRadius: 16,
     padding: 3,
     gap: 4,
+  },
+  activeModelViewfinderPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    minHeight: 40,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    maxWidth: 150,
+  },
+  activeModelViewfinderText: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: '700',
   },
   scanModeBtn: {
     flex: 1,

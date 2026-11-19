@@ -528,7 +528,7 @@ async function attemptRepairRetry<T>(
   base64Image: string,
   responseSchema: Record<string, unknown>,
   validator: (raw: unknown) => { success: boolean; data?: T }
-): Promise<T | null> {
+): Promise<{ data: T; usedModel: string } | null> {
   try {
     const repairPrompt = `Your previous JSON response was malformed or failed validation constraints:
 Validation Error: ${zodError}
@@ -538,7 +538,7 @@ ${rawText.slice(0, 400)}
 Please output strictly valid JSON conforming to this specification:
 ${schemaPrompt}`;
 
-    const { text: repairedJson } = await callGeminiVision(repairPrompt, base64Image, {
+    const { text: repairedJson, usedModel } = await callGeminiVision(repairPrompt, base64Image, {
       responseSchema,
       timeoutMs: 25000,
       maxRetries: 1,
@@ -547,7 +547,7 @@ ${schemaPrompt}`;
     const parsedJson = JSON.parse(repairedJson);
     const validated = validator(parsedJson);
     if (validated.success && validated.data) {
-      return validated.data;
+      return { data: validated.data, usedModel };
     }
   } catch {
     // Repair failed, proceed to manual fallback
@@ -662,7 +662,8 @@ export async function analyzeMealImage(
   }
 
   // 1. Check Image Hash Cache (0 network requests on repeated photo analysis)
-  const imageSig = options?.imageHash || computeImageSignature(base64Image);
+  const chosenModel = getEffectiveModel();
+  const imageSig = `${options?.imageHash || computeImageSignature(base64Image)}::model:${chosenModel}`;
   const cached = mealImageHashCache.get(imageSig);
   if (cached && Date.now() - cached.timestamp < SCAN_CACHE_TTL_MS) {
     return cached.result;
@@ -679,7 +680,7 @@ Ensure estimates are thermodynamically plausible (4*P + 4*C + 9*F ≈ calories).
 Return a valid JSON object matching the response schema.`;
 
   let parsed: RawMealAnalysisAiOutput | null = null;
-  let usedModelName = 'gemini-3.6-flash';
+  let usedModelName = chosenModel;
 
   try {
     const { text: rawJson, usedModel } = await callGeminiVision(prompt, base64Image, {
@@ -693,7 +694,7 @@ Return a valid JSON object matching the response schema.`;
         }
       },
     });
-    usedModelName = usedModel;
+    usedModelName = usedModel || chosenModel;
 
     let jsonParsed: unknown;
     try {
@@ -708,7 +709,7 @@ Return a valid JSON object matching the response schema.`;
     } else {
       // Attempt ONE repair retry
       const repairError = zodResult.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', ');
-      parsed = await attemptRepairRetry<RawMealAnalysisAiOutput>(
+      const repaired = await attemptRepairRetry<RawMealAnalysisAiOutput>(
         rawJson,
         repairError,
         JSON.stringify(GEMINI_MEAL_RESPONSE_SCHEMA),
@@ -716,6 +717,10 @@ Return a valid JSON object matching the response schema.`;
         GEMINI_MEAL_RESPONSE_SCHEMA,
         (raw) => MealAnalysisAiSchema.safeParse(raw)
       );
+      if (repaired) {
+        parsed = repaired.data;
+        usedModelName = repaired.usedModel || usedModelName;
+      }
     }
   } catch (err: unknown) {
     // If network failure and image path available, queue for retry
@@ -792,9 +797,10 @@ export async function analyzeIngredientsImage(
     throw new Error('No image data was provided for ingredient analysis. Please take a photo or choose from gallery.');
   }
 
-  // 1. Check Image Hash Cache FIRST (incorporating productNameHint to avoid returning mismatched previous scan)
+  // 1. Check Image Hash Cache FIRST (incorporating productNameHint and chosen model to avoid returning mismatched previous scan)
+  const chosenModel = getEffectiveModel();
   const imageSig =
-    (options?.imageHash || computeImageSignature(base64Image)) +
+    `${options?.imageHash || computeImageSignature(base64Image)}::model:${chosenModel}` +
     (options?.productNameHint ? `::hint:${options.productNameHint.trim().toLowerCase()}` : '');
   const cachedImage = toxicityImageHashCache.get(imageSig);
   if (cachedImage && Date.now() - cachedImage.timestamp < SCAN_CACHE_TTL_MS) {
@@ -818,7 +824,7 @@ Detect all printed ingredients, INS/E-number additives, and deceptive Indian for
 Return a valid JSON object strictly matching the response schema.`;
 
   let parsed: RawToxicityAiOutput | null = null;
-  let usedModelName = 'gemini-3.6-flash';
+  let usedModelName = chosenModel;
 
   try {
     const { text: rawJson, usedModel } = await callGeminiVision(prompt, base64Image, {
@@ -832,7 +838,7 @@ Return a valid JSON object strictly matching the response schema.`;
         }
       },
     });
-    usedModelName = usedModel;
+    usedModelName = usedModel || chosenModel;
 
     let jsonParsed: unknown;
     try {
@@ -847,7 +853,7 @@ Return a valid JSON object strictly matching the response schema.`;
     } else {
       // Attempt ONE repair retry
       const repairError = zodResult.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', ');
-      parsed = await attemptRepairRetry<RawToxicityAiOutput>(
+      const repaired = await attemptRepairRetry<RawToxicityAiOutput>(
         rawJson,
         repairError,
         JSON.stringify(GEMINI_TOXICITY_RESPONSE_SCHEMA),
@@ -855,6 +861,10 @@ Return a valid JSON object strictly matching the response schema.`;
         GEMINI_TOXICITY_RESPONSE_SCHEMA,
         (raw) => ToxicityAnalysisAiSchema.safeParse(raw)
       );
+      if (repaired) {
+        parsed = repaired.data;
+        usedModelName = repaired.usedModel || usedModelName;
+      }
     }
   } catch (err: unknown) {
     // If network failure, enqueue for background retry
@@ -888,8 +898,8 @@ Return a valid JSON object strictly matching the response schema.`;
       ? parsed.allIngredients
       : parsed.harmfulIngredients.map((h) => h.name).filter(Boolean);
 
-  // Check Text Fingerprint Cache
-  const fingerprint = computeScanFingerprint(detectedName, detectedIngredients);
+  // Check Text Fingerprint Cache (scoped by selected model)
+  const fingerprint = `${computeScanFingerprint(detectedName, detectedIngredients)}::model:${chosenModel}`;
   const cachedFingerprint = toxicityScanCache.get(fingerprint);
   if (cachedFingerprint && Date.now() - cachedFingerprint.timestamp < SCAN_CACHE_TTL_MS) {
     return cachedFingerprint.report;
@@ -1276,6 +1286,7 @@ export async function analyzeProductText(
   productName: string,
   ingredientsText?: string
 ): Promise<ToxicityReport> {
+  const chosenModel = getEffectiveModel();
   const cleanName = productName.trim() || 'Custom Product';
   const rawIngredients = (ingredientsText || '')
     .split(/[,;\n]+/)
@@ -1284,7 +1295,7 @@ export async function analyzeProductText(
 
   if (rawIngredients.length > 0) {
     let baseReport = recalculateToxicityReport(cleanName, rawIngredients);
-    baseReport.generatedBy = 'manual-input-recalculation';
+    baseReport.generatedBy = chosenModel;
 
     try {
       const prompt = `You are an expert consumer safety and regulatory compliance specialist evaluating Indian supermarket products.
@@ -1305,9 +1316,10 @@ Return ONLY a valid JSON object matching the requested schema.`;
       if (parsed.indianMarketAlert) baseReport.indianMarketAlert = parsed.indianMarketAlert;
       if (parsed.cleanSummary) baseReport.cleanSummary = parsed.cleanSummary;
       if (parsed.category) baseReport.category = parsed.category;
-      baseReport.generatedBy = usedModel;
+      baseReport.generatedBy = usedModel || chosenModel;
     } catch {
-      // Keep deterministic report
+      // Keep deterministic report with active model
+      baseReport.generatedBy = chosenModel;
     }
     return baseReport;
   }
@@ -1383,12 +1395,14 @@ Return ONLY a valid JSON object matching the requested schema.`;
 
     if (parsed.indianMarketAlert) baseReport.indianMarketAlert = parsed.indianMarketAlert;
     if (parsed.cleanSummary) baseReport.cleanSummary = parsed.cleanSummary;
-    baseReport.generatedBy = usedModel;
+    baseReport.generatedBy = usedModel || chosenModel;
 
     return baseReport;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[aiVisionService] analyzeProductText error: ${message}`);
-    return recalculateToxicityReport(cleanName, [cleanName]);
+    const fallback = recalculateToxicityReport(cleanName, [cleanName]);
+    fallback.generatedBy = chosenModel;
+    return fallback;
   }
 }

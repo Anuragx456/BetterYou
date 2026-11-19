@@ -27,6 +27,7 @@ import {
 } from '../store/useSettingsStore';
 import type { ThemeColors } from '../theme/colors';
 import { useThemeColors, useThemedStyles } from '../theme/theme';
+import { safeHaptics } from '../utils/haptics';
 
 const GOOGLE_AI_STUDIO_URL = 'https://aistudio.google.com/app/apikey';
 
@@ -150,6 +151,7 @@ export default function AiSettingsScreen() {
 
   const handleSelectModel = useCallback(
     (model: GeminiModelOption) => {
+      safeHaptics.selection();
       setSelectedModel(model.id);
       setIsCustomModel(false);
     },
@@ -160,9 +162,11 @@ export default function AiSettingsScreen() {
     Keyboard.dismiss();
     const cleaned = customModelInput.trim();
     if (!cleaned) {
+      safeHaptics.warning();
       Alert.alert('Model Required', 'Please enter a valid model identifier.');
       return;
     }
+    safeHaptics.success();
     setCustomModelName(cleaned);
     setIsCustomModel(true);
   }, [customModelInput, setCustomModelName, setIsCustomModel]);

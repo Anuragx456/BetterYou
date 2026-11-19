@@ -314,5 +314,25 @@ describe('Store Logic Tests (useFitnessStore & useSettingsStore)', () => {
       expect(useSettingsStore.getState().selectedModel).toBe('gemini-3.6-flash');
       expect(useSettingsStore.getState().isCustomModel).toBe(false);
     });
+
+    it('tracks onboarding completion flag', () => {
+      const store = useSettingsStore.getState();
+      expect(store.hasCompletedOnboarding).toBe(false);
+
+      store.setHasCompletedOnboarding(true);
+      expect(useSettingsStore.getState().hasCompletedOnboarding).toBe(true);
+
+      store.setHasCompletedOnboarding(false);
+      expect(useSettingsStore.getState().hasCompletedOnboarding).toBe(false);
+    });
+
+    it('resolves human-readable model display names', async () => {
+      const { getModelDisplayName } = await import('../useSettingsStore');
+      expect(getModelDisplayName('gemini-3.6-flash')).toBe('Gemini 3.6 Flash');
+      expect(getModelDisplayName('gemini-3.5-flash-lite')).toBe('Gemini 3.5 Flash Lite');
+      expect(getModelDisplayName('gemini-2.5-flash')).toBe('Gemini 2.5 Flash');
+      expect(getModelDisplayName('custom-fine-tuned-v1')).toBe('custom-fine-tuned-v1');
+      expect(getModelDisplayName('')).toBe('');
+    });
   });
 });
