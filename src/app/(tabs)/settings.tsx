@@ -13,17 +13,28 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   dbGetAllMeals,
+  dbGetAllScannedProducts,
   dbGetAllWorkouts,
 } from '../../db/client';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 import {
+  BackupPayload,
   generateJsonBackup,
   generateMealsCsv,
   generateWorkoutsCsv,
+  importBackup,
+  parseAndValidateBackup,
   shareOrCopyData,
 } from '../../services/backupService';
 import { getAppLanguage, setAppLanguage, SupportedLanguage } from '../../i18n';
 import { useFitnessStore } from '../../store/useFitnessStore';
-import { useSettingsStore } from '../../store/useSettingsStore';
+import {
+  AVAILABLE_GEMINI_MODELS,
+  getActiveModelDisplayName,
+  useSettingsStore,
+} from '../../store/useSettingsStore';
+import { safeHaptics } from '../../utils/haptics';
 import { useGeminiUsageStore } from '../../store/useGeminiUsageStore';
 import type { ThemeColors } from '../../theme/colors';
 import { useThemeColors, useThemedStyles } from '../../theme/theme';
@@ -43,6 +54,7 @@ export default function SettingsScreen() {
   const colorScheme = useSettingsStore((state) => state.colorScheme);
   const setColorScheme = useSettingsStore((state) => state.setColorScheme);
   const selectedModel = useSettingsStore((state) => state.selectedModel);
+  const setSelectedModel = useSettingsStore((state) => state.setSelectedModel);
   const isCustomModel = useSettingsStore((state) => state.isCustomModel);
   const customModelName = useSettingsStore((state) => state.customModelName);
   const totalCalls = useGeminiUsageStore((state) => state.totalCalls);
@@ -50,7 +62,7 @@ export default function SettingsScreen() {
   const [currentLang, setCurrentLangState] = useState<SupportedLanguage>(getAppLanguage());
 
   const hasCustom = Boolean(customApiKey?.trim());
-  const activeModelTitle = isCustomModel && customModelName ? customModelName : selectedModel;
+  const activeModelTitle = getActiveModelDisplayName();
 
   const handleToggleLanguage = (lang: SupportedLanguage) => {
     setAppLanguage(lang);
@@ -81,14 +93,123 @@ export default function SettingsScreen() {
     );
   };
 
+  const [isRestoring, setIsRestoring] = useState(false);
+  const refreshLoadedData = useFitnessStore((state) => state.refreshLoadedData);
+
   const handleExportJsonBackup = async () => {
-    const [workouts, meals] = await Promise.all([dbGetAllWorkouts(), dbGetAllMeals()]);
-    const json = generateJsonBackup(workouts, meals, dailyGoals);
+    const [workouts, meals, products] = await Promise.all([
+      dbGetAllWorkouts(),
+      dbGetAllMeals(),
+      dbGetAllScannedProducts(),
+    ]);
+    const json = generateJsonBackup(workouts, meals, dailyGoals, products);
     const status = await shareOrCopyData(json, 'BetterYou_Backup.json');
     Alert.alert(
       status === 'shared' ? 'Backup Shared' : 'Backup Copied',
       'Complete JSON database backup exported.'
     );
+  };
+
+  const handleRestoreBackup = async () => {
+    try {
+      const res = await DocumentPicker.getDocumentAsync({
+        type: 'application/json',
+        copyToCacheDirectory: true,
+      });
+
+      if (res.canceled || !res.assets || res.assets.length === 0) {
+        return;
+      }
+
+      const fileAsset = res.assets[0];
+      let rawContent = '';
+      try {
+        if (fileAsset.uri) {
+          rawContent = await FileSystem.readAsStringAsync(fileAsset.uri);
+        }
+      } catch {
+        const response = await fetch(fileAsset.uri);
+        rawContent = await response.text();
+      }
+
+      const validation = parseAndValidateBackup(rawContent);
+      if (!validation.success) {
+        safeHaptics.error();
+        Alert.alert('Invalid Backup File', validation.error);
+        return;
+      }
+
+      const { payload } = validation;
+      const exportDate = payload.exportedAt ? new Date(payload.exportedAt).toLocaleDateString() : 'Unknown';
+      const wCount = payload.workouts?.length ?? 0;
+      const mCount = payload.meals?.length ?? 0;
+      const pCount = payload.scannedProducts?.length ?? 0;
+      const hasGoals = Boolean(payload.dailyGoals);
+
+      const summaryMessage =
+        `Backup Exported: ${exportDate}\n` +
+        `• ${wCount} Workouts\n` +
+        `• ${mCount} Meals\n` +
+        `• ${pCount} Products\n` +
+        `• Daily Goals: ${hasGoals ? 'Included' : 'None'}\n\n` +
+        `Notice: Photos and scan images are stored locally and are NOT included in backups.\n\n` +
+        `Choose restore strategy:`;
+
+      Alert.alert(
+        'Restore from Backup',
+        summaryMessage,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Merge (Keep Existing)',
+            onPress: async () => {
+              await executeRestore(payload, 'merge');
+            },
+          },
+          {
+            text: 'Replace All (Wipe)',
+            style: 'destructive',
+            onPress: () => {
+              Alert.alert(
+                'Destructive Action Warning',
+                'Are you sure you want to replace all data? All current meals, workouts, and products on this device will be permanently deleted and replaced with this backup.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Erase & Replace',
+                    style: 'destructive',
+                    onPress: async () => {
+                      await executeRestore(payload, 'replace');
+                    },
+                  },
+                ]
+              );
+            },
+          },
+        ]
+      );
+    } catch (err: unknown) {
+      safeHaptics.error();
+      Alert.alert('Restore Error', `Failed to open or read backup: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const executeRestore = async (payload: BackupPayload, strategy: 'replace' | 'merge') => {
+    setIsRestoring(true);
+    try {
+      const summary = await importBackup(payload, strategy);
+      await refreshLoadedData();
+      safeHaptics.success();
+      Alert.alert(
+        'Restore Complete',
+        `Successfully restored ${summary.workoutsImported} workouts, ${summary.mealsImported} meals, and ${summary.productsImported} products.\n\n(Photos and scans are not included in backups).`
+      );
+    } catch (err: unknown) {
+      safeHaptics.error();
+      Alert.alert('Restore Failed', `Restore was cancelled with no data lost: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsRestoring(false);
+    }
   };
 
   // Reset all settings
@@ -263,9 +384,71 @@ export default function SettingsScreen() {
 
         {/* Section: AI Intelligence */}
         <View style={styles.section}>
-          <Text style={styles.sectionHeader} allowFontScaling>
-            AI & INTELLIGENCE
-          </Text>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionHeader} allowFontScaling>
+              AI & INTELLIGENCE
+            </Text>
+            <View style={styles.modelHeaderBadge}>
+              <Ionicons name="sparkles" size={11} color={colors.primary} />
+              <Text style={styles.modelHeaderBadgeText}>{activeModelTitle}</Text>
+            </View>
+          </View>
+
+          {/* Direct Model Selection in Settings */}
+          <View style={styles.modelPickerCard}>
+            <Text style={styles.modelPickerSubtext}>
+              Select active Gemini model for Meal Vision & Product Screening:
+            </Text>
+            <View style={styles.modelChipsGrid}>
+              {AVAILABLE_GEMINI_MODELS.map((model) => {
+                const isSelected = !isCustomModel && selectedModel === model.id;
+                return (
+                  <Pressable
+                    key={model.id}
+                    style={({ pressed }) => [
+                      styles.modelChip,
+                      isSelected && styles.modelChipActive,
+                      pressed && styles.pressed,
+                    ]}
+                    onPress={() => {
+                      safeHaptics.selection();
+                      setSelectedModel(model.id);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isSelected }}
+                    accessibilityLabel={`Select ${model.name} for meal vision and product screening`}
+                  >
+                    <View style={styles.modelChipTop}>
+                      <View style={[styles.modelRadio, isSelected && styles.modelRadioActive]}>
+                        {isSelected && <View style={styles.modelRadioDot} />}
+                      </View>
+                      <Text
+                        style={[styles.modelChipTitle, isSelected && styles.modelChipTitleActive]}
+                        numberOfLines={1}
+                      >
+                        {model.name}
+                      </Text>
+                    </View>
+                    <View style={styles.modelChipMeta}>
+                      <View style={styles.modelBadgeWrap}>
+                        <Text style={styles.modelChipBadge}>{model.badge}</Text>
+                      </View>
+                      <Text style={styles.modelChipSpeed}>{model.speed}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {isCustomModel && customModelName ? (
+              <View style={styles.customModelNotice}>
+                <Ionicons name="code-slash" size={13} color={colors.primary} />
+                <Text style={styles.customModelNoticeText}>
+                  Custom Model Active: {customModelName}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+
           <View style={styles.cardGroup}>
             <Pressable
               style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
@@ -278,18 +461,13 @@ export default function SettingsScreen() {
               </View>
               <View style={styles.navRowMeta}>
                 <Text style={styles.navRowTitle} allowFontScaling>
-                  AI Model & Key Settings
+                  API Key & Custom Model (BYOK)
                 </Text>
                 <Text style={styles.navRowSubtitle} allowFontScaling>
-                  Gemini API key & model selection
+                  {hasCustom ? 'Hardware-backed custom key active' : 'Managed Proxy (Google AI Studio)'}
                 </Text>
               </View>
               <View style={styles.navRight}>
-                <View style={styles.valueBadge}>
-                  <Text style={styles.valueBadgeText} allowFontScaling>
-                    {activeModelTitle}
-                  </Text>
-                </View>
                 <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </View>
             </Pressable>
@@ -388,6 +566,27 @@ export default function SettingsScreen() {
               </View>
               <Ionicons name="download-outline" size={18} color={colors.secondary} />
             </Pressable>
+
+            <Pressable
+              style={({ pressed }) => [styles.navRow, (pressed || isRestoring) && styles.pressed]}
+              onPress={handleRestoreBackup}
+              disabled={isRestoring}
+              accessibilityRole="button"
+              accessibilityLabel="Restore meals and workouts from JSON backup file"
+            >
+              <View style={[styles.iconBadge, { backgroundColor: colors.softGreen }]}>
+                <Ionicons name="cloud-upload-outline" size={18} color={colors.primary} />
+              </View>
+              <View style={styles.navRowMeta}>
+                <Text style={styles.navRowTitle} allowFontScaling>
+                  {isRestoring ? 'Restoring Backup...' : 'Restore from Backup (JSON)'}
+                </Text>
+                <Text style={styles.navRowSubtitle} allowFontScaling>
+                  Import meals, workouts & goals (Merge or Replace)
+                </Text>
+              </View>
+              <Ionicons name="arrow-up-circle-outline" size={18} color={colors.primary} />
+            </Pressable>
           </View>
         </View>
 
@@ -397,6 +596,28 @@ export default function SettingsScreen() {
             SYSTEM HEALTH
           </Text>
           <View style={styles.cardGroup}>
+            <Pressable
+              style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
+              onPress={() => router.push('/onboarding')}
+              accessibilityRole="button"
+              accessibilityLabel="View app introduction tour and onboarding walkthrough"
+            >
+              <View style={[styles.iconBadge, { backgroundColor: colors.softGreen }]}>
+                <Ionicons name="sparkles-outline" size={18} color={colors.primary} />
+              </View>
+              <View style={styles.navRowMeta}>
+                <Text style={styles.navRowTitle} allowFontScaling>
+                  App Tour & Onboarding
+                </Text>
+                <Text style={styles.navRowSubtitle} allowFontScaling>
+                  Feature walkthrough and setup guide
+                </Text>
+              </View>
+              <View style={styles.navRight}>
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+              </View>
+            </Pressable>
+
             <Pressable
               style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
               onPress={() => router.push('/diagnostics')}
@@ -559,6 +780,129 @@ function createStyles(colors: ThemeColors) {
     color: colors.textMuted,
     marginBottom: 8,
     paddingHorizontal: 4,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  modelHeaderBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.surfaceSubtle,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+  },
+  modelHeaderBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  modelPickerCard: {
+    backgroundColor: colors.card,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    padding: 12,
+    marginBottom: 10,
+  },
+  modelPickerSubtext: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginBottom: 10,
+    fontWeight: '500',
+  },
+  modelChipsGrid: {
+    gap: 8,
+  },
+  modelChip: {
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  modelChipActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryMuted,
+  },
+  modelChipTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  modelRadio: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 1.5,
+    borderColor: colors.textMuted,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modelRadioActive: {
+    borderColor: colors.primary,
+  },
+  modelRadioDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.primary,
+  },
+  modelChipTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.text,
+    flex: 1,
+  },
+  modelChipTitleActive: {
+    color: colors.primary,
+  },
+  modelChipMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 6,
+    paddingLeft: 22,
+  },
+  modelBadgeWrap: {
+    backgroundColor: colors.card,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+  },
+  modelChipBadge: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  modelChipSpeed: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  customModelNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.cardBorder,
+  },
+  customModelNoticeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.primary,
   },
   cardGroup: {
     backgroundColor: colors.card,

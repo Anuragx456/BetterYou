@@ -24,7 +24,12 @@ class MemoryDatabaseAdapter implements DatabaseAdapter {
   };
 
   async execAsync(sql: string): Promise<void> {
-    // Basic DDL and transaction no-op for memory mock
+    const trimmed = sql.toLowerCase();
+    if (trimmed.includes('delete from meals')) this.tables.meals = [];
+    if (trimmed.includes('delete from sets')) this.tables.sets = [];
+    if (trimmed.includes('delete from exercises')) this.tables.exercises = [];
+    if (trimmed.includes('delete from workout_sessions')) this.tables.workout_sessions = [];
+    if (trimmed.includes('delete from scanned_products')) this.tables.scanned_products = [];
   }
 
   async runAsync(sql: string, params: unknown[] = []): Promise<{ rowsAffected: number; lastInsertRowId: number }> {
