@@ -112,6 +112,12 @@ export interface SettingsState {
   colorScheme: ColorScheme;
   hasCompletedOnboarding: boolean;
 
+  // Reminders (opt-in only, default disabled)
+  dailyReminderEnabled: boolean;
+  dailyReminderTime: string;
+  weeklyReviewEnabled: boolean;
+  weeklyReviewTime: string;
+
   // Actions
   setCustomApiKey: (key: string) => void;
   clearCustomApiKey: () => void;
@@ -120,6 +126,10 @@ export interface SettingsState {
   setCustomModelName: (modelName: string) => void;
   setColorScheme: (scheme: ColorScheme) => void;
   setHasCompletedOnboarding: (completed: boolean) => void;
+  setDailyReminderEnabled: (enabled: boolean) => void;
+  setDailyReminderTime: (time: string) => void;
+  setWeeklyReviewEnabled: (enabled: boolean) => void;
+  setWeeklyReviewTime: (time: string) => void;
   resetSettings: () => void;
 }
 
@@ -147,6 +157,10 @@ export const useSettingsStore = create<SettingsState>()(
       customModelName: '',
       colorScheme: 'light',
       hasCompletedOnboarding: false,
+      dailyReminderEnabled: false,
+      dailyReminderTime: '20:00',
+      weeklyReviewEnabled: false,
+      weeklyReviewTime: '19:00',
 
       setCustomApiKey: (key: string) => {
         const trimmed = key.trim();
@@ -188,6 +202,22 @@ export const useSettingsStore = create<SettingsState>()(
         set({ hasCompletedOnboarding: completed });
       },
 
+      setDailyReminderEnabled: (enabled: boolean) => {
+        set({ dailyReminderEnabled: enabled });
+      },
+
+      setDailyReminderTime: (time: string) => {
+        set({ dailyReminderTime: time });
+      },
+
+      setWeeklyReviewEnabled: (enabled: boolean) => {
+        set({ weeklyReviewEnabled: enabled });
+      },
+
+      setWeeklyReviewTime: (time: string) => {
+        set({ weeklyReviewTime: time });
+      },
+
       resetSettings: () => {
         deleteSecureItem(SECURE_KEYS.GEMINI_API_KEY);
         set({
@@ -209,6 +239,10 @@ export const useSettingsStore = create<SettingsState>()(
         customModelName: state.customModelName,
         colorScheme: state.colorScheme,
         hasCompletedOnboarding: state.hasCompletedOnboarding,
+        dailyReminderEnabled: state.dailyReminderEnabled,
+        dailyReminderTime: state.dailyReminderTime,
+        weeklyReviewEnabled: state.weeklyReviewEnabled,
+        weeklyReviewTime: state.weeklyReviewTime,
       }),
       onRehydrateStorage: () => () => {
         // Hydrate custom API key from secure hardware-backed storage

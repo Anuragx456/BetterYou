@@ -28,6 +28,12 @@ import {
   parseAndValidateBackup,
   shareOrCopyData,
 } from '../../services/backupService';
+import {
+  cancelDailyMealReminder,
+  cancelSundayWeeklyReview,
+  scheduleDailyMealReminder,
+  scheduleSundayWeeklyReview,
+} from '../../services/notificationService';
 import { getAppLanguage, setAppLanguage, SupportedLanguage } from '../../i18n';
 import { useFitnessStore } from '../../store/useFitnessStore';
 import {
@@ -59,6 +65,117 @@ export default function SettingsScreen() {
   const isCustomModel = useSettingsStore((state) => state.isCustomModel);
   const customModelName = useSettingsStore((state) => state.customModelName);
   const totalCalls = useGeminiUsageStore((state) => state.totalCalls);
+
+  // Reminders state
+  const dailyReminderEnabled = useSettingsStore((state) => state.dailyReminderEnabled);
+  const dailyReminderTime = useSettingsStore((state) => state.dailyReminderTime);
+  const weeklyReviewEnabled = useSettingsStore((state) => state.weeklyReviewEnabled);
+  const weeklyReviewTime = useSettingsStore((state) => state.weeklyReviewTime);
+
+  const setDailyReminderEnabled = useSettingsStore((state) => state.setDailyReminderEnabled);
+  const setDailyReminderTime = useSettingsStore((state) => state.setDailyReminderTime);
+  const setWeeklyReviewEnabled = useSettingsStore((state) => state.setWeeklyReviewEnabled);
+  const setWeeklyReviewTime = useSettingsStore((state) => state.setWeeklyReviewTime);
+
+  const handleToggleDailyReminder = async (val: boolean) => {
+    safeHaptics.selection();
+    if (val) {
+      const ok = await scheduleDailyMealReminder(dailyReminderTime);
+      if (ok) {
+        setDailyReminderEnabled(true);
+      } else {
+        Alert.alert(
+          'Notifications Required',
+          'Please enable notifications in system settings to receive your daily meal log reminder.'
+        );
+        setDailyReminderEnabled(false);
+      }
+    } else {
+      await cancelDailyMealReminder();
+      setDailyReminderEnabled(false);
+    }
+  };
+
+  const handleToggleWeeklyReview = async (val: boolean) => {
+    safeHaptics.selection();
+    if (val) {
+      const ok = await scheduleSundayWeeklyReview(weeklyReviewTime);
+      if (ok) {
+        setWeeklyReviewEnabled(true);
+      } else {
+        Alert.alert(
+          'Notifications Required',
+          'Please enable notifications in system settings to receive your Sunday weekly review.'
+        );
+        setWeeklyReviewEnabled(false);
+      }
+    } else {
+      await cancelSundayWeeklyReview();
+      setWeeklyReviewEnabled(false);
+    }
+  };
+
+  const handleChangeDailyReminderTime = () => {
+    Alert.alert(
+      'Daily Reminder Time',
+      'Choose when to receive your daily meal log reminder:',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: '7:00 PM (19:00)',
+          onPress: async () => {
+            setDailyReminderTime('19:00');
+            if (dailyReminderEnabled) await scheduleDailyMealReminder('19:00');
+          },
+        },
+        {
+          text: '8:00 PM (20:00 - Recommended)',
+          onPress: async () => {
+            setDailyReminderTime('20:00');
+            if (dailyReminderEnabled) await scheduleDailyMealReminder('20:00');
+          },
+        },
+        {
+          text: '9:00 PM (21:00)',
+          onPress: async () => {
+            setDailyReminderTime('21:00');
+            if (dailyReminderEnabled) await scheduleDailyMealReminder('21:00');
+          },
+        },
+      ]
+    );
+  };
+
+  const handleChangeWeeklyReviewTime = () => {
+    Alert.alert(
+      'Sunday Review Time',
+      'Choose when to receive your Sunday weekly recap:',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: '6:00 PM (18:00)',
+          onPress: async () => {
+            setWeeklyReviewTime('18:00');
+            if (weeklyReviewEnabled) await scheduleSundayWeeklyReview('18:00');
+          },
+        },
+        {
+          text: '7:00 PM (19:00 - Recommended)',
+          onPress: async () => {
+            setWeeklyReviewTime('19:00');
+            if (weeklyReviewEnabled) await scheduleSundayWeeklyReview('19:00');
+          },
+        },
+        {
+          text: '8:00 PM (20:00)',
+          onPress: async () => {
+            setWeeklyReviewTime('20:00');
+            if (weeklyReviewEnabled) await scheduleSundayWeeklyReview('20:00');
+          },
+        },
+      ]
+    );
+  };
 
   const [currentLang, setCurrentLangState] = useState<SupportedLanguage>(getAppLanguage());
 
@@ -427,6 +544,112 @@ export default function SettingsScreen() {
               </View>
               <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
             </Pressable>
+          </View>
+        </View>
+
+        {/* Section: Reminders & Notifications */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader} allowFontScaling>
+            REMINDERS & NOTIFICATIONS
+          </Text>
+          <View style={styles.cardGroup}>
+            {/* Daily Meal Log Reminder */}
+            <View style={styles.navRow}>
+              <View style={[styles.iconBadge, { backgroundColor: colors.softOrange }]}>
+                <Ionicons name="notifications-outline" size={18} color={colors.calories} />
+              </View>
+              <View style={styles.navRowMeta}>
+                <Text style={styles.navRowTitle} allowFontScaling>
+                  Daily Meal Log Reminder
+                </Text>
+                <Text style={styles.navRowSubtitle} allowFontScaling>
+                  {dailyReminderEnabled ? `Active daily at ${dailyReminderTime}` : 'Disabled (opt-in only)'}
+                </Text>
+              </View>
+              <Switch
+                value={dailyReminderEnabled}
+                onValueChange={handleToggleDailyReminder}
+                trackColor={{ false: colors.cardBorder, true: colors.primary }}
+                thumbColor={colors.white}
+                accessibilityRole="switch"
+                accessibilityLabel="Toggle daily meal log reminder"
+              />
+            </View>
+
+            {dailyReminderEnabled && (
+              <>
+                <View style={styles.rowDivider} />
+                <Pressable
+                  style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
+                  onPress={handleChangeDailyReminderTime}
+                  accessibilityRole="button"
+                  accessibilityLabel="Change daily reminder time"
+                >
+                  <View style={[styles.iconBadge, { backgroundColor: colors.surfaceSubtle }]}>
+                    <Ionicons name="time-outline" size={18} color={colors.textSecondary} />
+                  </View>
+                  <View style={styles.navRowMeta}>
+                    <Text style={styles.navRowTitle} allowFontScaling>
+                      Reminder Time
+                    </Text>
+                    <Text style={styles.navRowSubtitle} allowFontScaling>
+                      Scheduled for {dailyReminderTime}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                </Pressable>
+              </>
+            )}
+
+            <View style={styles.rowDivider} />
+
+            {/* Sunday Weekly Review */}
+            <View style={styles.navRow}>
+              <View style={[styles.iconBadge, { backgroundColor: colors.softGreen }]}>
+                <Ionicons name="calendar-outline" size={18} color={colors.success} />
+              </View>
+              <View style={styles.navRowMeta}>
+                <Text style={styles.navRowTitle} allowFontScaling>
+                  Sunday Weekly Recap
+                </Text>
+                <Text style={styles.navRowSubtitle} allowFontScaling>
+                  {weeklyReviewEnabled ? `Sundays at ${weeklyReviewTime}` : 'Disabled (opt-in only)'}
+                </Text>
+              </View>
+              <Switch
+                value={weeklyReviewEnabled}
+                onValueChange={handleToggleWeeklyReview}
+                trackColor={{ false: colors.cardBorder, true: colors.success }}
+                thumbColor={colors.white}
+                accessibilityRole="switch"
+                accessibilityLabel="Toggle Sunday weekly recap reminder"
+              />
+            </View>
+
+            {weeklyReviewEnabled && (
+              <>
+                <View style={styles.rowDivider} />
+                <Pressable
+                  style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
+                  onPress={handleChangeWeeklyReviewTime}
+                  accessibilityRole="button"
+                  accessibilityLabel="Change weekly review reminder time"
+                >
+                  <View style={[styles.iconBadge, { backgroundColor: colors.surfaceSubtle }]}>
+                    <Ionicons name="time-outline" size={18} color={colors.textSecondary} />
+                  </View>
+                  <View style={styles.navRowMeta}>
+                    <Text style={styles.navRowTitle} allowFontScaling>
+                      Review Prompt Time
+                    </Text>
+                    <Text style={styles.navRowSubtitle} allowFontScaling>
+                      Scheduled for {weeklyReviewTime}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                </Pressable>
+              </>
+            )}
           </View>
         </View>
 

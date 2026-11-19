@@ -30,6 +30,12 @@ import { getFullImageUri, ensureFileSystemReady } from '../../utils/imageManager
 import {
   useFitnessStore,
 } from '../../store/useFitnessStore';
+import { dbGetAllMeals, dbGetAllWorkouts } from '../../db/client';
+import {
+  generateWeeklySummary,
+  type WeeklySummary,
+} from '../../services/weeklySummaryService';
+import { WeeklySummaryModal } from '../../components/WeeklySummaryModal';
 import type { ThemeColors } from '../../theme/colors';
 import { useThemeColors, useThemedStyles } from '../../theme/theme';
 import { MacroBreakdown, MealLog, ScannedProduct } from '../../types';
@@ -420,6 +426,40 @@ export default function DashboardScreen() {
   const [thumbsReady, setThumbsReady] = useState(false);
   const isViewingToday = selectedDate === todayDateString;
 
+  // Weekly Summary Recap State
+  const [weeklySummary, setWeeklySummary] = useState<WeeklySummary | null>(null);
+  const [isWeeklySummaryVisible, setIsWeeklySummaryVisible] = useState(false);
+  const isSunday = useMemo(() => new Date().getDay() === 0, []);
+
+  const handleOpenWeeklySummary = useCallback(async () => {
+    safeHaptics.selection();
+    try {
+      const [allWorkouts, allMeals] = await Promise.all([
+        dbGetAllWorkouts(),
+        dbGetAllMeals(),
+      ]);
+      const summary = generateWeeklySummary(
+        allWorkouts,
+        allMeals,
+        scannedProducts,
+        dailyGoals,
+        selectedDate
+      );
+      setWeeklySummary(summary);
+      setIsWeeklySummaryVisible(true);
+    } catch {
+      const summary = generateWeeklySummary(
+        useFitnessStore.getState().workouts,
+        meals,
+        scannedProducts,
+        dailyGoals,
+        selectedDate
+      );
+      setWeeklySummary(summary);
+      setIsWeeklySummaryVisible(true);
+    }
+  }, [selectedDate, scannedProducts, dailyGoals, meals]);
+
   useEffect(() => {
     ensureFileSystemReady()
       .then(() => setThumbsReady(true))
@@ -599,6 +639,20 @@ export default function DashboardScreen() {
           </View>
 
           <View style={styles.headerBadgesRow}>
+            {/* Weekly Recap Pill */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.recapHeaderBtn,
+                pressed && styles.pressed,
+              ]}
+              hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+              onPress={handleOpenWeeklySummary}
+              accessibilityLabel="View Weekly Summary"
+            >
+              <Ionicons name="sparkles" size={13} color={colors.primary} />
+              <Text style={styles.recapHeaderText} allowFontScaling>Recap</Text>
+            </Pressable>
+
             {/* Streak Badge */}
             <View style={styles.streakBadge}>
               <Ionicons name="flame" size={15} color={colors.primary} />
@@ -631,6 +685,29 @@ export default function DashboardScreen() {
           onSelectDay={handleSelectDay}
           onReturnToday={handleReturnToToday}
         />
+
+        {/* Sunday Weekly Recap Banner */}
+        {isSunday && (
+          <Pressable
+            style={({ pressed }) => [styles.weeklyRecapBanner, pressed && styles.pressed]}
+            onPress={handleOpenWeeklySummary}
+            accessibilityRole="button"
+            accessibilityLabel="Open Sunday Weekly Recap"
+          >
+            <View style={styles.weeklyRecapBannerIcon}>
+              <Ionicons name="sparkles" size={18} color={colors.primary} />
+            </View>
+            <View style={styles.weeklyRecapBannerMeta}>
+              <Text style={styles.weeklyRecapBannerTitle} allowFontScaling>
+                Sunday Weekly Recap Ready ✨
+              </Text>
+              <Text style={styles.weeklyRecapBannerSub} allowFontScaling>
+                Tap to see your workout volume, nutrition & PRs
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.primary} />
+          </Pressable>
+        )}
 
         {/* Daily Calorie & Macro Hero Card (Reanimated Native Rings) */}
         <View style={styles.heroCard}>
@@ -770,12 +847,69 @@ export default function DashboardScreen() {
         </SafeAreaView>
       </Modal>
       ) : null}
+
+      {weeklySummary && (
+        <WeeklySummaryModal
+          visible={isWeeklySummaryVisible}
+          summary={weeklySummary}
+          onClose={() => setIsWeeklySummaryVisible(false)}
+        />
+      )}
     </SafeAreaView>
   );
 }
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
+  recapHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    minHeight: 34,
+  },
+  recapHeaderText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  weeklyRecapBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primaryMuted,
+    borderRadius: 16,
+    padding: 14,
+    gap: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.softOrangeBorder,
+  },
+  weeklyRecapBannerIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  weeklyRecapBannerMeta: {
+    flex: 1,
+  },
+  weeklyRecapBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  weeklyRecapBannerSub: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
