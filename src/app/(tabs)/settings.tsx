@@ -17,7 +17,7 @@ import {
   dbGetAllWorkouts,
 } from '../../db/client';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import { File as ExpoFile } from 'expo-file-system';
 import {
   BackupPayload,
   generateJsonBackup,
@@ -125,7 +125,8 @@ export default function SettingsScreen() {
       let rawContent = '';
       try {
         if (fileAsset.uri) {
-          rawContent = await FileSystem.readAsStringAsync(fileAsset.uri);
+          const file = new ExpoFile(fileAsset.uri);
+          rawContent = await file.text();
         }
       } catch {
         const response = await fetch(fileAsset.uri);

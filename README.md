@@ -379,19 +379,23 @@ bunx expo-doctor
 
 ## Empirical Model Benchmark & Accuracy Evaluation
 
-Measured using BetterYou's empirical evaluation harness (`evals/run-eval.ts`) over a standardized ground-truth benchmark of $N=50$ annotated samples (25 diverse Indian & global meals + 25 Indian supermarket packaged goods across 8 aisles).
+BetterYou's evaluation harness (`evals/run-eval.ts`) evaluates multimodal model performance against a standardized benchmark of $N=50$ annotated ground-truth samples (25 Indian & global meals with weighed macro breakdowns from IFCT 2017 + 25 Indian supermarket packaged goods across 8 aisles).
+
+> [!NOTE]
+> **Status: Text-only synthetic baseline, photo evaluation pending.**
+> The evaluation dataset manifest (`evals/dataset/manifest.json`) defines 50 validated ground-truth samples. To adhere to our zero-fabrication data policy, the harness strictly skips samples that lack physical photos on disk (`evals/dataset/images/{meals,products}/`). To capture the photographic ground-truth dataset and run empirical evaluations, follow the protocol in [`evals/COLLECTING.md`](evals/COLLECTING.md).
 
 Run the evaluation locally:
 ```bash
 bun run eval
 ```
 
-| Model ID | Display Name | MAE Calories | MAE Protein | OCR Recall | Macro Plausibility | Avg Latency | Best Suited For |
+| Model ID | Display Name | MAE Calories | MAE Protein | OCR Recall | Macro Plausibility | Avg Latency | Evaluation Status |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
-| `gemini-3.6-flash` | **Gemini 3.6 Flash** *(Recommended)* | 22.3 kcal | 1.1 g | 95.0% | 100% | 1420 ms | High-fidelity food & ingredient scans |
-| `gemini-3.5-flash-lite` | **Gemini 3.5 Flash Lite** *(Balanced)* | 30.2 kcal | 1.5 g | 92.5% | 100% | 980 ms | High-efficiency daily scanning |
-| `gemini-3.1-flash-lite` | **Gemini 3.1 Flash Lite** *(Lightweight)* | 39.5 kcal | 1.9 g | 89.4% | 100% | 740 ms | Low-latency macro estimates |
-| `gemini-2.5-flash` | **Gemini 2.5 Flash** *(Stable)* | 24.8 kcal | 1.2 g | 94.7% | 100% | 1310 ms | High-reliability fallback tier |
+| `gemini-3.6-flash` | **Gemini 3.6 Flash** *(Recommended)* | *Pending* | *Pending* | *Pending* | *Pending* | 1420 ms | Photo evaluation pending (`evals/COLLECTING.md`) |
+| `gemini-3.5-flash-lite` | **Gemini 3.5 Flash Lite** *(Balanced)* | *Pending* | *Pending* | *Pending* | *Pending* | 980 ms | Photo evaluation pending (`evals/COLLECTING.md`) |
+| `gemini-3.1-flash-lite` | **Gemini 3.1 Flash Lite** *(Lightweight)* | *Pending* | *Pending* | *Pending* | *Pending* | 740 ms | Photo evaluation pending (`evals/COLLECTING.md`) |
+| `gemini-2.5-flash` | **Gemini 2.5 Flash** *(Stable)* | *Pending* | *Pending* | *Pending* | *Pending* | 1310 ms | Photo evaluation pending (`evals/COLLECTING.md`) |
 | *Custom Model* | **User Specified** | Variable | Variable | Variable | Variable | Variable | Custom fine-tuned models |
 
 ---

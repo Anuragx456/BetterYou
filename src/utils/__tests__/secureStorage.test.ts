@@ -53,6 +53,9 @@ describe('Secure Storage & Device Signing Utilities', () => {
     const body = JSON.stringify({ prompt: 'test food scan', imageBase64: 'abc123xyz' });
 
     // Client calculation
+    const hmacDirect = computeHmacSha256Hex(testSecret, 'hello world');
+    const expectedDirectHmac = createHmac('sha256', testSecret).update('hello world').digest('hex');
+    expect(hmacDirect).toBe(expectedDirectHmac);
     const clientHmac = await computeRequestHmac(testSecret, method, path, timestamp, body);
 
     // Expected independent server HMAC
