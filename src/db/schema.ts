@@ -162,6 +162,17 @@ export const bodyMeasurements = sqliteTable(
 );
 
 /**
+ * Corrections Table (for feedback loop and local learning)
+ */
+export const corrections = sqliteTable('corrections', {
+  id: text('id').primaryKey(),
+  type: text('type').notNull(), // 'meal' | 'toxicity'
+  originalJson: text('original_json').notNull(),
+  correctedJson: text('corrected_json').notNull(),
+  timestamp: integer('timestamp').notNull(),
+});
+
+/**
  * Migrations Metadata Table (for tracking one-time migrations)
  */
 export const migrationsMeta = sqliteTable('migrations_meta', {
@@ -201,3 +212,6 @@ export type InsertUserProfileRecord = typeof userProfile.$inferInsert;
 
 export type BodyMeasurementRecord = typeof bodyMeasurements.$inferSelect;
 export type InsertBodyMeasurementRecord = typeof bodyMeasurements.$inferInsert;
+
+export type CorrectionRecord = typeof corrections.$inferSelect;
+export type InsertCorrectionRecord = typeof corrections.$inferInsert;

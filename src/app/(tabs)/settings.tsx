@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
+  dbClearCorrections,
   dbGetAllMeals,
   dbGetAllScannedProducts,
   dbGetAllWorkouts,
@@ -212,6 +213,30 @@ export default function SettingsScreen() {
       setIsRestoring(false);
     }
   };
+
+  const handleClearCorrections = useCallback(() => {
+    Alert.alert(
+      'Clear Learned Corrections',
+      'This will delete all personalized meal macro corrections learned from your previous edits. Reference databases (IFCT 2017) will still be active.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear All',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await dbClearCorrections();
+              safeHaptics.success();
+              Alert.alert('Cleared', 'All learned food corrections have been reset.');
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : 'Unknown error';
+              Alert.alert('Error', `Failed to clear corrections: ${msg}`);
+            }
+          },
+        },
+      ]
+    );
+  }, []);
 
   // Reset all settings
   const handleResetSettings = useCallback(() => {
@@ -609,6 +634,26 @@ export default function SettingsScreen() {
                 </Text>
               </View>
               <Ionicons name="arrow-up-circle-outline" size={18} color={colors.primary} />
+            </Pressable>
+
+            <Pressable
+              style={({ pressed }) => [styles.navRow, pressed && styles.pressed]}
+              onPress={handleClearCorrections}
+              accessibilityRole="button"
+              accessibilityLabel="Clear learned food macro corrections"
+            >
+              <View style={[styles.iconBadge, { backgroundColor: colors.surfaceSubtle }]}>
+                <Ionicons name="trash-outline" size={18} color={colors.warning} />
+              </View>
+              <View style={styles.navRowMeta}>
+                <Text style={styles.navRowTitle} allowFontScaling>
+                  Clear Learned Corrections
+                </Text>
+                <Text style={styles.navRowSubtitle} allowFontScaling>
+                  Reset custom meal macro adjustments & priors
+                </Text>
+              </View>
+              <Ionicons name="refresh-outline" size={18} color={colors.warning} />
             </Pressable>
           </View>
         </View>

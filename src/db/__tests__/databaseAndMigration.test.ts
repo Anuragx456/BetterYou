@@ -13,6 +13,9 @@ import {
   dbGetAllBodyMeasurements,
   dbGetLatestBodyMeasurement,
   dbDeleteBodyMeasurement,
+  dbInsertCorrection,
+  dbGetAllCorrections,
+  dbClearCorrections,
   dbGetMealsByDate,
   dbGetProductSummaries,
   dbGetScannedProductById,
@@ -67,6 +70,7 @@ describe('SQLite Data Layer & Repository Tests', () => {
     expect(tableNames).toContain('daily_goals');
     expect(tableNames).toContain('user_profile');
     expect(tableNames).toContain('body_measurements');
+    expect(tableNames).toContain('corrections');
     expect(tableNames).toContain('migrations_meta');
 
     const indexes = await db.getAllAsync<{ name: string }>(
@@ -354,6 +358,37 @@ describe('SQLite Data Layer & Repository Tests', () => {
     const remaining = await dbGetAllBodyMeasurements();
     expect(remaining.length).toBe(1);
     expect(remaining[0].id).toBe('bm_2');
+  });
+
+  it('performs CRUD on corrections and clears them', async () => {
+    const c1 = await dbInsertCorrection({
+      type: 'meal',
+      originalJson: JSON.stringify({ dishName: 'Butter Chicken', calories: 750 }),
+      correctedJson: JSON.stringify({ dishName: 'Butter Chicken', calories: 495 }),
+      timestamp: 1000,
+    });
+
+    const c2 = await dbInsertCorrection({
+      type: 'toxicity',
+      originalJson: JSON.stringify({ productName: 'Biscuits', riskLevel: 'Safe' }),
+      correctedJson: JSON.stringify({ productName: 'Biscuits', riskLevel: 'Moderate' }),
+      timestamp: 2000,
+    });
+
+    const all = await dbGetAllCorrections();
+    expect(all.length).toBe(2);
+
+    const mealOnly = await dbGetAllCorrections('meal');
+    expect(mealOnly.length).toBe(1);
+    expect(mealOnly[0].id).toBe(c1.id);
+
+    const toxOnly = await dbGetAllCorrections('toxicity');
+    expect(toxOnly.length).toBe(1);
+    expect(toxOnly[0].id).toBe(c2.id);
+
+    await dbClearCorrections();
+    const afterClear = await dbGetAllCorrections();
+    expect(afterClear.length).toBe(0);
   });
 });
 

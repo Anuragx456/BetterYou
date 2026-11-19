@@ -26,6 +26,11 @@ import { safeHaptics } from '../../utils/haptics';
 import type { ThemeColors } from '../../theme/colors';
 import { useThemeColors, useThemedStyles } from '../../theme/theme';
 import { MealAnalysisResult } from '../../types';
+import { dbGetAllCorrections, dbInsertCorrection } from '../../db/client';
+import {
+  matchIndianFoodEstimate,
+  UserMealCorrection,
+} from '../../utils/indianFoodMatcher';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const RETICLE_SIZE = SCREEN_WIDTH * 0.78;
@@ -74,6 +79,10 @@ export default function MealScanScreen() {
   const [aiResult, setAiResult] = useState<MealAnalysisResult | null>(null);
   const [portionMultiplier, setPortionMultiplier] = useState<number>(1.0);
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [userCorrections, setUserCorrections] = useState<UserMealCorrection[]>([]);
+  const [originalAiResult, setOriginalAiResult] = useState<MealAnalysisResult | null>(null);
+  const [wasCorrected, setWasCorrected] = useState<boolean>(false);
+  const [dismissDeviation, setDismissDeviation] = useState<boolean>(false);
   const [isTypeModalVisible, setIsTypeModalVisible] = useState<boolean>(false);
   const [isVoiceModalVisible, setIsVoiceModalVisible] = useState<boolean>(false);
   const [ManualMeal, loadManualMeal] = useOnDemandComponent(() =>
@@ -121,6 +130,29 @@ export default function MealScanScreen() {
         localImagePath: hashUri,
       });
       setAiResult(result);
+      setOriginalAiResult(result);
+      setWasCorrected(false);
+      setDismissDeviation(false);
+      dbGetAllCorrections('meal').then((rows) => {
+        const parsed: UserMealCorrection[] = [];
+        for (const r of rows) {
+          try {
+            const c = JSON.parse(r.correctedJson);
+            if (c && c.dishName) {
+              parsed.push({
+                dishName: c.dishName,
+                portionGrams: c.portionGrams || 250,
+                calories: c.calories || 0,
+                protein: c.protein || 0,
+                carbs: c.carbs || 0,
+                fat: c.fat || 0,
+                timestamp: r.timestamp,
+              });
+            }
+          } catch {}
+        }
+        setUserCorrections(parsed);
+      }).catch(() => {});
       setStage('verifying');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -233,6 +265,28 @@ export default function MealScanScreen() {
       ingredientsDetected: aiResult.ingredientsDetected,
     });
 
+    if (wasCorrected && originalAiResult) {
+      dbInsertCorrection({
+        type: 'meal',
+        originalJson: JSON.stringify({
+          dishName: originalAiResult.dishName,
+          portionGrams: originalAiResult.estimatedWeightGrams,
+          calories: originalAiResult.calories,
+          protein: originalAiResult.protein,
+          carbs: originalAiResult.carbs,
+          fat: originalAiResult.fat,
+        }),
+        correctedJson: JSON.stringify({
+          dishName: aiResult.dishName,
+          portionGrams: scaledGrams,
+          calories: scaledCalories,
+          protein: scaledProtein,
+          carbs: scaledCarbs,
+          fat: scaledFat,
+        }),
+      }).catch(() => {});
+    }
+
     setIsSaving(false);
     safeHaptics.success();
 
@@ -300,6 +354,16 @@ export default function MealScanScreen() {
     const scaledFat = Math.round(aiResult.fat * portionMultiplier);
     const scaledGrams = Math.round(aiResult.estimatedWeightGrams * portionMultiplier);
 
+    const indianFoodMatch = matchIndianFoodEstimate(
+      aiResult.dishName,
+      scaledGrams,
+      scaledCalories,
+      scaledProtein,
+      scaledCarbs,
+      scaledFat,
+      userCorrections
+    );
+
     return (
       <SafeAreaView style={styles.container}>
         <ScrollView contentContainerStyle={styles.verifyScroll} showsVerticalScrollIndicator={false}>
@@ -311,6 +375,9 @@ export default function MealScanScreen() {
               onPress={() => {
                 setStage('viewfinder');
                 setAiResult(null);
+                setWasCorrected(false);
+                setDismissDeviation(false);
+                setOriginalAiResult(null);
               }}
             >
               <Ionicons name="arrow-back" size={20} color={colors.text} />
@@ -336,11 +403,82 @@ export default function MealScanScreen() {
 
           <MealPreviewImage uri={capturedImageUri} />
 
-          {/* Dish Header & Weight */}
+          {/* Dish Header, Weight & Provenance */}
           <View style={styles.dishCardClean}>
             <Text style={styles.dishNameTextClean}>{aiResult.dishName}</Text>
             <Text style={styles.dishWeightSubClean}>~{scaledGrams}g</Text>
+            <View style={styles.provenanceBadge}>
+              <Ionicons
+                name={
+                  indianFoodMatch.provenance === 'from your past corrections'
+                    ? 'repeat'
+                    : indianFoodMatch.provenance === 'from local database (IFCT 2017)'
+                    ? 'book-outline'
+                    : 'sparkles-outline'
+                }
+                size={12}
+                color={
+                  indianFoodMatch.provenance === 'from your past corrections'
+                    ? colors.secondary
+                    : indianFoodMatch.provenance === 'from local database (IFCT 2017)'
+                    ? colors.primary
+                    : colors.textSecondary
+                }
+              />
+              <Text style={styles.provenanceText}>{indianFoodMatch.provenance}</Text>
+            </View>
           </View>
+
+          {/* Deviation Alert Card (>35%) */}
+          {indianFoodMatch.isSignificantDeviation && !dismissDeviation && (
+            <View style={styles.deviationCard}>
+              <View style={styles.deviationHeader}>
+                <Ionicons name="alert-circle" size={16} color={colors.warning} />
+                <Text style={styles.deviationTitle}>Macro Deviation Alert (&gt;35%)</Text>
+              </View>
+              <Text style={styles.deviationMessage}>{indianFoodMatch.deviationMessage}</Text>
+              <View style={styles.deviationActionsRow}>
+                <Pressable
+                  style={({ pressed }) => [styles.useReferenceBtn, pressed && styles.pressed]}
+                  onPress={() => {
+                    safeHaptics.success();
+                    if (!originalAiResult) setOriginalAiResult(aiResult);
+                    const unscaledCalories = Math.round(indianFoodMatch.referenceCalories / portionMultiplier);
+                    const unscaledProtein = Math.round((indianFoodMatch.referenceProtein / portionMultiplier) * 10) / 10;
+                    const unscaledCarbs = Math.round((indianFoodMatch.referenceCarbs / portionMultiplier) * 10) / 10;
+                    const unscaledFat = Math.round((indianFoodMatch.referenceFat / portionMultiplier) * 10) / 10;
+                    setAiResult({
+                      ...aiResult,
+                      calories: unscaledCalories,
+                      protein: unscaledProtein,
+                      carbs: unscaledCarbs,
+                      fat: unscaledFat,
+                      generatedBy: indianFoodMatch.provenance,
+                    });
+                    setWasCorrected(true);
+                    setDismissDeviation(true);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Use reference values"
+                >
+                  <Ionicons name="checkmark-done" size={14} color="#FFFFFF" />
+                  <Text style={styles.useReferenceBtnText}>Use reference values</Text>
+                </Pressable>
+
+                <Pressable
+                  style={({ pressed }) => [styles.keepAiBtn, pressed && styles.pressed]}
+                  onPress={() => {
+                    safeHaptics.selection();
+                    setDismissDeviation(true);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Keep AI estimate"
+                >
+                  <Text style={styles.keepAiBtnText}>Keep AI estimate</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
 
           {/* Plausibility Warning Banner */}
           {!aiResult.isPlausible && aiResult.plausibilityWarning ? (
@@ -1020,6 +1158,83 @@ function createStyles(colors: ThemeColors) {
     color: colors.textSecondary,
     marginTop: 2,
     fontVariant: ['tabular-nums'],
+  },
+  provenanceBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: colors.surfaceSubtle,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    marginTop: 6,
+  },
+  provenanceText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  deviationCard: {
+    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.35)',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 14,
+  },
+  deviationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  deviationTitle: {
+    color: colors.warning,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  deviationMessage: {
+    color: colors.text,
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 10,
+  },
+  deviationActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'center',
+  },
+  useReferenceBtn: {
+    backgroundColor: colors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    minHeight: 38,
+  },
+  useReferenceBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  keepAiBtn: {
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    minHeight: 38,
+    justifyContent: 'center',
+  },
+  keepAiBtnText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
   },
   calorieHeroContainer: {
     alignItems: 'center',
