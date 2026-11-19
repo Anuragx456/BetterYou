@@ -12,7 +12,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Line, Polyline } from 'react-native-svg';
 import type { ThemeColors } from '../theme/colors';
 import { useThemeColors, useThemedStyles } from '../theme/theme';
-import { ExerciseHistoryIndex, normalizeExerciseName } from '../utils/workoutAnalytics';
+import {
+  calculateEpley1RM,
+  ExerciseHistoryIndex,
+  normalizeExerciseName,
+} from '../utils/workoutAnalytics';
 
 interface ExerciseHistoryModalProps {
   visible: boolean;
@@ -41,10 +45,11 @@ export function ExerciseHistoryModal({
     return historyIndex.get(normalizeExerciseName(exerciseName))?.sessions ?? [];
   }, [exerciseName, historyIndex]);
 
-  // Compute PRs (Personal Records)
+  // Compute PRs (Personal Records) and Max Estimated 1RM
   const prMetrics = useMemo(() => {
     let maxWeightPr = 0;
     let maxVolumePr = 0;
+    let max1RM = 0;
     let bestSet = '';
 
     for (const p of historyData) {
@@ -57,10 +62,14 @@ export function ExerciseHistoryModal({
           maxVolumePr = v;
           bestSet = `${s.weightKg} kg × ${s.reps} reps`;
         }
+        const e1rm = calculateEpley1RM(s.weightKg, s.reps);
+        if (e1rm > max1RM) {
+          max1RM = e1rm;
+        }
       }
     }
 
-    return { maxWeightPr, maxVolumePr, bestSet };
+    return { maxWeightPr, maxVolumePr, bestSet, max1RM };
   }, [historyData]);
 
   // Mini Chart Coordinates
@@ -130,6 +139,19 @@ export function ExerciseHistoryModal({
                 {prMetrics.maxWeightPr > 0 ? `${prMetrics.maxWeightPr} kg` : '—'}
               </Text>
               <Text style={styles.prSub}>Heaviest Load</Text>
+            </View>
+
+            <View style={styles.prDivider} />
+
+            <View style={styles.prItem}>
+              <View style={styles.prBadge}>
+                <Ionicons name="calculator" size={14} color={colors.primary} />
+                <Text style={styles.prBadgeText}>EPLEY 1RM</Text>
+              </View>
+              <Text style={styles.prValue}>
+                {prMetrics.max1RM > 0 ? `${prMetrics.max1RM} kg` : '—'}
+              </Text>
+              <Text style={styles.prSub}>Estimated Max</Text>
             </View>
 
             <View style={styles.prDivider} />
@@ -216,13 +238,19 @@ export function ExerciseHistoryModal({
                   </View>
 
                   <View style={styles.setsWrap}>
-                    {entry.sets.map((s, si) => (
-                      <View key={si} style={styles.setChip}>
-                        <Text style={styles.setChipText}>
-                          Set {s.setNumber}: <Text style={{ color: colors.text }}>{s.weightKg}kg × {s.reps}</Text>
-                        </Text>
-                      </View>
-                    ))}
+                    {entry.sets.map((s, si) => {
+                      const e1rm = calculateEpley1RM(s.weightKg, s.reps);
+                      return (
+                        <View key={si} style={styles.setChip}>
+                          <Text style={styles.setChipText}>
+                            Set {s.setNumber}: <Text style={{ color: colors.text }}>{s.weightKg}kg × {s.reps}</Text>
+                            {e1rm > 0 && (
+                              <Text style={{ color: colors.primary, fontSize: 10 }}> (1RM: {e1rm}kg)</Text>
+                            )}
+                          </Text>
+                        </View>
+                      );
+                    })}
                   </View>
                 </View>
               ))

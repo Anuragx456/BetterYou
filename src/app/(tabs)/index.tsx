@@ -15,6 +15,7 @@ import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AnimatedCalorieRing } from '../../components/AnimatedCalorieRing';
 import { AnimatedMacroBar } from '../../components/AnimatedMacroBar';
+import { BodyweightCard } from '../../components/dashboard/BodyweightCard';
 import { useOnDemandComponent } from '../../utils/useOnDemandComponent';
 import {
   addLocalDays,
@@ -708,6 +709,8 @@ export default function DashboardScreen() {
           todayCaloriesBurned={todayCaloriesBurned}
           onOpenWorkouts={openWorkouts}
         />
+
+        <BodyweightCard />
 
         <MealFeed
           todayMeals={todayMeals}

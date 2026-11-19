@@ -145,6 +145,23 @@ export const userProfile = sqliteTable('user_profile', {
 });
 
 /**
+ * Body Measurements Table with index on date (YYYY-MM-DD)
+ */
+export const bodyMeasurements = sqliteTable(
+  'body_measurements',
+  {
+    id: text('id').primaryKey(),
+    date: text('date').notNull(), // Local date string: YYYY-MM-DD
+    weightKg: real('weight_kg').notNull(),
+    note: text('note'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => [
+    index('body_measurements_date_idx').on(table.date),
+  ]
+);
+
+/**
  * Migrations Metadata Table (for tracking one-time migrations)
  */
 export const migrationsMeta = sqliteTable('migrations_meta', {
@@ -181,3 +198,6 @@ export type InsertDailyGoalsRecord = typeof dailyGoals.$inferInsert;
 
 export type UserProfileRecord = typeof userProfile.$inferSelect;
 export type InsertUserProfileRecord = typeof userProfile.$inferInsert;
+
+export type BodyMeasurementRecord = typeof bodyMeasurements.$inferSelect;
+export type InsertBodyMeasurementRecord = typeof bodyMeasurements.$inferInsert;

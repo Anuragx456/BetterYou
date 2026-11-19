@@ -9,6 +9,10 @@ import {
   dbGetDailyGoals,
   dbGetUserProfile,
   dbUpsertUserProfile,
+  dbInsertBodyMeasurement,
+  dbGetAllBodyMeasurements,
+  dbGetLatestBodyMeasurement,
+  dbDeleteBodyMeasurement,
   dbGetMealsByDate,
   dbGetProductSummaries,
   dbGetScannedProductById,
@@ -62,6 +66,7 @@ describe('SQLite Data Layer & Repository Tests', () => {
     expect(tableNames).toContain('scanned_products');
     expect(tableNames).toContain('daily_goals');
     expect(tableNames).toContain('user_profile');
+    expect(tableNames).toContain('body_measurements');
     expect(tableNames).toContain('migrations_meta');
 
     const indexes = await db.getAllAsync<{ name: string }>(
@@ -71,6 +76,7 @@ describe('SQLite Data Layer & Repository Tests', () => {
     expect(indexNames).toContain('meals_date_idx');
     expect(indexNames).toContain('workout_sessions_date_idx');
     expect(indexNames).toContain('scanned_products_date_idx');
+    expect(indexNames).toContain('body_measurements_date_idx');
   });
 
   it('performs CRUD on meals with date indexing', async () => {
@@ -312,6 +318,42 @@ describe('SQLite Data Layer & Repository Tests', () => {
     const updated = await dbGetUserProfile();
     expect(updated?.weightKg).toBe(74);
     expect(updated?.goalType).toBe('maintain');
+  });
+
+  it('performs CRUD on body measurements with date ordering', async () => {
+    const m1 = {
+      id: 'bm_1',
+      date: '2026-05-20',
+      weightKg: 75.2,
+      note: 'Morning weigh in fasted',
+      createdAt: 1000,
+    };
+    const m2 = {
+      id: 'bm_2',
+      date: '2026-05-22',
+      weightKg: 74.8,
+      note: 'Post workout',
+      createdAt: 2000,
+    };
+
+    await dbInsertBodyMeasurement(m1);
+    await dbInsertBodyMeasurement(m2);
+
+    const all = await dbGetAllBodyMeasurements();
+    expect(all.length).toBe(2);
+    // Should be ordered date DESC
+    expect(all[0].id).toBe('bm_2');
+    expect(all[0].weightKg).toBe(74.8);
+    expect(all[1].id).toBe('bm_1');
+
+    const latest = await dbGetLatestBodyMeasurement();
+    expect(latest?.id).toBe('bm_2');
+    expect(latest?.weightKg).toBe(74.8);
+
+    await dbDeleteBodyMeasurement('bm_1');
+    const remaining = await dbGetAllBodyMeasurements();
+    expect(remaining.length).toBe(1);
+    expect(remaining[0].id).toBe('bm_2');
   });
 });
 

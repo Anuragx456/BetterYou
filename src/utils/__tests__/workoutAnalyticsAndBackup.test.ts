@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import {
   buildExerciseHistoryIndex,
+  calculateEpley1RM,
   detectPersonalRecord,
   getPreviousSessionExerciseValues,
   personalRecordFromSnapshot,
@@ -99,6 +100,31 @@ describe('Workout Analytics & PR Detection', () => {
     expect(above.previousMaxWeight).toBe(95);
     expect(personalRecordFromSnapshot(90, 10, snap).isVolumePr).toBe(true);
     expect(index.get('overhead cable extension')).toBeUndefined();
+  });
+
+  describe('Epley 1RM Formula (calculateEpley1RM)', () => {
+    it('returns exact weight for 1 rep single', () => {
+      expect(calculateEpley1RM(100, 1)).toBe(100);
+      expect(calculateEpley1RM(142.5, 1)).toBe(142.5);
+    });
+
+    it('accurately calculates estimated 1RM for reps > 1 using w * (1 + reps/30)', () => {
+      // 100 kg for 10 reps = 100 * (1 + 10/30) = 133.33 -> 133.3 kg
+      expect(calculateEpley1RM(100, 10)).toBe(133.3);
+
+      // 80 kg for 5 reps = 80 * (1 + 5/30) = 80 * 1.1667 = 93.33 -> 93.3 kg
+      expect(calculateEpley1RM(80, 5)).toBe(93.3);
+
+      // 120 kg for 3 reps = 120 * (1 + 3/30) = 120 * 1.1 = 132 kg
+      expect(calculateEpley1RM(120, 3)).toBe(132);
+    });
+
+    it('returns 0 for non-positive weight or reps', () => {
+      expect(calculateEpley1RM(0, 10)).toBe(0);
+      expect(calculateEpley1RM(-50, 5)).toBe(0);
+      expect(calculateEpley1RM(100, 0)).toBe(0);
+      expect(calculateEpley1RM(100, -2)).toBe(0);
+    });
   });
 });
 

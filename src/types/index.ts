@@ -158,3 +158,11 @@ export interface DailyGoals {
   carbsTargetGrams: number;
   fatTargetGrams: number;
 }
+
+export interface BodyMeasurement {
+  id: string;
+  date: string; // YYYY-MM-DD
+  weightKg: number;
+  note?: string;
+  createdAt: number;
+}

@@ -235,3 +235,18 @@ export function personalRecordFromSnapshot(
     previousMaxVolume: snap.maxVolume,
   };
 }
+
+/**
+ * Calculates estimated One-Rep Max (1RM) using the standard Epley formula:
+ *   - When reps == 1: weightKg
+ *   - When reps > 1: weightKg * (1 + reps / 30)
+ *   - When reps <= 0 or weightKg <= 0: 0
+ * Returns estimated 1RM rounded to 1 decimal place.
+ */
+export function calculateEpley1RM(weightKg: number, reps: number): number {
+  if (weightKg <= 0 || reps <= 0) return 0;
+  if (reps === 1) return Math.round(weightKg * 10) / 10;
+  const estimate = weightKg * (1 + reps / 30);
+  return Math.round(estimate * 10) / 10;
+}
+

@@ -19,6 +19,9 @@ import {
   dbInsertScannedProduct,
   dbInsertWorkout,
   dbSetDailyGoals,
+  dbGetAllBodyMeasurements,
+  dbInsertBodyMeasurement,
+  dbDeleteBodyMeasurement,
   getDatabase,
 } from '../db/client';
 import { runAsyncStorageToSqliteMigration } from '../db/migration';
@@ -31,6 +34,7 @@ import { activeWorkoutPersistStorage, flushActiveWorkoutPersist } from '../utils
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import {
+  BodyMeasurement,
   DailyGoals,
   ExerciseItem,
   ExerciseSet,
@@ -55,6 +59,7 @@ export interface FitnessState {
   workoutCount: number;
   scannedProductCount: number;
   workoutsHistoryLoaded: boolean;
+  bodyMeasurements: BodyMeasurement[];
 
   // Active Session / UI State
   activeWorkout: WorkoutSession | null;
@@ -75,6 +80,11 @@ export interface FitnessState {
 
   // Goals Actions
   updateDailyGoals: (goals: Partial<DailyGoals>) => Promise<void>;
+
+  // Bodyweight Actions
+  logBodyWeight: (weightKg: number, note?: string, date?: string) => Promise<void>;
+  deleteBodyMeasurement: (id: string) => Promise<void>;
+  loadBodyMeasurements: () => Promise<void>;
 
   // Workout Actions
   startWorkout: (templateTitle?: string) => void;
@@ -160,6 +170,7 @@ export const useFitnessStore = create<FitnessState>()(
       workoutCount: 0,
       scannedProductCount: 0,
       workoutsHistoryLoaded: false,
+      bodyMeasurements: [],
       activeWorkout: null,
       streakDays: 0,
       lastActiveWorkoutDate: undefined,
@@ -173,13 +184,14 @@ export const useFitnessStore = create<FitnessState>()(
             await getDatabase();
             await runAsyncStorageToSqliteMigration();
             const date = get().dashboardDate || getLocalDateString();
-            const [meals, dayWorkouts, summaries, goals, activityDates, counts] = await Promise.all([
+            const [meals, dayWorkouts, summaries, goals, activityDates, counts, measurements] = await Promise.all([
               dbGetMealsByDate(date),
               dbGetWorkoutsByDate(date),
               dbGetProductSummaries(3),
               dbGetDailyGoals(),
               dbGetActivityDates(),
               dbGetLibraryCounts().catch(() => null),
+              dbGetAllBodyMeasurements().catch(() => []),
             ]);
             const history = get().workoutsHistoryLoaded ? await dbGetAllWorkouts() : dayWorkouts;
 
@@ -191,6 +203,7 @@ export const useFitnessStore = create<FitnessState>()(
               dailyGoals: goals,
               activityDates,
               dashboardDate: date,
+              bodyMeasurements: measurements,
               mealCount: counts?.meals ?? meals.length,
               mealPhotoCount: counts?.mealsWithPhotos ?? meals.filter((meal) => Boolean(meal.imageUri)).length,
               workoutCount: counts?.workouts ?? history.length,
@@ -331,6 +344,34 @@ export const useFitnessStore = create<FitnessState>()(
       updateDailyGoals: async (goalsUpdate) => {
         const updated = await dbSetDailyGoals(goalsUpdate);
         set({ dailyGoals: updated });
+      },
+
+      logBodyWeight: async (weightKg: number, note?: string, date?: string) => {
+        const measurement: BodyMeasurement = {
+          id: `bm_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          date: date || getLocalDateString(),
+          weightKg: Math.round(weightKg * 10) / 10,
+          note,
+          createdAt: Date.now(),
+        };
+        await dbInsertBodyMeasurement(measurement);
+        set((state) => ({
+          bodyMeasurements: [measurement, ...state.bodyMeasurements.filter((m) => m.id !== measurement.id)].sort(
+            (a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt
+          ),
+        }));
+      },
+
+      deleteBodyMeasurement: async (id: string) => {
+        await dbDeleteBodyMeasurement(id);
+        set((state) => ({
+          bodyMeasurements: state.bodyMeasurements.filter((m) => m.id !== id),
+        }));
+      },
+
+      loadBodyMeasurements: async () => {
+        const measurements = await dbGetAllBodyMeasurements();
+        set({ bodyMeasurements: measurements });
       },
 
       startWorkout: (templateTitle = 'Custom Workout') => {
@@ -747,6 +788,7 @@ export const useFitnessStore = create<FitnessState>()(
           workoutCount: 0,
           scannedProductCount: 0,
           workoutsHistoryLoaded: false,
+      bodyMeasurements: [],
         });
       },
     }),
