@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -13,27 +13,15 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useSharedValue,
-  withDelay,
-  withRepeat,
-  withSequence,
-  withTiming,
-} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useVoiceRecording } from '../hooks/useVoiceRecording';
 import { analyzeMealText, analyzeProductText } from '../services/aiVisionService';
-import {
-  abortSpeechRecognition,
-  isSpeechRecognitionSupported,
-  startSpeechRecognition,
-  stopSpeechRecognition,
-} from '../services/speechService';
 import type { ThemeColors } from '../theme/colors';
 import { useThemeColors, useThemedStyles } from '../theme/theme';
 import { MealAnalysisResult, ToxicityReport } from '../types';
 import { safeHaptics } from '../utils/haptics';
+import { VoicePromptSuggestions } from './voice/VoicePromptSuggestions';
+import { VoiceWaveformVisualizer } from './voice/VoiceWaveformVisualizer';
 
 interface VoiceInputModalProps {
   visible: boolean;
@@ -41,66 +29,6 @@ interface VoiceInputModalProps {
   onClose: () => void;
   onSubmitMealResult?: (result: MealAnalysisResult) => void;
   onSubmitProductResult?: (report: ToxicityReport) => void;
-}
-
-const QUICK_MEAL_PROMPTS = [
-  '2 Paneer Parathas with Curd',
-  '1 Bowl Chicken Biryani & Salad',
-  'Masala Dosa with Sambar & Coconut Chutney',
-  '3 Boiled Eggs & Whole Wheat Toast',
-  'Dal Tadka, 2 Phulkas & Jeera Rice',
-  'Whey Protein Shake with Peanut Butter',
-  'Oatmeal with Almonds & Banana',
-];
-
-const QUICK_PRODUCT_PROMPTS = [
-  'Bajaj Almond Drops Hair Oil',
-  'Maggi 2-Minute Masala Noodles',
-  'Dettol Original Bath Soap',
-  'Good Knight Mosquito Vaporizer',
-  'Colgate Strong Teeth Toothpaste',
-  'Lizol Citrus Disinfectant Floor Cleaner',
-  'Patanjali Dant Kanti Toothpaste',
-  'Kurkure Masala Munch',
-  "Johnson's Baby Powder",
-];
-
-// Reanimated Waveform Bar Component (GPU-accelerated scaleY)
-function WaveformBar({ isListening, delay, minHeight, maxHeight }: {
-  isListening: boolean;
-  delay: number;
-  minHeight: number;
-  maxHeight: number;
-}) {
-  const styles = useThemedStyles(createStyles);
-  const minScale = Math.max(0.1, minHeight / maxHeight);
-  const scaleAnim = useSharedValue(minScale);
-
-  useEffect(() => {
-    if (isListening) {
-      scaleAnim.set(
-        withDelay(
-          delay,
-          withRepeat(
-            withSequence(
-              withTiming(1, { duration: 320, easing: Easing.inOut(Easing.ease) }),
-              withTiming(minScale, { duration: 320, easing: Easing.inOut(Easing.ease) })
-            ),
-            -1,
-            true
-          )
-        )
-      );
-    } else {
-      scaleAnim.set(withTiming(minScale, { duration: 250 }));
-    }
-  }, [isListening, delay, minScale, scaleAnim]);
-
-  const barStyle = useAnimatedStyle(() => ({
-    transform: [{ scaleY: scaleAnim.get() }],
-  }));
-
-  return <Animated.View style={[styles.waveBar, { height: maxHeight, transformOrigin: 'bottom' }, barStyle]} />;
 }
 
 export function VoiceInputModal({
@@ -112,133 +40,24 @@ export function VoiceInputModal({
 }: VoiceInputModalProps) {
   const colors = useThemeColors();
   const styles = useThemedStyles(createStyles);
-  const [transcript, setTranscript] = useState<string>('');
-  const [isListening, setIsListening] = useState<boolean>(false);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
-  const [statusMessage, setStatusMessage] = useState<string>('Tap the microphone to speak');
-  const [isSpeechAvailable, setIsSpeechAvailable] = useState<boolean>(true);
 
-  const cleanupRef = useRef<(() => void) | null>(null);
+  const {
+    transcript,
+    setTranscript,
+    isListening,
+    statusMessage,
+    setStatusMessage,
+    isSpeechAvailable,
+    toggleListening,
+    stopActiveListening,
+    resetRecording,
+  } = useVoiceRecording();
 
-  // Animated pulse rings for the microphone
-  const pulseScale = useSharedValue(1);
-  const pulseOpacity = useSharedValue(0.4);
-
-  useEffect(() => {
-    if (isListening) {
-      pulseScale.set(
-        withRepeat(
-          withTiming(1.35, { duration: 1100, easing: Easing.out(Easing.ease) }),
-          -1,
-          false
-        )
-      );
-      pulseOpacity.set(
-        withRepeat(
-          withSequence(
-            withTiming(0.6, { duration: 400 }),
-            withTiming(0, { duration: 700 })
-          ),
-          -1,
-          false
-        )
-      );
-    } else {
-      pulseScale.set(withTiming(1, { duration: 200 }));
-      pulseOpacity.set(withTiming(0, { duration: 200 }));
-    }
-  }, [isListening, pulseScale, pulseOpacity]);
-
-  const pulseRingStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: pulseScale.get() }],
-    opacity: pulseOpacity.get(),
-  }));
-
-  // Check speech availability on mount
-  useEffect(() => {
-    let mounted = true;
-    isSpeechRecognitionSupported().then((supported) => {
-      if (mounted) {
-        setIsSpeechAvailable(supported);
-      }
-    });
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  // Cleanup on unmount or modal close
   const handleModalClose = useCallback(() => {
-    if (cleanupRef.current) {
-      cleanupRef.current();
-      cleanupRef.current = null;
-    }
-    abortSpeechRecognition().catch(() => {});
-    setIsListening(false);
-    setTranscript('');
-    setStatusMessage('Tap the microphone to speak');
+    resetRecording();
     onClose();
-  }, [onClose]);
-
-  useEffect(() => {
-    return () => {
-      if (cleanupRef.current) {
-        cleanupRef.current();
-        cleanupRef.current = null;
-      }
-      stopSpeechRecognition().catch(() => {});
-    };
-  }, []);
-
-  // Toggle Microphone
-  const handleToggleListening = async () => {
-    safeHaptics.impactMedium();
-
-    if (isListening) {
-      // Stop listening
-      if (cleanupRef.current) {
-        cleanupRef.current();
-        cleanupRef.current = null;
-      }
-      await stopSpeechRecognition();
-      setIsListening(false);
-      setStatusMessage('Listening paused. Review or submit below.');
-      return;
-    }
-
-    // Start listening
-    setIsListening(true);
-    setStatusMessage('Listening... Speak now');
-
-    try {
-      const stopFn = await startSpeechRecognition({
-        onStart: () => {
-          setIsListening(true);
-          setStatusMessage('Listening... Speak clearly');
-        },
-        onResult: (spokenText) => {
-          if (spokenText) {
-            setTranscript(spokenText);
-            setStatusMessage('Speech captured! Tap microphone to finish.');
-          }
-        },
-        onError: (err) => {
-          setIsListening(false);
-          setStatusMessage(`Speech error: ${err}`);
-        },
-        onEnd: () => {
-          setIsListening(false);
-          setStatusMessage('Speech finished. Review or edit below.');
-        },
-      });
-
-      cleanupRef.current = stopFn;
-    } catch (err: unknown) {
-      setIsListening(false);
-      const msg = err instanceof Error ? err.message : String(err);
-      setStatusMessage(`Speech unavailable: ${msg}`);
-    }
-  };
+  }, [resetRecording, onClose]);
 
   // Submit to Gemini AI Analysis
   const handleSubmit = async () => {
@@ -248,15 +67,7 @@ export function VoiceInputModal({
       return;
     }
 
-    if (isListening) {
-      if (cleanupRef.current) {
-        cleanupRef.current();
-        cleanupRef.current = null;
-      }
-      await stopSpeechRecognition();
-      setIsListening(false);
-    }
-
+    await stopActiveListening();
     setIsAnalyzing(true);
     safeHaptics.impactLight();
 
@@ -289,7 +100,6 @@ export function VoiceInputModal({
   };
 
   const isMeal = mode === 'meal';
-  const prompts = isMeal ? QUICK_MEAL_PROMPTS : QUICK_PRODUCT_PROMPTS;
 
   return (
     <Modal
@@ -340,53 +150,11 @@ export function VoiceInputModal({
             showsVerticalScrollIndicator={false}
           >
             {/* Visualizer & Mic Section */}
-            <View style={styles.visualizerContainer}>
-              {/* Concentric Pulse Ring */}
-              <Animated.View style={[styles.pulseRing, pulseRingStyle]} />
-
-              {/* Main Glowing Mic Button */}
-              <Pressable
-                style={({ pressed }) => [
-                  styles.micButton,
-                  isListening && styles.micButtonListening,
-                  pressed && styles.pressed,
-                ]}
-                onPress={handleToggleListening}
-                accessibilityRole="button"
-                accessibilityLabel={isListening ? 'Stop listening' : 'Start listening'}
-              >
-                <Ionicons
-                  name={isListening ? 'mic' : 'mic-outline'}
-                  size={36}
-                  color={isListening ? colors.textInverse : colors.primary}
-                />
-              </Pressable>
-
-              {/* Waveform Bars */}
-              <View style={styles.waveformContainer}>
-                <WaveformBar isListening={isListening} delay={0} minHeight={6} maxHeight={28} />
-                <WaveformBar isListening={isListening} delay={70} minHeight={8} maxHeight={36} />
-                <WaveformBar isListening={isListening} delay={140} minHeight={10} maxHeight={44} />
-                <WaveformBar isListening={isListening} delay={210} minHeight={8} maxHeight={34} />
-                <WaveformBar isListening={isListening} delay={280} minHeight={6} maxHeight={26} />
-              </View>
-
-              {/* Status Pill */}
-              <View
-                style={[
-                  styles.statusPill,
-                  isListening && styles.statusPillActive,
-                ]}
-              >
-                <View
-                  style={[
-                    styles.statusDot,
-                    isListening && styles.statusDotActive,
-                  ]}
-                />
-                <Text style={styles.statusText}>{statusMessage}</Text>
-              </View>
-            </View>
+            <VoiceWaveformVisualizer
+              isListening={isListening}
+              statusMessage={statusMessage}
+              onToggleListening={toggleListening}
+            />
 
             {/* Spoken Transcript Input Card */}
             <View style={styles.transcriptCard}>
@@ -429,41 +197,13 @@ export function VoiceInputModal({
             </View>
 
             {/* Quick Suggestions Carousel */}
-            <View style={styles.suggestionsContainer}>
-              <View style={styles.suggestionsHeaderRow}>
-                <Text style={styles.suggestionsTitle}>
-                  {isMeal ? 'Quick Meal Examples' : 'Popular Indian Products'}
-                </Text>
-                <Text style={styles.suggestionsSubtitle}>Tap to insert</Text>
-              </View>
-
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.chipsScrollRow}
-              >
-                {prompts.map((prompt, idx) => (
-                  <Pressable
-                    key={idx}
-                    style={({ pressed }) => [styles.chipBtn, pressed && styles.pressed]}
-                    onPress={() => {
-                      safeHaptics.selection();
-                      setTranscript(prompt);
-                      setStatusMessage(`Selected "${prompt}"`);
-                    }}
-                  >
-                    <Ionicons
-                      name={isMeal ? 'fast-food-outline' : 'barcode-outline'}
-                      size={13}
-                      color={colors.primary}
-                    />
-                    <Text style={styles.chipText} numberOfLines={1}>
-                      {prompt}
-                    </Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-            </View>
+            <VoicePromptSuggestions
+              isMeal={isMeal}
+              onSelectPrompt={(prompt) => {
+                setTranscript(prompt);
+                setStatusMessage(`Selected "${prompt}"`);
+              }}
+            />
 
             {!isSpeechAvailable ? (
               <View style={styles.noticeBanner}>
@@ -509,262 +249,137 @@ export function VoiceInputModal({
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  keyboardContainer: {
-    flex: 1,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.cardBorder,
-  },
-  closeBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  headerTitleCol: {
-    alignItems: 'center',
-  },
-  headerBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: colors.primaryMuted,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-    marginBottom: 4,
-  },
-  headerBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.primary,
-    textTransform: 'uppercase',
-  },
-  headerTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 40,
-  },
-  visualizerContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginVertical: 16,
-    position: 'relative',
-    height: 180,
-  },
-  pulseRing: {
-    position: 'absolute',
-    width: 108,
-    height: 108,
-    borderRadius: 54,
-    backgroundColor: colors.primary,
-  },
-  micButton: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: colors.cardElevated,
-    borderWidth: 2,
-    borderColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 2,
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 6,
-  },
-  micButtonListening: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primaryLight,
-  },
-  waveformContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    height: 44,
-    marginTop: 16,
-  },
-  waveBar: {
-    width: 5,
-    borderRadius: 3,
-    backgroundColor: colors.primary,
-  },
-  statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: colors.card,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    marginTop: 8,
-  },
-  statusPillActive: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primaryMuted,
-  },
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: colors.textSecondary,
-  },
-  statusDotActive: {
-    backgroundColor: colors.primary,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  transcriptCard: {
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    marginTop: 12,
-  },
-  transcriptHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  transcriptLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  clearLinkText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.danger,
-  },
-  transcriptInput: {
-    color: colors.text,
-    fontSize: 15,
-    minHeight: 70,
-    lineHeight: 22,
-    padding: 0,
-  },
-  transcriptHint: {
-    fontSize: 11,
-    color: colors.textSecondary,
-    marginTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.cardBorder,
-    paddingTop: 8,
-  },
-  suggestionsContainer: {
-    marginTop: 20,
-  },
-  suggestionsHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  suggestionsTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  suggestionsSubtitle: {
-    fontSize: 11,
-    color: colors.textSecondary,
-  },
-  chipsScrollRow: {
-    gap: 8,
-    paddingRight: 8,
-  },
-  chipBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  chipText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  noticeBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: colors.softOrange,
-    borderWidth: 1,
-    borderColor: colors.softOrangeBorder,
-    padding: 12,
-    borderRadius: 14,
-    marginTop: 16,
-  },
-  noticeText: {
-    fontSize: 11,
-    color: colors.softOrangeText,
-    flex: 1,
-    lineHeight: 16,
-  },
-  submitBtn: {
-    backgroundColor: colors.primary,
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 24,
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  submitBtnDisabled: {
-    opacity: 0.45,
-  },
-  submitBtnInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  submitBtnText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.textInverse,
-  },
-  pressed: {
-    opacity: 0.75,
-  },
-});
+    safeArea: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    keyboardContainer: {
+      flex: 1,
+    },
+    headerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 20,
+      paddingVertical: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.cardBorder,
+    },
+    closeBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    headerTitleCol: {
+      alignItems: 'center',
+    },
+    headerBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      marginBottom: 2,
+    },
+    headerBadgeText: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: colors.primary,
+      letterSpacing: 0.8,
+      textTransform: 'uppercase',
+    },
+    headerTitle: {
+      fontSize: 17,
+      fontWeight: '800',
+      color: colors.text,
+    },
+    scrollContent: {
+      paddingHorizontal: 20,
+      paddingTop: 16,
+      paddingBottom: 40,
+    },
+    transcriptCard: {
+      backgroundColor: colors.card,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      padding: 16,
+      marginTop: 8,
+    },
+    transcriptHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    transcriptLabel: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    clearLinkText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.primary,
+    },
+    transcriptInput: {
+      fontSize: 16,
+      fontWeight: '500',
+      color: colors.text,
+      minHeight: 76,
+      lineHeight: 24,
+      padding: 0,
+    },
+    transcriptHint: {
+      fontSize: 11,
+      color: colors.textMuted,
+      marginTop: 8,
+    },
+    noticeBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      backgroundColor: colors.softOrange,
+      borderWidth: 1,
+      borderColor: colors.softOrangeBorder,
+      borderRadius: 12,
+      padding: 12,
+      marginTop: 16,
+    },
+    noticeText: {
+      fontSize: 12,
+      color: colors.softOrangeText,
+      flex: 1,
+      lineHeight: 16,
+    },
+    submitBtn: {
+      backgroundColor: colors.primary,
+      borderRadius: 16,
+      paddingVertical: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 24,
+    },
+    submitBtnDisabled: {
+      opacity: 0.5,
+    },
+    submitBtnInner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    submitBtnText: {
+      color: colors.textInverse,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    pressed: {
+      opacity: 0.7,
+    },
+  });
 }
-
