@@ -122,12 +122,9 @@ export async function dbInsertWorkout(workout: WorkoutSession): Promise<void> {
   const db = await getDatabase();
   const date = workout.date || getLocalDateString(workout.completedAt || workout.startedAt);
   const now = Date.now();
+  const spId = `sp_wo_${now}_${Math.random().toString(36).substring(2, 7)}`;
 
-  try {
-    await db.execAsync('BEGIN TRANSACTION;');
-  } catch {
-    // Non-fatal if transactions unsupported by adapter
-  }
+  await db.execAsync(`SAVEPOINT ${spId};`);
 
   try {
     await db.runAsync(
@@ -166,17 +163,14 @@ export async function dbInsertWorkout(workout: WorkoutSession): Promise<void> {
       setRows
     );
 
-    try {
-      await db.execAsync('COMMIT;');
-    } catch {
-      // Non-fatal
-    }
+    await db.execAsync(`RELEASE SAVEPOINT ${spId};`);
     invalidateActivityDatesCache();
   } catch (err) {
     try {
-      await db.execAsync('ROLLBACK;');
+      await db.execAsync(`ROLLBACK TO SAVEPOINT ${spId};`);
+      await db.execAsync(`RELEASE SAVEPOINT ${spId};`);
     } catch {
-      // Ignore
+      // Ignore if adapter lacks savepoint rollback
     }
     throw err;
   }

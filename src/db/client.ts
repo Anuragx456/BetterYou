@@ -3,6 +3,7 @@ export interface DatabaseAdapter {
   runAsync(sql: string, params?: unknown[]): Promise<{ rowsAffected: number; lastInsertRowId: number }>;
   getAllAsync<T>(sql: string, params?: unknown[]): Promise<T[]>;
   getFirstAsync<T>(sql: string, params?: unknown[]): Promise<T | null>;
+  withTransactionAsync<T>(fn: () => Promise<T>): Promise<T>;
 }
 
 let dbInstance: DatabaseAdapter | null = null;
@@ -19,9 +20,41 @@ class MemoryDatabaseAdapter implements DatabaseAdapter {
     daily_goals: [],
     migrations_meta: [],
   };
+  private snapshots: string[] = [];
+
+  async withTransactionAsync<T>(fn: () => Promise<T>): Promise<T> {
+    const snapshot = JSON.stringify(this.tables);
+    this.snapshots.push(snapshot);
+    try {
+      const res = await fn();
+      this.snapshots.pop();
+      return res;
+    } catch (err) {
+      const last = this.snapshots.pop();
+      if (last) {
+        this.tables = JSON.parse(last);
+      }
+      throw err;
+    }
+  }
 
   async execAsync(sql: string): Promise<void> {
-    const trimmed = sql.toLowerCase();
+    const trimmed = sql.toLowerCase().trim();
+    if (trimmed.startsWith('begin') || trimmed.startsWith('savepoint')) {
+      this.snapshots.push(JSON.stringify(this.tables));
+      return;
+    }
+    if (trimmed.startsWith('commit') || trimmed.startsWith('release savepoint')) {
+      this.snapshots.pop();
+      return;
+    }
+    if (trimmed.startsWith('rollback')) {
+      const last = this.snapshots.pop();
+      if (last) {
+        this.tables = JSON.parse(last);
+      }
+      return;
+    }
     if (trimmed.includes('delete from meals')) this.tables.meals = [];
     if (trimmed.includes('delete from sets')) this.tables.sets = [];
     if (trimmed.includes('delete from exercises')) this.tables.exercises = [];
@@ -152,6 +185,20 @@ export async function getDatabase(): Promise<DatabaseAdapter> {
         },
         getAllAsync: async <T>(sql: string, params = []) => (nativeDb.getAllAsync as any)(sql, params) as Promise<T[]>,
         getFirstAsync: async <T>(sql: string, params = []) => (nativeDb.getFirstAsync as any)(sql, params) as Promise<T | null>,
+        withTransactionAsync: async <T>(fn: () => Promise<T>): Promise<T> => {
+          if (typeof (nativeDb as unknown as Record<string, unknown>).withTransactionAsync === 'function') {
+            return (nativeDb as unknown as { withTransactionAsync: <R>(f: () => Promise<R>) => Promise<R> }).withTransactionAsync(fn);
+          }
+          await nativeDb.execAsync('BEGIN TRANSACTION;');
+          try {
+            const res = await fn();
+            await nativeDb.execAsync('COMMIT;');
+            return res;
+          } catch (err) {
+            await nativeDb.execAsync('ROLLBACK;');
+            throw err;
+          }
+        },
       };
     } catch (err: unknown) {
       console.warn('[db] Failed to load native expo-sqlite, using memory adapter:', err);
@@ -179,6 +226,17 @@ export async function getDatabase(): Promise<DatabaseAdapter> {
           const stmt = bunDb.prepare(sql);
           const result = stmt.get(...(params as any[]));
           return (result ?? null) as T | null;
+        },
+        withTransactionAsync: async <T>(fn: () => Promise<T>): Promise<T> => {
+          bunDb.run('BEGIN TRANSACTION;');
+          try {
+            const res = await fn();
+            bunDb.run('COMMIT;');
+            return res;
+          } catch (err) {
+            bunDb.run('ROLLBACK;');
+            throw err;
+          }
         },
       };
     } catch {
