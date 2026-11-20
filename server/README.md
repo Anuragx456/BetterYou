@@ -23,8 +23,14 @@ Create `server/.env`:
 PORT=8787
 GEMINI_API_KEY=your_actual_google_gemini_api_key_here
 
-# Optional: Shared bootstrap check for device registration
+# Optional: Shared bootstrap check for device registration (REQUIRED in production, min 32 chars)
 BOOTSTRAP_SECRET=
+
+# Required in production when Upstash Redis is enabled: 32-byte AES-256-GCM encryption key
+DEVICE_STORE_ENCRYPTION_KEY=
+
+# Optional: Reverse proxy header trust (set to "true" behind Fly.io, Cloudflare, etc.)
+TRUST_PROXY_HEADERS=true
 
 # Optional: Upstash Redis for distributed rate-limiting & device records
 UPSTASH_REDIS_REST_URL=
@@ -68,16 +74,22 @@ Connect the repository and set the root directory to `server/`. Specify `bun run
 
 ### 1. Registration Flow (`POST /v1/devices/register`)
 - On first launch, the mobile app calls `/v1/devices/register`.
+- **Fail-Closed Production Rules**: If running in production (`NODE_ENV=production` or `PROXY_ENV=production`), `BOOTSTRAP_SECRET` must be set and $\ge 32$ characters, and `DEVICE_STORE_ENCRYPTION_KEY` must be set and exactly 32 bytes (64 hex characters or 32 raw bytes). If either is missing, registration is disabled with HTTP 503 Service Unavailable.
+- **Constant-Time Verification**: Incoming bootstrap secrets (`x-bootstrap-secret` header or payload) are hashed with SHA-256 and compared using `crypto.timingSafeEqual` to eliminate timing side-channels without length leakage.
 - The proxy generates a cryptographically secure random per-device secret (32 bytes / 64 hex characters) using `crypto.randomBytes(32)`.
-- The proxy stores the device record (with SHA-256 hashed secret for lookup and verification) and returns `{ deviceId, deviceSecret }` to the client.
+- **At-Rest AES-256-GCM Encryption**: The Upstash Redis store never writes plaintext secrets to disk or cloud databases. Records are encrypted with AES-256-GCM using `DEVICE_STORE_ENCRYPTION_KEY`, storing `{ iv, ciphertext, authTag }`. Tampered ciphertext fails closed safely.
+- **Honest Rate Limiting**: Client IP extraction from `x-forwarded-for` and `Fly-Client-IP` is strictly gated by `TRUST_PROXY_HEADERS=true` (safely set by reverse proxies like Fly.io). Without it, an un-spoofable global cap (100 registrations/hour) and per-deviceId cap (5 registrations/hour) protect the cluster in addition to client rate limiting.
 - The client persists `deviceSecret` in hardware-backed `expo-secure-store` (Android Keystore / iOS Keychain), never in plaintext AsyncStorage.
 - Re-registration generates a fresh secret and overwrites the previous record; the endpoint **never echoes or returns another device's existing secret**.
-- Registration is protected by:
-  1. A strict rate limit (maximum 5 registrations per minute per client).
-  2. A configurable bootstrap check (`BOOTSTRAP_SECRET` environment variable).
-  3. A pluggable platform attestation interface (`AttestationVerifier`).
 
-### 2. Request Signing (`HMAC-SHA256`)
+### 2. Device Secret Rotation (`POST /v1/devices/rotate`)
+- When rotating credentials, an authenticated device calls `/v1/devices/rotate`.
+- The request is authenticated by the existing HMAC-SHA256 middleware using the current device secret.
+- Upon valid verification, the server generates a fresh 32-byte secret, updates the store atomically, and returns `{ deviceId, deviceSecret }`.
+- The old secret is immediately invalidated; subsequent requests with the old secret are rejected.
+- Client helper `rotateDeviceSecretWithProxy()` only overwrites the local SecureStore credential after the server confirms success.
+
+### 3. Request Signing (`HMAC-SHA256`)
 Every request to `/v1/*` must include:
 - `x-device-id`: The registered device identifier.
 - `x-timestamp`: The client timestamp in milliseconds.

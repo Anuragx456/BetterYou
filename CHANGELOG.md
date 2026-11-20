@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Caveats Closed Post-Sprint-3 (Audit Caveats Milestone)
+#### Added
+- **Fail-Closed Device Registration & Secret Rotation (Task A)**:
+  - Enforced production fail-closed requirement on `POST /v1/devices/register` (returns HTTP 503 if `BOOTSTRAP_SECRET` is missing or $<32$ characters, or if `DEVICE_STORE_ENCRYPTION_KEY` is missing in production).
+  - Implemented constant-time bootstrap secret comparison via SHA-256 + `crypto.timingSafeEqual`.
+  - Added honest reverse proxy rate limiting gated by `TRUST_PROXY_HEADERS=true` (with 100/hr global registration cap and 5/hr per-deviceId cap).
+  - Redesigned `DeviceStore` to use a single representation and encrypted Upstash/Redis storage at rest using AES-256-GCM (`DEVICE_STORE_ENCRYPTION_KEY`).
+  - Added authenticated `POST /v1/devices/rotate` endpoint with client helper `rotateDeviceSecretWithProxy`.
+- **Atomic Backup Restore with Nested Savepoints & Store Rehydration (Task B)**:
+  - Upgraded SQLite database adapter with `withTransactionAsync<T>` supporting real SQLite transactions and nested `SAVEPOINT`s.
+  - Added pre-restore snapshot rollback on fault injection for both `replace` and `merge` strategies.
+  - Automated post-restore Zustand store rehydration (`useFitnessStore.getState().refreshLoadedData()`) and added fault-injection tests.
+- **Decomposition of Remaining 9 God Files & Automated Size Guard (Task C)**:
+  - Modularized all 9 remaining oversized source files down to $\le 600$ lines: `src/services/barcodeService.ts` (1,146 $\to$ 34 lines), `src/app/onboarding.tsx` (1,098 $\to$ 225 lines), `src/app/nutrition-target.tsx` (977 $\to$ 272 lines), `src/components/ToxicityReportModal.tsx` (919 $\to$ 393 lines), `src/app/ai-settings.tsx` (840 $\to$ 328 lines), `src/store/useFitnessStore.ts` (837 $\to$ 534 lines), `src/components/GeminiUsageSection.tsx` (827 $\to$ 374 lines), `src/components/VoiceInputModal.tsx` (770 $\to$ 385 lines), `src/store/useSettingsStore.ts` (634 $\to$ 195 lines).
+  - Added `scripts/check-file-size.mjs` size guard script wired into CI.
+- **CI Trigger Expansion, Stable testIDs & Android Emulator Runner (Task D)**:
+  - Added `fix/**` and `feat/**` branch push triggers to `.github/workflows/ci.yml`.
+  - Added stable `testID` props across tab bars, meal inputs/saves, workout start/finish, set completion, and barcode/scan views.
+  - Updated Maestro Golden Path flows (`log-meal.yaml`, `workout-session.yaml`, `scan-barcode.yaml`) with ID-based selectors.
+  - Added non-blocking Android emulator runner job to CI (`reactivecircus/android-emulator-runner@v2`).
+- **Release Configuration Validator & Production Deployment Checklist (Task E)**:
+  - Created `scripts/validate-release-config.mjs` with `--strict` mode (enforced on main/master) and `--allow-placeholders` mode.
+  - Configured preview and production profiles in `eas.json` to point to `https://betteryou-proxy.fly.dev`.
+  - Documented complete production deployment checklist in `RELEASE.md`.
+- **Indian Food Database Provenance Audit & Integrity Tests (Task F)**:
+  - Audited all 50 dishes in `src/data/indianFoodDb.json` with `"confidence": "verified" | "estimate"` and honest source attribution.
+  - Updated `src/utils/indianFoodMatcher.ts` and `MealVerificationCard.tsx` to distinguish between `"from local database (IFCT 2017)"` and `"from local database (estimate)"`.
+  - Added `src/data/__tests__/indianFoodDb.test.ts` verifying Atwater factors ($\le 20\%$), thermodynamic macro sums ($\le 105$g), and alias uniqueness.
+
+---
+
 ### Sprint 3 — Code Health, E2E Tests & Documentation (P2)
 #### Added
 - **Maestro Golden Path E2E Suite**: Created automated flows in `.maestro/`:
