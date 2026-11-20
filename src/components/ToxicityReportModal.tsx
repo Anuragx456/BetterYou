@@ -1,10 +1,8 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import React, { useEffect, useState } from 'react';
-import Svg, { Circle } from 'react-native-svg';
 import {
   Alert,
-  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -14,18 +12,16 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { recalculateToxicityReport } from '../services/barcodeService';
-import { getFullImageUri } from '../utils/imageManager';
 import { useFitnessStore } from '../store/useFitnessStore';
 import { getModelDisplayName } from '../store/useSettingsStore';
 import type { ThemeColors } from '../theme/colors';
 import { useThemeColors, useThemedStyles } from '../theme/theme';
-import {
-  NovaGroup,
-  NutriscoreGrade,
-  ScannedProduct,
-  TargetExposure,
-} from '../types';
+import type { ScannedProduct } from '../types';
+import { getFullImageUri } from '../utils/imageManager';
 import { EditProductModal } from './EditProductModal';
+import { IngredientBreakdownSection } from './scan/IngredientBreakdownSection';
+import { ModalScoreGaugeHero } from './scan/ModalScoreGaugeHero';
+import { StandardsDisclosureCard } from './scan/StandardsDisclosureCard';
 
 interface ToxicityReportModalProps {
   visible: boolean;
@@ -60,57 +56,6 @@ export function ToxicityReportModal({
       : score >= 40
       ? colors.safetyModerate
       : colors.safetyHighRisk;
-
-  // Visual meta helpers
-  const getExposureMeta = (exposure?: TargetExposure) => {
-    switch (exposure) {
-      case 'Inhalation':
-        return { icon: 'cloud-outline' as const, label: 'Inhalation Exposure', color: colors.danger };
-      case 'Dermal Absorption':
-        return { icon: 'hand-left-outline' as const, label: 'Dermal Absorption', color: colors.fat };
-      case 'Mucous Membrane':
-        return { icon: 'alert-circle-outline' as const, label: 'Mucous Membrane', color: colors.warning };
-      case 'Ingestion':
-        return { icon: 'restaurant-outline' as const, label: 'Oral Ingestion', color: colors.success };
-      default:
-        return { icon: 'shield-outline' as const, label: 'General Household', color: colors.textMuted };
-    }
-  };
-
-  const getNovaDetails = (nova: NovaGroup | null | undefined) => {
-    switch (nova) {
-      case 1:
-        return { label: 'NOVA 1', title: 'Unprocessed / Natural', color: colors.nova1 };
-      case 2:
-        return { label: 'NOVA 2', title: 'Processed Culinary', color: colors.nova2 };
-      case 3:
-        return { label: 'NOVA 3', title: 'Processed Food', color: colors.nova3 };
-      case 4:
-        return { label: 'NOVA 4', title: 'Ultra-Processed (UPF)', color: colors.nova4 };
-      default:
-        return null;
-    }
-  };
-
-  const getNutriscoreColor = (grade: NutriscoreGrade | null | undefined): string => {
-    switch (grade) {
-      case 'a':
-        return colors.success;
-      case 'b':
-        return colors.nova1;
-      case 'c':
-        return colors.warning;
-      case 'd':
-        return colors.primary;
-      case 'e':
-        return colors.danger;
-      default:
-        return colors.textMuted;
-    }
-  };
-
-  const exposureMeta = getExposureMeta(report.targetExposure);
-  const novaDetails = getNovaDetails(report.novaGroup);
 
   // Handle Edit Save
   const handleSaveEdit = (newName: string, newIngredients: string[]) => {
@@ -216,56 +161,14 @@ export function ToxicityReportModal({
           )}
 
           {/* Circular Safety Score Gauge Hero */}
-          <View style={styles.gaugeHeroCard}>
-            <View style={styles.gaugeRingWrapper}>
-              <Svg width={156} height={156}>
-                <Circle
-                  cx={78}
-                  cy={78}
-                  r={68}
-                  stroke={colors.surfaceSubtle}
-                  strokeWidth={10}
-                  fill="none"
-                />
-                <Circle
-                  cx={78}
-                  cy={78}
-                  r={68}
-                  stroke={scoreColor}
-                  strokeWidth={10}
-                  strokeDasharray={`${(2 * Math.PI * 68).toFixed(2)} ${(2 * Math.PI * 68).toFixed(2)}`}
-                  strokeDashoffset={(2 * Math.PI * 68 * (1 - Math.min(1, Math.max(0, score / 100)))).toFixed(2)}
-                  strokeLinecap="round"
-                  fill="none"
-                  transform="rotate(-90 78 78)"
-                />
-              </Svg>
-              <View style={styles.gaugeCenterAbsolute} pointerEvents="none">
-                <Text style={[styles.gaugeScoreHuge, { color: scoreColor }]}>{score}</Text>
-                <Text style={styles.gaugeRiskLabel}>
-                  {report.riskLevel === 'Safe' ? 'Safe & Clean' : report.riskLevel}
-                </Text>
-                {report.category ? (
-                  <View style={styles.gaugeCategoryBadge}>
-                    <Text style={styles.gaugeCategoryText}>{report.category}</Text>
-                  </View>
-                ) : null}
-              </View>
-            </View>
-
-            <View style={styles.productNameRowClean}>
-              <Text style={styles.productNameClean} numberOfLines={2}>
-                {product.productName}
-              </Text>
-              <Pressable
-                style={styles.inlineEditBtnClean}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                onPress={() => setIsEditModalVisible(true)}
-              >
-                <Ionicons name="pencil" size={13} color={colors.textSecondary} />
-              </Pressable>
-            </View>
-          </View>
+          <ModalScoreGaugeHero
+            score={score}
+            scoreColor={scoreColor}
+            riskLevel={report.riskLevel}
+            category={report.category}
+            productName={product.productName}
+            onOpenEdit={() => setIsEditModalVisible(true)}
+          />
 
           {/* Plain-English Verdict Card */}
           <View style={styles.verdictCardClean}>
@@ -288,130 +191,14 @@ export function ToxicityReportModal({
           ) : null}
 
           {/* Clean Ingredients Breakdown */}
-          <View style={styles.ingredientsSectionClean}>
-            <View style={styles.ingredientsHeaderRowClean}>
-              <Text style={styles.ingredientsTitleClean}>
-                Ingredients Breakdown {report.allIngredients ? `(${report.allIngredients.length})` : ''}
-              </Text>
-              <Pressable
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                onPress={() => setIsEditModalVisible(true)}
-              >
-                <Text style={styles.editLinkTextClean}>Edit</Text>
-              </Pressable>
-            </View>
-
-            <View style={styles.ingredientsListClean}>
-              {/* Flagged Harmful Additives first */}
-              {report.harmfulIngredients.map((item, idx) => (
-                <View key={`harmful-${idx}`} style={styles.harmfulItemCard}>
-                  <View style={styles.harmfulItemHeader}>
-                    <View style={styles.harmfulItemTitleRow}>
-                      <View style={[styles.statusDotClean, { backgroundColor: colors.danger, marginTop: 4 }]} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.ingredientNameHarmful}>{item.name}</Text>
-                        <View style={styles.harmfulMetaRow}>
-                          <Text style={styles.harmfulCategoryTag}>{item.category}</Text>
-                          {item.concentrationRank ? (
-                            <Text style={styles.harmfulRankTag}>{item.concentrationRank}</Text>
-                          ) : null}
-                        </View>
-                      </View>
-                    </View>
-                    <View style={styles.badgeGroup}>
-                      <View style={styles.severityBadgeClean}>
-                        <Text style={styles.severityBadgeText}>{item.severity}</Text>
-                      </View>
-                      {typeof item.deduction === 'number' && item.deduction > 0 ? (
-                        <View style={styles.deductionBadge}>
-                          <Text style={styles.deductionBadgeText}>-{item.deduction} pts</Text>
-                        </View>
-                      ) : null}
-                    </View>
-                  </View>
-
-                  <Text style={styles.ingredientHarmSub}>{item.healthImpact}</Text>
-
-                  {/* Scientific Rationale ("Why it's flagged") */}
-                  {item.rationale ? (
-                    <View style={styles.rationaleBox}>
-                      <Text style={styles.rationaleLabel}>Why it&apos;s flagged:</Text>
-                      <Text style={styles.rationaleText}>{item.rationale}</Text>
-                    </View>
-                  ) : null}
-
-                  {/* Regulatory Source & Citation Link */}
-                  {(item.source || item.sourceUrl) ? (
-                    <View style={styles.sourceCitationRow}>
-                      <View style={styles.sourcePill}>
-                        <Ionicons name="shield-checkmark" size={11} color={colors.primary} />
-                        <Text style={styles.sourcePillText}>Source: {item.source || 'Regulatory Monograph'}</Text>
-                      </View>
-                      {item.sourceUrl ? (
-                        <Pressable
-                          style={({ pressed }) => [styles.sourceLinkBtn, pressed && styles.pressed]}
-                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                          onPress={() => Linking.openURL(item.sourceUrl!).catch(() => {})}
-                        >
-                          <Text style={styles.sourceLinkText}>View standard</Text>
-                          <Ionicons name="open-outline" size={12} color={colors.primary} />
-                        </Pressable>
-                      ) : null}
-                    </View>
-                  ) : null}
-                </View>
-              ))}
-
-              {/* Clean / Unflagged Ingredients */}
-              {report.allIngredients ? report.allIngredients.map((ing, idx) => {
-                const isFlagged = report.harmfulIngredients.some(
-                  (h) => h.name.toLowerCase().includes(ing.toLowerCase()) || ing.toLowerCase().includes(h.name.toLowerCase())
-                );
-                if (isFlagged) return null;
-
-                return (
-                  <View key={`clean-${idx}`} style={styles.ingredientRowClean}>
-                    <View style={styles.ingredientRowLeft}>
-                      <View style={[styles.statusDotClean, { backgroundColor: colors.safetyClean }]} />
-                      <Text style={styles.ingredientNameClean}>{ing}</Text>
-                    </View>
-                  </View>
-                );
-              }) : null}
-            </View>
-          </View>
+          <IngredientBreakdownSection
+            allIngredients={report.allIngredients}
+            harmfulIngredients={report.harmfulIngredients}
+            onOpenEdit={() => setIsEditModalVisible(true)}
+          />
 
           {/* Standards & Provenance Card */}
-          <View style={styles.standardsDisclosureCard}>
-            <View style={styles.standardsHeaderClean}>
-              <Text style={styles.standardsTitleClean}>Regulatory Standards</Text>
-              {report.regulatoryStandard ? (
-                <Text style={styles.standardPillClean}>{report.regulatoryStandard}</Text>
-              ) : null}
-            </View>
-            <View style={styles.standardsRowClean}>
-              {novaDetails ? (
-                <View style={styles.standardChipClean}>
-                  <Text style={[styles.standardChipTag, { color: novaDetails.color }]}>{novaDetails.label}</Text>
-                  <Text style={styles.standardChipDesc}>{novaDetails.title}</Text>
-                </View>
-              ) : null}
-              {report.nutriscoreGrade ? (
-                <View style={styles.standardChipClean}>
-                  <Text style={[styles.standardChipTag, { color: getNutriscoreColor(report.nutriscoreGrade) }]}>
-                    Nutri-Score {report.nutriscoreGrade.toUpperCase()}
-                  </Text>
-                  <Text style={styles.standardChipDesc}>Quality</Text>
-                </View>
-              ) : null}
-              {report.targetExposure ? (
-                <View style={styles.standardChipClean}>
-                  <Text style={[styles.standardChipTag, { color: exposureMeta.color }]}>{report.targetExposure}</Text>
-                  <Text style={styles.standardChipDesc}>Exposure</Text>
-                </View>
-              ) : null}
-            </View>
-          </View>
+          <StandardsDisclosureCard report={report} />
 
           {/* Bottom Action Button */}
           <View style={styles.bottomActionsClean}>
@@ -441,479 +228,166 @@ export function ToxicityReportModal({
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.cardBorder,
-  },
-  iconBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  iconBtnDanger: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: colors.fatMuted,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  headerTitleCol: {
-    alignItems: 'center',
-  },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: colors.text,
-  },
-  headerSub: {
-    fontSize: 11,
-    color: colors.primary,
-    fontWeight: '600',
-    marginTop: 1,
-  },
-  headerActionsRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 40,
-  },
-  imagePreviewBox: {
-    width: '100%',
-    height: 180,
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  imagePreview: {
-    width: '100%',
-    height: '100%',
-  },
-  // Gauge Hero Card
-  provenanceDemoBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    alignSelf: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    backgroundColor: colors.softOrange,
-    borderWidth: 1,
-    borderColor: colors.softOrangeBorder,
-    marginBottom: 12,
-  },
-  provenanceDemoText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.softOrangeText,
-    letterSpacing: 0.2,
-  },
-  provenanceVerifiedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    alignSelf: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    backgroundColor: colors.softGreen,
-    borderWidth: 1,
-    borderColor: colors.softGreenBorder,
-    marginBottom: 12,
-  },
-  provenanceVerifiedText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.softGreenText,
-    letterSpacing: 0.2,
-  },
-  gaugeHeroCard: {
-    backgroundColor: colors.card,
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    alignItems: 'center',
-  },
-  gaugeRingWrapper: {
-    width: 156,
-    height: 156,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-    marginVertical: 8,
-  },
-  gaugeCenterAbsolute: {
-    position: 'absolute',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  gaugeScoreHuge: {
-    fontSize: 44,
-    fontWeight: '800',
-    letterSpacing: -1,
-    fontVariant: ['tabular-nums'],
-  },
-  gaugeRiskLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  gaugeCategoryBadge: {
-    backgroundColor: colors.surfaceSubtle,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
-    marginTop: 6,
-    borderWidth: 1,
-    borderColor: colors.hairline,
-  },
-  gaugeCategoryText: {
-    fontSize: 10,
-    color: colors.textSecondary,
-    fontWeight: '500',
-  },
-  productNameRowClean: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    marginTop: 12,
-    paddingHorizontal: 12,
-  },
-  productNameClean: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.text,
-    textAlign: 'center',
-  },
-  inlineEditBtnClean: {
-    padding: 4,
-  },
-
-  // Verdict Card
-  verdictCardClean: {
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  verdictTextBold: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.text,
-    lineHeight: 20,
-  },
-  verdictTextSub: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    lineHeight: 18,
-    marginTop: 6,
-  },
-
-  // Indian Alert Card
-  indianAlertCardClean: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    backgroundColor: colors.softOrange,
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: colors.softOrangeBorder,
-  },
-  indianAlertTextClean: {
-    flex: 1,
-    fontSize: 12,
-    color: colors.softOrangeText,
-    lineHeight: 17,
-    fontWeight: '500',
-  },
-
-  // Clean Ingredients Breakdown
-  ingredientsSectionClean: {
-    backgroundColor: colors.card,
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  ingredientsHeaderRowClean: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  ingredientsTitleClean: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  editLinkTextClean: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  ingredientsListClean: {
-    gap: 0,
-  },
-  ingredientRowClean: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.hairline,
-  },
-  ingredientRowLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    flex: 1,
-    marginRight: 8,
-  },
-  statusDotClean: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-  },
-  ingredientNameClean: {
-    fontSize: 13,
-    color: colors.text,
-    fontWeight: '500',
-  },
-  ingredientNameHarmful: {
-    fontSize: 13,
-    color: colors.text,
-    fontWeight: '600',
-  },
-  ingredientHarmSub: {
-    fontSize: 11,
-    color: colors.danger,
-    marginTop: 2,
-    lineHeight: 15,
-  },
-  severityBadgeClean: {
-    backgroundColor: colors.fatMuted,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  severityBadgeText: {
-    fontSize: 10,
-    color: colors.danger,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  harmfulItemCard: {
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.hairline,
-  },
-  harmfulItemHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  harmfulItemTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    flex: 1,
-    marginRight: 8,
-  },
-  harmfulMetaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 3,
-  },
-  harmfulCategoryTag: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: colors.textSecondary,
-    backgroundColor: colors.surfaceSubtle,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  harmfulRankTag: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.softOrangeText,
-    backgroundColor: colors.softOrange,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  badgeGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  deductionBadge: {
-    backgroundColor: colors.fatMuted,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  deductionBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.danger,
-    fontVariant: ['tabular-nums'],
-  },
-  rationaleBox: {
-    backgroundColor: colors.surfaceSubtle,
-    borderRadius: 8,
-    padding: 8,
-    marginTop: 8,
-    borderLeftWidth: 2,
-    borderLeftColor: colors.primary,
-  },
-  rationaleLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.primary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  rationaleText: {
-    fontSize: 11,
-    color: colors.textSecondary,
-    lineHeight: 16,
-  },
-  sourceCitationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 8,
-  },
-  sourcePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  sourcePillText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  sourceLinkBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  sourceLinkText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: colors.primary,
-    textDecorationLine: 'underline',
-  },
-
-  // Standards Disclosure
-  standardsDisclosureCard: {
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  standardsHeaderClean: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  standardsTitleClean: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textSecondary,
-  },
-  standardPillClean: {
-    fontSize: 11,
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  standardsRowClean: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  standardChipClean: {
-    flex: 1,
-    backgroundColor: colors.surfaceSubtle,
-    borderRadius: 10,
-    padding: 8,
-    borderWidth: 1,
-    borderColor: colors.hairline,
-  },
-  standardChipTag: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  standardChipDesc: {
-    fontSize: 9,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-
-  // Bottom Actions
-  bottomActionsClean: {
-    gap: 10,
-    marginTop: 4,
-  },
-  closeBtnClean: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 14,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  closeBtnTextClean: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  pressed: {
-    opacity: 0.82,
-    transform: [{ scale: 0.98 }],
-  },
-});
+    safeArea: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    headerRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.cardBorder,
+    },
+    iconBtn: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+    },
+    iconBtnDanger: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: colors.fatMuted,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+    },
+    headerTitleCol: {
+      alignItems: 'center',
+    },
+    headerTitle: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: colors.text,
+    },
+    headerSub: {
+      fontSize: 11,
+      color: colors.primary,
+      fontWeight: '600',
+      marginTop: 1,
+    },
+    headerActionsRight: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    scrollContent: {
+      paddingHorizontal: 16,
+      paddingTop: 16,
+      paddingBottom: 40,
+    },
+    imagePreviewBox: {
+      width: '100%',
+      height: 180,
+      borderRadius: 16,
+      overflow: 'hidden',
+      marginBottom: 16,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+    },
+    imagePreview: {
+      width: '100%',
+      height: '100%',
+    },
+    provenanceDemoBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'flex-start',
+      gap: 6,
+      backgroundColor: colors.warning + '18',
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 20,
+      marginBottom: 14,
+    },
+    provenanceDemoText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.warning,
+    },
+    provenanceVerifiedBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'flex-start',
+      gap: 6,
+      backgroundColor: colors.primary + '14',
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 20,
+      marginBottom: 14,
+    },
+    provenanceVerifiedText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.primary,
+    },
+    verdictCardClean: {
+      backgroundColor: colors.card,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      padding: 16,
+      marginBottom: 16,
+    },
+    verdictTextBold: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.text,
+      lineHeight: 20,
+    },
+    verdictTextSub: {
+      fontSize: 13,
+      color: colors.textSecondary,
+      lineHeight: 18,
+      marginTop: 6,
+    },
+    indianAlertCardClean: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      backgroundColor: colors.warning + '12',
+      borderWidth: 1,
+      borderColor: colors.warning + '30',
+      borderRadius: 14,
+      padding: 12,
+      marginBottom: 16,
+    },
+    indianAlertTextClean: {
+      flex: 1,
+      fontSize: 13,
+      color: colors.warning,
+      lineHeight: 18,
+      fontWeight: '600',
+    },
+    bottomActionsClean: {
+      marginTop: 12,
+    },
+    closeBtnClean: {
+      backgroundColor: colors.card,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      paddingVertical: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    closeBtnTextClean: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.text,
+    },
+    pressed: {
+      opacity: 0.7,
+    },
+  });
 }
-
