@@ -56,6 +56,9 @@ jobs:
       - name: Expo Doctor Diagnostic Check
         run: bunx expo-doctor
 
+      - name: Check Source File Sizes (<= 600 lines target)
+        run: node scripts/check-file-size.mjs
+
       - name: Gitleaks Secrets Scan
         uses: gitleaks/gitleaks-action@v2
         env:

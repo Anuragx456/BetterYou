@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Audit Remediation Tracking**: Renamed `AUDIT.md` to `docs/AUDIT-2026-11.md` with a comprehensive executive remediation matrix.
 
 #### Changed
-- **God-File Architectural Decomposition**:
+- **God-File Architectural Decomposition (Sprint 3 Initial Pass)**:
   - `src/db/client.ts` decomposed from 1195 to 385 lines by extracting `src/db/repositories/` (`mealsRepository.ts`, `workoutsRepository.ts`, `productsRepository.ts`, `goalsRepository.ts`, `measurementsRepository.ts`, `correctionsRepository.ts`).
   - `src/services/aiVisionService.ts` decomposed from 1408 to 557 lines by extracting `src/services/ai/` (`geminiTransport.ts`, `promptBuilders.ts`, `responseParsers.ts`, `visionCache.ts`).
   - `src/app/(tabs)/index.tsx` decomposed from 1818 to 537 lines by extracting `src/components/dashboard/` (`CalorieHeroCard.tsx`, `WeekStrip.tsx`, `TrainingCard.tsx`, `MealFeed.tsx`, `RecentScans.tsx`, `AllScansModal.tsx`).
@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `src/app/(tabs)/toxicity-scan.tsx` decomposed from 1805 to 439 lines by extracting `src/components/scan/` (`ScanViewfinder.tsx`, `ScannedProductReportView.tsx`, `SafetyScoreGaugeHero.tsx`, `HarmfulIngredientItem.tsx`, `StandardsDisclosureCard.tsx`) and `useToxicityScanner.ts`.
   - `src/app/(tabs)/meal-scan.tsx` decomposed from 1518 to 245 lines by extracting `src/components/meal/` (`MealViewfinder.tsx`, `MealVerificationCard.tsx`, `MealMacroPills.tsx`, `MealDeviationCard.tsx`, `MealPortionStepper.tsx`) and `useMealScanner.ts`.
   - `src/app/(tabs)/settings.tsx` decomposed from 1292 to 539 lines by extracting `src/components/settings/` (`AiIntelligenceSection.tsx`, `AppearanceSection.tsx`, `DataBackupSection.tsx`, `NutritionGoalsSection.tsx`, `RemindersSection.tsx`, `SystemHealthSection.tsx`).
-  - **Strict Constraint Enforced**: Every single touched component, hook, repository, and service file is `<= 600 lines`.
+  - *(Correction)*: While primary tab screens were split, nine secondary god files (`barcodeService.ts`, `onboarding.tsx`, `nutrition-target.tsx`, `ToxicityReportModal.tsx`, `ai-settings.tsx`, `useFitnessStore.ts`, `GeminiUsageSection.tsx`, `VoiceInputModal.tsx`, `useSettingsStore.ts`) remained over 600 lines at the end of Sprint 3. Their complete modular decomposition was completed in the subsequent audit-caveats remediation, bringing every source file across `src/` to <= 600 lines.
 - **Documentation Realignment**: Updated `README.md` with accurate filesystem tree, real setup instructions (`bun install`), and honest benchmark table.
 
 ---
