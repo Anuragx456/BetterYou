@@ -6,12 +6,27 @@ import {
 } from '../indianFoodMatcher';
 
 describe('Indian Food Database Matcher & Correction Loop (indianFoodMatcher.ts)', () => {
-  it('fuzzy matches "butter chicken" to "Murgh Makhani (Butter Chicken)"', () => {
+  it('fuzzy matches "butter chicken" to "Murgh Makhani (Butter Chicken)" with estimate confidence', () => {
     const match = findMatchingIndianDish('butter chicken');
     expect(match).not.toBeNull();
     expect(match?.name).toBe('Murgh Makhani (Butter Chicken)');
     expect(match?.caloriesPer100g).toBe(165);
-    expect(match?.source).toContain('IFCT 2017');
+    expect(match?.confidence).toBe('estimate');
+    expect(match?.source).toContain('composite recipe reference');
+  });
+
+  it('matches verified single-ingredient staples such as "Roti" with verified IFCT provenance', () => {
+    const roti = findMatchingIndianDish('roti');
+    expect(roti).not.toBeNull();
+    expect(roti?.confidence).toBe('verified');
+    expect(roti?.source).toContain('IFCT 2017');
+
+    const result = matchIndianFoodEstimate('Roti (Chapati)', 100, 400, 10, 60, 5);
+    expect(result.isMatch).toBe(true);
+    expect(result.confidence).toBe('verified');
+    expect(result.provenance).toBe('from local database (IFCT 2017)');
+    expect(result.isSignificantDeviation).toBe(true);
+    expect(result.deviationMessage).toContain('Reference (IFCT 2017)');
   });
 
   it('fuzzy matches aliases such as "dal makhani", "palak paneer", and "chole"', () => {
@@ -21,7 +36,7 @@ describe('Indian Food Database Matcher & Correction Loop (indianFoodMatcher.ts)'
     expect(findMatchingIndianDish('kanda poha')?.id).toBe('dish_29');
   });
 
-  it('flags deviation when Gemini estimate deviates by > 35% from IFCT reference', () => {
+  it('flags deviation when Gemini estimate deviates by > 35% from local estimate reference', () => {
     // Murgh Makhani is 165 kcal/100g. For 300g portion: 165 * 3 = 495 kcal
     // If Gemini estimates 750 kcal: deviation = (750 - 495) / 495 = 51.5% (> 35%)
     const result = matchIndianFoodEstimate(
@@ -34,14 +49,15 @@ describe('Indian Food Database Matcher & Correction Loop (indianFoodMatcher.ts)'
     );
 
     expect(result.isMatch).toBe(true);
-    expect(result.provenance).toBe('from local database (IFCT 2017)');
+    expect(result.confidence).toBe('estimate');
+    expect(result.provenance).toBe('from local database (estimate)');
     expect(result.referenceCalories).toBe(495);
     expect(result.isSignificantDeviation).toBe(true);
-    expect(result.deviationMessage).toContain('Reference (IFCT 2017): ~495 kcal for 300g. Gemini estimated 750 kcal.');
+    expect(result.deviationMessage).toContain('Reference (recipe estimate): ~495 kcal for 300g. Gemini estimated 750 kcal.');
     expect(result.deviationPercent).toBeGreaterThan(0.35);
   });
 
-  it('does NOT flag deviation when Gemini estimate is within 35% of IFCT reference', () => {
+  it('does NOT flag deviation when Gemini estimate is within 35% of local estimate reference', () => {
     // For 300g Murgh Makhani: reference = 495 kcal
     // Gemini estimates 520 kcal: deviation = (520 - 495) / 495 = 5.0% (<= 35%)
     const result = matchIndianFoodEstimate(
@@ -54,7 +70,8 @@ describe('Indian Food Database Matcher & Correction Loop (indianFoodMatcher.ts)'
     );
 
     expect(result.isMatch).toBe(true);
-    expect(result.provenance).toBe('from local database (IFCT 2017)');
+    expect(result.confidence).toBe('estimate');
+    expect(result.provenance).toBe('from local database (estimate)');
     expect(result.referenceCalories).toBe(495);
     expect(result.isSignificantDeviation).toBe(false);
     expect(result.deviationMessage).toBeUndefined();

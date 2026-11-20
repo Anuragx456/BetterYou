@@ -7,6 +7,8 @@
 
 import indianFoodData from '../data/indianFoodDb.json';
 
+export type FoodConfidence = 'verified' | 'estimate';
+
 export interface IndianFoodItem {
   id: string;
   name: string;
@@ -17,6 +19,7 @@ export interface IndianFoodItem {
   carbsPer100g: number;
   fatPer100g: number;
   source: string;
+  confidence: FoodConfidence;
 }
 
 export interface UserMealCorrection {
@@ -32,6 +35,7 @@ export interface UserMealCorrection {
 export type MatchProvenance =
   | 'from your past corrections'
   | 'from local database (IFCT 2017)'
+  | 'from local database (estimate)'
   | 'AI estimate';
 
 export interface IndianFoodMatchResult {
@@ -47,6 +51,7 @@ export interface IndianFoodMatchResult {
   isSignificantDeviation: boolean; // deviation > 0.35
   deviationMessage?: string;
   provenance: MatchProvenance;
+  confidence?: FoodConfidence;
 }
 
 const INDIAN_FOOD_DB = indianFoodData as IndianFoodItem[];
@@ -189,7 +194,7 @@ export function matchIndianFoodEstimate(
     };
   }
 
-  // 2. Check Local IFCT 2017 Database
+  // 2. Check Local Database (IFCT 2017 verified staples or curated composite recipes)
   const matchedDish = findMatchingIndianDish(dishName);
   if (matchedDish) {
     const scale = portionGrams / 100;
@@ -200,6 +205,12 @@ export function matchIndianFoodEstimate(
 
     const deviationPercent = refCalories > 0 ? Math.abs(geminiCalories - refCalories) / refCalories : 0;
     const isSignificantDeviation = deviationPercent > 0.35;
+
+    const isVerified = matchedDish.confidence === 'verified';
+    const provenance: MatchProvenance = isVerified
+      ? 'from local database (IFCT 2017)'
+      : 'from local database (estimate)';
+    const refLabel = isVerified ? 'Reference (IFCT 2017)' : 'Reference (recipe estimate)';
 
     return {
       isMatch: true,
@@ -213,9 +224,10 @@ export function matchIndianFoodEstimate(
       deviationPercent: Math.round(deviationPercent * 100) / 100,
       isSignificantDeviation,
       deviationMessage: isSignificantDeviation
-        ? `Reference (IFCT 2017): ~${refCalories} kcal for ${portionGrams}g. Gemini estimated ${geminiCalories} kcal.`
+        ? `${refLabel}: ~${refCalories} kcal for ${portionGrams}g. Gemini estimated ${geminiCalories} kcal.`
         : undefined,
-      provenance: 'from local database (IFCT 2017)',
+      provenance,
+      confidence: matchedDish.confidence,
     };
   }
 

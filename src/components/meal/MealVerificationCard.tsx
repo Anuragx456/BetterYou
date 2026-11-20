@@ -162,7 +162,8 @@ export const MealVerificationCard = React.memo(function MealVerificationCard({
               name={
                 indianFoodMatch.provenance === 'from your past corrections'
                   ? 'repeat'
-                  : indianFoodMatch.provenance === 'from local database (IFCT 2017)'
+                  : indianFoodMatch.provenance === 'from local database (IFCT 2017)' ||
+                    indianFoodMatch.provenance === 'from local database (estimate)'
                   ? 'book-outline'
                   : 'sparkles-outline'
               }
@@ -172,6 +173,8 @@ export const MealVerificationCard = React.memo(function MealVerificationCard({
                   ? colors.secondary
                   : indianFoodMatch.provenance === 'from local database (IFCT 2017)'
                   ? colors.primary
+                  : indianFoodMatch.provenance === 'from local database (estimate)'
+                  ? colors.primaryLight
                   : colors.textSecondary
               }
             />
