@@ -145,6 +145,7 @@ export function ManualMealModal({ visible, onClose, onSubmitResult }: ManualMeal
             </Pressable>
 
             <Pressable
+              testID="meal-tab-direct"
               style={[styles.segmentBtn, tabMode === 'direct' && styles.segmentBtnActive]}
               onPress={() => setTabMode('direct')}
             >
@@ -230,6 +231,7 @@ export function ManualMealModal({ visible, onClose, onSubmitResult }: ManualMeal
                 <View style={styles.fieldSection}>
                   <Text style={styles.inputLabel}>MEAL OR DISH NAME</Text>
                   <TextInput
+                    testID="meal-input-name"
                     style={styles.textInput}
                     value={dishName}
                     onChangeText={setDishName}
@@ -244,6 +246,7 @@ export function ManualMealModal({ visible, onClose, onSubmitResult }: ManualMeal
                   <View style={styles.fieldCol}>
                     <Text style={styles.inputLabel}>CALORIES (KCAL)</Text>
                     <TextInput
+                      testID="meal-input-cals"
                       style={[styles.textInput, styles.monoInput]}
                       value={calories}
                       onChangeText={setCalories}
@@ -311,7 +314,7 @@ export function ManualMealModal({ visible, onClose, onSubmitResult }: ManualMeal
                 </View>
 
                 {/* Action Button */}
-                <Pressable style={styles.actionBtn} onPress={handleDirectSubmit}>
+                <Pressable testID="meal-save-preview-btn" style={styles.actionBtn} onPress={handleDirectSubmit}>
                   <View style={styles.actionBtnInner}>
                     <Ionicons name="checkmark-circle" size={16} color={colors.textInverse} />
                     <Text style={styles.actionBtnText}>Save & Preview Meal</Text>

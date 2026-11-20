@@ -183,6 +183,7 @@ export const ActiveSetRow = React.memo(function ActiveSetRow({
 
       {/* Completed Checkbox */}
       <Pressable
+        testID={set.setNumber === 1 ? 'workout-complete-set-btn' : `workout-complete-set-${set.setNumber}`}
         style={({ pressed }) => [styles.setCheckCircle, pressed && styles.pressed]}
         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
         onPress={handleCheck}

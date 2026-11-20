@@ -46,6 +46,7 @@ export const ScannedProductReportView = React.memo(function ScannedProductReport
         {/* Header Action Row */}
         <View style={styles.reportHeaderRow}>
           <Pressable
+            testID="scan-report-close-btn"
             style={({ pressed }) => [
               styles.backButtonClean,
               { backgroundColor: colors.card, borderColor: colors.cardBorder },
@@ -230,6 +231,7 @@ export const ScannedProductReportView = React.memo(function ScannedProductReport
 
         {/* Bottom Scan Next Button */}
         <Pressable
+          testID="scan-another-label-btn"
           style={({ pressed }) => [
             styles.scanNextBtnClean,
             { backgroundColor: colors.primary },

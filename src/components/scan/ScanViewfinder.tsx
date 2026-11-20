@@ -74,6 +74,7 @@ export const ScanViewfinder = React.memo(function ScanViewfinder({
           <View style={styles.topBar}>
             <View style={styles.scanModeRow}>
               <Pressable
+                testID="scan-mode-label-btn"
                 style={({ pressed }) => [
                   styles.scanModeBtn,
                   scanMode === 'label' && [styles.scanModeBtnActive, { backgroundColor: colors.primary }],
@@ -89,6 +90,7 @@ export const ScanViewfinder = React.memo(function ScanViewfinder({
                 </Text>
               </Pressable>
               <Pressable
+                testID="scan-mode-barcode-btn"
                 style={({ pressed }) => [
                   styles.scanModeBtn,
                   scanMode === 'barcode' && [styles.scanModeBtnActive, { backgroundColor: colors.primary }],
@@ -202,6 +204,7 @@ export const ScanViewfinder = React.memo(function ScanViewfinder({
             </Pressable>
 
             <Pressable
+              testID="scan-manual-type-btn"
               style={({ pressed }) => [styles.sideBarBtn, pressed && styles.pressed]}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               onPress={onOpenManual}

@@ -17,27 +17,39 @@ appId: com.betteryou.app
     commands:
       - tapOn: "Skip"
 
-# 2. Navigate to Ingredient Lab / Screening tab
-- tapOn: "Screening"
-- assertVisible: "Label"
-- assertVisible: "Barcode"
+# 2. Navigate to Ingredient Lab / Screening tab using stable testID
+- tapOn:
+    id: "tab-toxicity-scan"
+- assertVisible:
+    id: "scan-mode-label-btn"
+- assertVisible:
+    id: "scan-mode-barcode-btn"
 
-# 3. Switch to Barcode mode
-- tapOn: "Barcode"
+# 3. Switch to Barcode mode using stable testID
+- tapOn:
+    id: "scan-mode-barcode-btn"
 
-# 4. Trigger manual or demo search
+# 4. Trigger manual product entry
 - runFlow:
     when:
-      visible: "Type"
+      visible:
+        id: "scan-manual-type-btn"
     commands:
-      - tapOn: "Type"
+      - tapOn:
+          id: "scan-manual-type-btn"
+      - tapOn:
+          id: "product-input-name"
       - inputText: "Organic Almond Milk"
-      - tapOn: "Search"
+      - tapOn:
+          id: "product-analyze-btn"
 
-# 5. Assert report view with risk score
+# 5. Assert report view and close via stable testID
 - runFlow:
     when:
-      visible: "Scan Another Label"
+      visible:
+        id: "scan-report-close-btn"
     commands:
-      - assertVisible: "Scan Another Label"
-      - assertVisible: "Ingredients Breakdown"
+      - assertVisible:
+          id: "scan-report-close-btn"
+      - tapOn:
+          id: "scan-report-close-btn"

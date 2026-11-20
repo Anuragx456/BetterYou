@@ -122,6 +122,7 @@ export const ActiveWorkoutView = React.memo(function ActiveWorkoutView({
           <WorkoutTimerBadge startedAt={activeWorkout.startedAt} />
 
           <Pressable
+            testID="workout-finish-btn"
             style={({ pressed }) => [
               styles.finishWorkoutButton,
               { backgroundColor: colors.primary },

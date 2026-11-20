@@ -112,6 +112,7 @@ export function ManualProductModal({ visible, onClose, onSubmitResult }: ManualP
                   </Pressable>
                 </View>
                 <TextInput
+                  testID="product-input-name"
                   style={styles.textInput}
                   value={productName}
                   onChangeText={setProductName}
@@ -166,6 +167,7 @@ export function ManualProductModal({ visible, onClose, onSubmitResult }: ManualP
 
               {/* Action Button */}
               <Pressable
+                testID="product-analyze-btn"
                 style={[styles.actionBtn, isAnalyzing && styles.btnDisabled]}
                 onPress={handleAnalyze}
                 disabled={isAnalyzing}

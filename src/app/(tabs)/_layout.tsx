@@ -35,6 +35,7 @@ export default function TabsLayout() {
         options={{
           title: 'Dashboard',
           tabBarLabel: 'Dashboard',
+          tabBarButtonTestID: 'tab-dashboard',
           tabBarIcon: ({ focused }) => (
             <Ionicons
               name={focused ? 'stats-chart' : 'stats-chart-outline'}
@@ -50,6 +51,7 @@ export default function TabsLayout() {
         options={{
           title: 'Meal Vision',
           tabBarLabel: 'Meal AI',
+          tabBarButtonTestID: 'tab-meal-scan',
           tabBarIcon: ({ focused }) => (
             <Ionicons
               name={focused ? 'camera' : 'camera-outline'}
@@ -65,6 +67,7 @@ export default function TabsLayout() {
         options={{
           title: 'Ingredient Lab',
           tabBarLabel: 'Screening',
+          tabBarButtonTestID: 'tab-toxicity-scan',
           tabBarIcon: ({ focused }) => (
             <Ionicons
               name={focused ? 'shield-checkmark' : 'shield-checkmark-outline'}
@@ -80,6 +83,7 @@ export default function TabsLayout() {
         options={{
           title: 'Workouts',
           tabBarLabel: 'Workouts',
+          tabBarButtonTestID: 'tab-workouts',
           tabBarIcon: ({ focused }) => (
             <Ionicons
               name={focused ? 'barbell' : 'barbell-outline'}
@@ -95,6 +99,7 @@ export default function TabsLayout() {
         options={{
           title: 'Settings',
           tabBarLabel: 'Settings',
+          tabBarButtonTestID: 'tab-settings',
           tabBarIcon: ({ focused }) => (
             <Ionicons
               name={focused ? 'settings' : 'settings-outline'}

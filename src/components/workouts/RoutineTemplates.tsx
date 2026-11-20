@@ -60,6 +60,7 @@ export const RoutineTemplates = React.memo(function RoutineTemplates({
           </Pressable>
 
           <Pressable
+            testID="workout-start-btn"
             style={({ pressed }) => [
               styles.startEmptyBtn,
               {

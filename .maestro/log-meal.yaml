@@ -17,41 +17,44 @@ appId: com.betteryou.app
     commands:
       - tapOn: "Skip"
 
-# 2. Navigate to Meal Vision tab
-- tapOn: "Meal AI"
+# 2. Navigate to Meal Vision tab using stable testID
+- tapOn:
+    id: "tab-meal-scan"
 
-# 3. Enter meal via manual / type modal or capture
+# 3. Enter meal via manual modal
 - runFlow:
     when:
-      visible: "Log Meal Manually"
+      visible:
+        id: "meal-manual-btn"
     commands:
-      - tapOn: "Log Meal Manually"
+      - tapOn:
+          id: "meal-manual-btn"
 
+# 4. Fill in meal details in direct macros mode
 - runFlow:
     when:
-      visible: "Type"
+      visible:
+        id: "meal-tab-direct"
     commands:
-      - tapOn: "Type"
-
-# 4. Fill in meal details
-- runFlow:
-    when:
-      visible: "Type Meal"
-    commands:
-      - tapOn: "Direct Numbers"
-      - tapOn: "e.g. Scrambled Eggs & Toast"
+      - tapOn:
+          id: "meal-tab-direct"
+      - tapOn:
+          id: "meal-input-name"
       - inputText: "Grilled Chicken & Rice"
-      - tapOn: "500"
+      - tapOn:
+          id: "meal-input-cals"
       - inputText: "650"
-      - tapOn: "Log Meal"
+      - tapOn:
+          id: "meal-save-preview-btn"
 
-# 5. Verify macro verification card renders
-- assertVisible: "Log to Today"
+# 5. Verify macro verification card renders and save meal
+- assertVisible:
+    id: "meal-save-btn"
+- tapOn:
+    id: "meal-save-btn"
 
-# 6. Save meal to today's log
-- tapOn: "Log to Today"
-
-# 7. Return to Dashboard and assert updated log
-- tapOn: "Dashboard"
+# 6. Return to Dashboard and assert updated calorie logs
+- tapOn:
+    id: "tab-dashboard"
 - assertVisible: "Dashboard"
 - assertVisible: "TODAY'S CALORIES"

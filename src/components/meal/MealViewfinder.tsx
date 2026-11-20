@@ -100,6 +100,7 @@ export const MealViewfinder = React.memo(function MealViewfinder({
               },
               pressed && styles.pressed,
             ]}
+            testID="meal-manual-btn"
             onPress={onOpenManual}
           >
             <Text style={[styles.grantPermissionText, { color: colors.text }]}>
@@ -219,6 +220,7 @@ export const MealViewfinder = React.memo(function MealViewfinder({
           <Pressable
             style={({ pressed }) => [styles.sideBarBtn, pressed && styles.pressed]}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            testID="meal-manual-btn"
             onPress={onOpenManual}
             accessibilityRole="button"
             accessibilityLabel="Type meal manually without camera"

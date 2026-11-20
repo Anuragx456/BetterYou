@@ -299,6 +299,7 @@ export const MealVerificationCard = React.memo(function MealVerificationCard({
 
         {/* Save Action Button */}
         <Pressable
+          testID="meal-save-btn"
           style={({ pressed }) => [
             styles.saveButtonClean,
             { backgroundColor: colors.primary },
