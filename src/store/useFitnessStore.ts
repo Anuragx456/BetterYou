@@ -1,158 +1,63 @@
-import { getLocalDateString, getLocalDayDifference } from '../utils/date';
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import {
+  dbDeleteBodyMeasurement,
   dbDeleteMeal,
   dbDeleteScannedProduct,
   dbDeleteWorkout,
-  dbUpdateWorkout,
-  dbGetActivityDates,
-  invalidateActivityDatesCache,
-  dbGetAllMealImagePaths,
-  dbGetAllProductImagePaths,
+  dbGetAllBodyMeasurements,
   dbGetAllWorkouts,
-  dbGetDailyGoals,
-  dbGetLibraryCounts,
+  dbGetActivityDates,
   dbGetMealsByDate,
   dbGetProductSummaries,
   dbGetScannedProductById,
   dbGetWorkoutsByDate,
+  dbInsertBodyMeasurement,
   dbInsertMeal,
   dbInsertScannedProduct,
   dbInsertWorkout,
   dbSetDailyGoals,
-  dbGetAllBodyMeasurements,
-  dbInsertBodyMeasurement,
-  dbDeleteBodyMeasurement,
+  dbUpdateWorkout,
   getDatabase,
+  invalidateActivityDatesCache,
 } from '../db/client';
-import { runAsyncStorageToSqliteMigration } from '../db/migration';
-import {
-  cleanupOrphanImages,
-  deletePersistedImage,
-  saveImageToDocuments,
-} from '../utils/imageManager';
-import { activeWorkoutPersistStorage, flushActiveWorkoutPersist } from '../utils/debouncedStorage';
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 import {
   BodyMeasurement,
-  DailyGoals,
-  ExerciseItem,
-  ExerciseSet,
-  MacroBreakdown,
-  MealLog,
   ScannedProduct,
   WorkoutSession,
 } from '../types';
+import { getLocalDateString } from '../utils/date';
+import {
+  activeWorkoutPersistStorage,
+  flushActiveWorkoutPersist,
+} from '../utils/debouncedStorage';
+import {
+  deletePersistedImage,
+  saveImageToDocuments,
+} from '../utils/imageManager';
+import {
+  addExerciseToList,
+  addSetToExerciseList,
+  calculateNewStreak,
+  calculateWorkoutVolume,
+  fetchInitialFitnessData,
+  fetchRefreshedFitnessData,
+  getTodayMacroTotals,
+  getWorkoutTemplateExercises,
+  mergeProductRows,
+  removeExerciseFromList,
+  removeSetFromExerciseList,
+  triggerOrphanImagesCleanup,
+  updateSetInExerciseList,
+  withDate,
+} from './fitnessSyncHelpers';
+import { DEFAULT_GOALS, FitnessState } from './fitnessTypes';
 
-export interface FitnessState {
-  // In-Memory Cached State (Populated from SQLite)
-  meals: MealLog[];
-  workouts: WorkoutSession[];
-  dashboardWorkouts: WorkoutSession[];
-  scannedProducts: ScannedProduct[];
-  dailyGoals: DailyGoals;
-  isInitialized: boolean;
-  dashboardDate: string;
-  activityDates: string[];
-  mealCount: number;
-  mealPhotoCount: number;
-  workoutCount: number;
-  scannedProductCount: number;
-  workoutsHistoryLoaded: boolean;
-  bodyMeasurements: BodyMeasurement[];
-
-  // Active Session / UI State
-  activeWorkout: WorkoutSession | null;
-  streakDays: number;
-  lastActiveWorkoutDate?: string;
-
-  // Lifecycle
-  loadDataFromDb: () => Promise<void>;
-  loadDashboardDate: (date: string) => Promise<void>;
-  loadWorkoutHistory: () => Promise<void>;
-  loadAllProductSummaries: () => Promise<void>;
-  loadScannedProductReport: (id: string) => Promise<void>;
-  refreshLoadedData: () => Promise<void>;
-
-  // Meal Actions
-  addMeal: (meal: Omit<MealLog, 'id' | 'timestamp'>) => Promise<MealLog>;
-  removeMeal: (id: string) => Promise<void>;
-
-  // Goals Actions
-  updateDailyGoals: (goals: Partial<DailyGoals>) => Promise<void>;
-
-  // Bodyweight Actions
-  logBodyWeight: (weightKg: number, note?: string, date?: string) => Promise<void>;
-  deleteBodyMeasurement: (id: string) => Promise<void>;
-  loadBodyMeasurements: () => Promise<void>;
-
-  // Workout Actions
-  startWorkout: (templateTitle?: string) => void;
-  updateActiveWorkout: (workout: WorkoutSession) => void;
-  addExerciseToActiveWorkout: (exerciseName: string) => void;
-  removeExerciseFromActiveWorkout: (exerciseId: string) => void;
-  addSetToActiveExercise: (exerciseId: string) => void;
-  updateSetInActiveExercise: (
-    exerciseId: string,
-    setId: string,
-    updates: Partial<ExerciseSet>
-  ) => void;
-  removeSetFromActiveExercise: (exerciseId: string, setId: string) => void;
-  finishActiveWorkout: () => Promise<WorkoutSession | null>;
-  cancelActiveWorkout: () => void;
-  addWorkout: (workout: WorkoutSession) => Promise<void>;
-  updateWorkout: (id: string, updates: Partial<WorkoutSession>) => Promise<void>;
-  removeWorkout: (id: string) => Promise<void>;
-
-  // Scanned Products Actions
-  addScannedProduct: (product: Omit<ScannedProduct, 'id' | 'scannedAt'>) => Promise<void>;
-  updateScannedProduct: (id: string, updates: Partial<Omit<ScannedProduct, 'id'>>) => Promise<void>;
-  removeScannedProduct: (id: string) => Promise<void>;
-
-  // Reset
-  clearAllData: () => Promise<void>;
-}
-
-const DEFAULT_GOALS: DailyGoals = {
-  calorieTarget: 2200,
-  proteinTargetGrams: 160,
-  carbsTargetGrams: 220,
-  fatTargetGrams: 65,
-};
-
-/**
- * Calculates total volume in kg from completed sets: Sum(weightKg * reps)
- */
-export function calculateWorkoutVolume(exercises: ExerciseItem[]): number {
-  return exercises.reduce((exerciseSum, ex) => {
-    const setsSum = ex.sets.reduce((setSum, set) => {
-      if (set.completed && set.weightKg > 0 && set.reps > 0) {
-        return setSum + set.weightKg * set.reps;
-      }
-      return setSum;
-    }, 0);
-    return exerciseSum + setsSum;
-  }, 0);
-}
-
-function mergeProductRows(incoming: ScannedProduct[], existing: ScannedProduct[]): ScannedProduct[] {
-  if (existing.length === 0) return incoming;
-  return incoming.map((item) => {
-    const prior = existing.find((product) => product.id === item.id && product.reportComplete);
-    return prior ?? item;
-  });
-}
-
-function withDate(dates: string[], date: string): string[] {
-  return dates.includes(date) ? dates : [...dates, date];
-}
+// Re-export helpers and types for backwards compatibility
+export { calculateWorkoutVolume, getTodayMacroTotals };
+export type { FitnessState };
 
 let loadDataInFlight: Promise<void> | null = null;
-
-function scheduleIdleTask(task: () => void): void {
-  // Run idle tasks cleanly after initial render without enumerating the react-native module namespace
-  setTimeout(task, 1000);
-}
 
 export const useFitnessStore = create<FitnessState>()(
   persist(
@@ -181,43 +86,13 @@ export const useFitnessStore = create<FitnessState>()(
 
         loadDataInFlight = (async () => {
           try {
-            await getDatabase();
-            await runAsyncStorageToSqliteMigration();
-            const date = get().dashboardDate || getLocalDateString();
-            const [meals, dayWorkouts, summaries, goals, activityDates, counts, measurements] = await Promise.all([
-              dbGetMealsByDate(date),
-              dbGetWorkoutsByDate(date),
-              dbGetProductSummaries(3),
-              dbGetDailyGoals(),
-              dbGetActivityDates(),
-              dbGetLibraryCounts().catch(() => null),
-              dbGetAllBodyMeasurements().catch(() => []),
-            ]);
-            const history = get().workoutsHistoryLoaded ? await dbGetAllWorkouts() : dayWorkouts;
-
-            set({
-              meals,
-              dashboardWorkouts: dayWorkouts,
-              workouts: history,
-              scannedProducts: mergeProductRows(summaries, get().scannedProducts),
-              dailyGoals: goals,
-              activityDates,
-              dashboardDate: date,
-              bodyMeasurements: measurements,
-              mealCount: counts?.meals ?? meals.length,
-              mealPhotoCount: counts?.mealsWithPhotos ?? meals.filter((meal) => Boolean(meal.imageUri)).length,
-              workoutCount: counts?.workouts ?? history.length,
-              scannedProductCount: counts?.products ?? summaries.length,
-              isInitialized: true,
+            const initialData = await fetchInitialFitnessData({
+              dashboardDate: get().dashboardDate,
+              workoutsHistoryLoaded: get().workoutsHistoryLoaded,
+              existingScannedProducts: get().scannedProducts,
             });
-
-            scheduleIdleTask(() => {
-              Promise.all([dbGetAllMealImagePaths(), dbGetAllProductImagePaths()])
-                .then(([mealPaths, prodPaths]) => {
-                  cleanupOrphanImages([...mealPaths, ...prodPaths]).catch(() => {});
-                })
-                .catch(() => {});
-            });
+            set(initialData);
+            triggerOrphanImagesCleanup();
           } catch (err: unknown) {
             console.warn('[fitnessStore] loadDataFromDb warning:', err);
           } finally {
@@ -262,28 +137,23 @@ export const useFitnessStore = create<FitnessState>()(
       },
 
       refreshLoadedData: async () => {
-        const date = get().dashboardDate || getLocalDateString();
-        const productLimit = get().scannedProducts.length > 3 ? 100 : 3;
-        const [meals, dayWorkouts, summaries, activityDates, counts] = await Promise.all([
-          dbGetMealsByDate(date),
-          dbGetWorkoutsByDate(date),
-          dbGetProductSummaries(productLimit),
-          dbGetActivityDates(),
-          dbGetLibraryCounts().catch(() => null),
-        ]);
-        const history = get().workoutsHistoryLoaded ? await dbGetAllWorkouts() : dayWorkouts;
+        const refreshedData = await fetchRefreshedFitnessData({
+          dashboardDate: get().dashboardDate,
+          workoutsHistoryLoaded: get().workoutsHistoryLoaded,
+          existingScannedProducts: get().scannedProducts,
+          currentCounts: {
+            mealCount: get().mealCount,
+            mealPhotoCount: get().mealPhotoCount,
+            workoutCount: get().workoutCount,
+            scannedProductCount: get().scannedProductCount,
+          },
+        });
         set((state) => ({
-          meals,
-          dashboardWorkouts: dayWorkouts,
-          workouts: history,
-          scannedProducts: mergeProductRows(summaries, state.scannedProducts),
-          activityDates,
-          dashboardDate: date,
-          mealCount: counts?.meals ?? state.mealCount,
-          mealPhotoCount: counts?.mealsWithPhotos ?? state.mealPhotoCount,
-          workoutCount: counts?.workouts ?? state.workoutCount,
-          scannedProductCount: counts?.products ?? state.scannedProductCount,
-          isInitialized: true,
+          ...refreshedData,
+          scannedProducts: mergeProductRows(
+            refreshedData.scannedProducts ?? [],
+            state.scannedProducts
+          ),
         }));
       },
 
@@ -356,9 +226,10 @@ export const useFitnessStore = create<FitnessState>()(
         };
         await dbInsertBodyMeasurement(measurement);
         set((state) => ({
-          bodyMeasurements: [measurement, ...state.bodyMeasurements.filter((m) => m.id !== measurement.id)].sort(
-            (a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt
-          ),
+          bodyMeasurements: [
+            measurement,
+            ...state.bodyMeasurements.filter((m) => m.id !== measurement.id),
+          ].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt),
         }));
       },
 
@@ -375,93 +246,7 @@ export const useFitnessStore = create<FitnessState>()(
       },
 
       startWorkout: (templateTitle = 'Custom Workout') => {
-        let initialExercises: ExerciseItem[] = [];
-
-        if (templateTitle === 'Push Day') {
-          initialExercises = [
-            {
-              id: 'ex_bench',
-              name: 'Barbell Bench Press',
-              sets: [
-                { id: 's1', setNumber: 1, weightKg: 60, reps: 10, completed: false },
-                { id: 's2', setNumber: 2, weightKg: 70, reps: 8, completed: false },
-                { id: 's3', setNumber: 3, weightKg: 75, reps: 6, completed: false },
-              ],
-            },
-            {
-              id: 'ex_incline_db',
-              name: 'Incline Dumbbell Press',
-              sets: [
-                { id: 's4', setNumber: 1, weightKg: 24, reps: 10, completed: false },
-                { id: 's5', setNumber: 2, weightKg: 26, reps: 8, completed: false },
-              ],
-            },
-            {
-              id: 'ex_overhead_tri',
-              name: 'Cable Overhead Tricep Extension',
-              sets: [
-                { id: 's6', setNumber: 1, weightKg: 25, reps: 12, completed: false },
-                { id: 's7', setNumber: 2, weightKg: 30, reps: 10, completed: false },
-              ],
-            },
-          ];
-        } else if (templateTitle === 'Pull Day') {
-          initialExercises = [
-            {
-              id: 'ex_deadlift',
-              name: 'Conventional Deadlift',
-              sets: [
-                { id: 's1', setNumber: 1, weightKg: 100, reps: 5, completed: false },
-                { id: 's2', setNumber: 2, weightKg: 120, reps: 5, completed: false },
-                { id: 's3', setNumber: 3, weightKg: 130, reps: 3, completed: false },
-              ],
-            },
-            {
-              id: 'ex_lat_pulldown',
-              name: 'Lat Pulldown',
-              sets: [
-                { id: 's4', setNumber: 1, weightKg: 55, reps: 10, completed: false },
-                { id: 's5', setNumber: 2, weightKg: 60, reps: 8, completed: false },
-              ],
-            },
-            {
-              id: 'ex_bicep_curl',
-              name: 'Dumbbell Bicep Curls',
-              sets: [
-                { id: 's6', setNumber: 1, weightKg: 14, reps: 12, completed: false },
-                { id: 's7', setNumber: 2, weightKg: 16, reps: 10, completed: false },
-              ],
-            },
-          ];
-        } else if (templateTitle === 'Leg Day') {
-          initialExercises = [
-            {
-              id: 'ex_squat',
-              name: 'Barbell Back Squat',
-              sets: [
-                { id: 's1', setNumber: 1, weightKg: 80, reps: 8, completed: false },
-                { id: 's2', setNumber: 2, weightKg: 90, reps: 8, completed: false },
-                { id: 's3', setNumber: 3, weightKg: 100, reps: 6, completed: false },
-              ],
-            },
-            {
-              id: 'ex_leg_press',
-              name: 'Leg Press',
-              sets: [
-                { id: 's4', setNumber: 1, weightKg: 160, reps: 12, completed: false },
-                { id: 's5', setNumber: 2, weightKg: 180, reps: 10, completed: false },
-              ],
-            },
-            {
-              id: 'ex_calves',
-              name: 'Standing Calf Raises',
-              sets: [
-                { id: 's6', setNumber: 1, weightKg: 50, reps: 15, completed: false },
-                { id: 's7', setNumber: 2, weightKg: 50, reps: 15, completed: false },
-              ],
-            },
-          ];
-        }
+        const initialExercises = getWorkoutTemplateExercises(templateTitle);
 
         const newWorkout: WorkoutSession = {
           id: `workout_${Date.now()}`,
@@ -488,22 +273,7 @@ export const useFitnessStore = create<FitnessState>()(
       addExerciseToActiveWorkout: (exerciseName) => {
         const current = get().activeWorkout;
         if (!current) return;
-
-        const newExercise: ExerciseItem = {
-          id: `ex_${Date.now()}`,
-          name: exerciseName.trim() || 'Exercise',
-          sets: [
-            {
-              id: `s_${Date.now()}_1`,
-              setNumber: 1,
-              weightKg: 20,
-              reps: 10,
-              completed: false,
-            },
-          ],
-        };
-
-        const updatedExercises = [...current.exercises, newExercise];
+        const updatedExercises = addExerciseToList(current.exercises, exerciseName);
         set({
           activeWorkout: {
             ...current,
@@ -516,8 +286,7 @@ export const useFitnessStore = create<FitnessState>()(
       removeExerciseFromActiveWorkout: (exerciseId) => {
         const current = get().activeWorkout;
         if (!current) return;
-
-        const updatedExercises = current.exercises.filter((e) => e.id !== exerciseId);
+        const updatedExercises = removeExerciseFromList(current.exercises, exerciseId);
         set({
           activeWorkout: {
             ...current,
@@ -530,29 +299,7 @@ export const useFitnessStore = create<FitnessState>()(
       addSetToActiveExercise: (exerciseId) => {
         const current = get().activeWorkout;
         if (!current) return;
-
-        const updatedExercises = current.exercises.map((ex) => {
-          if (ex.id !== exerciseId) return ex;
-
-          const lastSet = ex.sets[ex.sets.length - 1];
-          const newSetNumber = ex.sets.length + 1;
-          const defaultWeight = lastSet ? lastSet.weightKg : 20;
-          const defaultReps = lastSet ? lastSet.reps : 10;
-
-          const newSet: ExerciseSet = {
-            id: `s_${Date.now()}_${newSetNumber}`,
-            setNumber: newSetNumber,
-            weightKg: defaultWeight,
-            reps: defaultReps,
-            completed: false,
-          };
-
-          return {
-            ...ex,
-            sets: [...ex.sets, newSet],
-          };
-        });
-
+        const updatedExercises = addSetToExerciseList(current.exercises, exerciseId);
         set({
           activeWorkout: {
             ...current,
@@ -565,24 +312,7 @@ export const useFitnessStore = create<FitnessState>()(
       updateSetInActiveExercise: (exerciseId, setId, updates) => {
         const current = get().activeWorkout;
         if (!current) return;
-
-        const updatedExercises = current.exercises.map((ex) => {
-          if (ex.id !== exerciseId) return ex;
-
-          const updatedSets = ex.sets.map((s) => {
-            if (s.id !== setId) return s;
-            return {
-              ...s,
-              ...updates,
-            };
-          });
-
-          return {
-            ...ex,
-            sets: updatedSets,
-          };
-        });
-
+        const updatedExercises = updateSetInExerciseList(current.exercises, exerciseId, setId, updates);
         set({
           activeWorkout: {
             ...current,
@@ -595,20 +325,7 @@ export const useFitnessStore = create<FitnessState>()(
       removeSetFromActiveExercise: (exerciseId, setId) => {
         const current = get().activeWorkout;
         if (!current) return;
-
-        const updatedExercises = current.exercises.map((ex) => {
-          if (ex.id !== exerciseId) return ex;
-
-          const remainingSets = ex.sets
-            .filter((s) => s.id !== setId)
-            .map((s, idx) => ({ ...s, setNumber: idx + 1 }));
-
-          return {
-            ...ex,
-            sets: remainingSets,
-          };
-        });
-
+        const updatedExercises = removeSetFromExerciseList(current.exercises, exerciseId, setId);
         set({
           activeWorkout: {
             ...current,
@@ -629,32 +346,26 @@ export const useFitnessStore = create<FitnessState>()(
         };
 
         const todayStr = getLocalDateString();
-        const lastActive = get().lastActiveWorkoutDate;
-        let newStreak = get().streakDays || 0;
-
-        if (!lastActive) {
-          newStreak = 1;
-        } else if (lastActive === todayStr) {
-          // Already worked out today: streak steady
-        } else {
-          const diffDays = getLocalDayDifference(lastActive, todayStr);
-          if (diffDays === 1) {
-            newStreak += 1;
-          } else {
-            newStreak = 1;
-          }
-        }
+        const newStreak = calculateNewStreak(
+          get().lastActiveWorkoutDate,
+          todayStr,
+          get().streakDays || 0
+        );
 
         // Save to SQLite
         await dbInsertWorkout(completedWorkout);
 
         set((state) => {
-          const sessionDate = getLocalDateString(completedWorkout.completedAt || completedWorkout.startedAt);
+          const sessionDate = getLocalDateString(
+            completedWorkout.completedAt || completedWorkout.startedAt
+          );
           const onDashboard = sessionDate === state.dashboardDate;
           const inHistory = state.workoutsHistoryLoaded || onDashboard;
           return {
             activeWorkout: null,
-            workouts: inHistory ? [completedWorkout, ...state.workouts].slice(0, 150) : state.workouts,
+            workouts: inHistory
+              ? [completedWorkout, ...state.workouts].slice(0, 150)
+              : state.workouts,
             dashboardWorkouts: onDashboard
               ? [completedWorkout, ...state.dashboardWorkouts]
               : state.dashboardWorkouts,
@@ -676,7 +387,9 @@ export const useFitnessStore = create<FitnessState>()(
 
       addWorkout: async (workout) => {
         await dbInsertWorkout(workout);
-        const sessionDate = workout.date || getLocalDateString(workout.completedAt || workout.startedAt);
+        const sessionDate =
+          workout.date ||
+          getLocalDateString(workout.completedAt || workout.startedAt);
         set((state) => ({
           workouts: [workout, ...state.workouts].slice(0, 150),
           dashboardWorkouts:
@@ -691,8 +404,12 @@ export const useFitnessStore = create<FitnessState>()(
       updateWorkout: async (id, updates) => {
         await dbUpdateWorkout(id, updates);
         set((state) => ({
-          workouts: state.workouts.map((w) => (w.id === id ? { ...w, ...updates } : w)),
-          dashboardWorkouts: state.dashboardWorkouts.map((w) => (w.id === id ? { ...w, ...updates } : w)),
+          workouts: state.workouts.map((w) =>
+            w.id === id ? { ...w, ...updates } : w
+          ),
+          dashboardWorkouts: state.dashboardWorkouts.map((w) =>
+            w.id === id ? { ...w, ...updates } : w
+          ),
         }));
       },
 
@@ -709,7 +426,10 @@ export const useFitnessStore = create<FitnessState>()(
         let finalImageUri = productData.imageUrl || productData.imageUri;
         if (finalImageUri) {
           try {
-            finalImageUri = await saveImageToDocuments(finalImageUri, 'products');
+            finalImageUri = await saveImageToDocuments(
+              finalImageUri,
+              'products'
+            );
           } catch {
             // Keep original
           }
@@ -745,7 +465,9 @@ export const useFitnessStore = create<FitnessState>()(
         };
         await dbInsertScannedProduct(updated);
         set((state) => ({
-          scannedProducts: state.scannedProducts.map((p) => (p.id === id ? updated : p)),
+          scannedProducts: state.scannedProducts.map((p) =>
+            p.id === id ? updated : p
+          ),
         }));
       },
 
@@ -788,7 +510,7 @@ export const useFitnessStore = create<FitnessState>()(
           workoutCount: 0,
           scannedProductCount: 0,
           workoutsHistoryLoaded: false,
-      bodyMeasurements: [],
+          bodyMeasurements: [],
         });
       },
     }),
@@ -810,28 +532,3 @@ export const useFitnessStore = create<FitnessState>()(
     }
   )
 );
-
-/**
- * Helper selector to compute total daily macros from meals logged today
- */
-export function getTodayMacroTotals(meals: MealLog[]): MacroBreakdown {
-  const todayStr = getLocalDateString();
-
-  return meals
-    .filter((meal) => {
-      try {
-        return getLocalDateString(meal.timestamp) === todayStr;
-      } catch {
-        return false;
-      }
-    })
-    .reduce<MacroBreakdown>(
-      (acc, meal) => ({
-        calories: acc.calories + meal.calories,
-        protein: acc.protein + meal.protein,
-        carbs: acc.carbs + meal.carbs,
-        fat: acc.fat + meal.fat,
-      }),
-      { calories: 0, protein: 0, carbs: 0, fat: 0 }
-    );
-}
