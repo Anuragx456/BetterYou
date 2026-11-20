@@ -191,14 +191,21 @@ export async function getOrCreateDeviceSecret(): Promise<string> {
  */
 export async function registerDeviceWithProxy(
   proxyUrl?: string,
-  preferredDeviceId?: string
+  preferredDeviceId?: string,
+  bootstrapSecret?: string
 ): Promise<{ deviceId: string; deviceSecret: string }> {
   const baseUrl = proxyUrl || process.env.EXPO_PUBLIC_PROXY_URL?.trim() || 'http://localhost:8787';
   const deviceId = preferredDeviceId || (await getOrCreateDeviceId());
+  const secret = bootstrapSecret || process.env.EXPO_PUBLIC_BOOTSTRAP_SECRET?.trim();
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (secret) {
+    headers['x-bootstrap-secret'] = secret;
+  }
 
   const res = await fetch(`${baseUrl}/v1/devices/register`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ deviceId }),
   });
 

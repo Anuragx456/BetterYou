@@ -125,3 +125,55 @@ To run the automated Maestro E2E test suite locally on an active Android emulato
    maestro test .maestro/workout-session.yaml
    maestro test .maestro/scan-barcode.yaml
    ```
+
+---
+
+## 5. Production Release Gate & Deployment Checklist
+
+Before triggering a store build or merging to `main`, ensure every gate below is satisfied:
+
+### 5.1 Proxy Server Deployment Checklist (Fly.io / Docker)
+The proxy server enforces fail-closed registration and cryptographic store encryption in production:
+
+1. **Deploy Proxy**:
+   ```bash
+   cd server
+   fly deploy
+   ```
+2. **Configure Required Server Secrets**:
+   ```bash
+   # 1. Production Bootstrap Secret (must be >= 32 characters)
+   fly secrets set BOOTSTRAP_SECRET="<generate-random-32-byte-hex-or-base64-string>"
+
+   # 2. Store Encryption Key for AES-256-GCM (exactly 32 bytes hex or base64)
+   fly secrets set DEVICE_STORE_ENCRYPTION_KEY="<generate-32-byte-encryption-key>"
+
+   # 3. Google Gemini API Key
+   fly secrets set GEMINI_API_KEY="<production-gemini-api-key>"
+
+   # 4. Redis at Rest (Upstash)
+   fly secrets set UPSTASH_REDIS_REST_URL="https://..."
+   fly secrets set UPSTASH_REDIS_REST_TOKEN="..."
+
+   # 5. Reverse Proxy Trust Header
+   fly secrets set TRUST_PROXY_HEADERS="true"
+   fly secrets set NODE_ENV="production"
+   ```
+
+### 5.2 Client EAS Project & Environment Checklist
+1. **Link Project**:
+   ```bash
+   bunx eas-cli project:init
+   ```
+   Replace `YOUR_EAS_PROJECT_ID_HERE` in `app.json` (`expo.updates.url` and `expo.extra.eas.projectId`) with the assigned project UUID.
+2. **Configure EAS Production Environment Variables**:
+   ```bash
+   # Set the production proxy URL for preview and production builds
+   bunx eas-cli env:create --scope project --name EXPO_PUBLIC_PROXY_URL --value "https://betteryou-proxy.fly.dev" --type string
+   ```
+3. **Verify Config with Automated Validator**:
+   ```bash
+   # Strict mode (fails if any placeholders or localhost urls remain)
+   node scripts/validate-release-config.mjs --strict
+   ```
+
