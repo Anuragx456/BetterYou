@@ -1,22 +1,18 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import * as WebBrowser from 'expo-web-browser';
 import { useRouter } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Linking,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { useFitnessStore } from '../store/useFitnessStore';
-import {
-  GeminiApiRecord,
-  useGeminiUsageStore,
-} from '../store/useGeminiUsageStore';
+import { useGeminiUsageStore } from '../store/useGeminiUsageStore';
 import {
   getActiveModelDisplayName,
   getEffectiveModel,
@@ -28,28 +24,12 @@ import {
 import type { ThemeColors } from '../theme/colors';
 import { useThemeColors, useThemedStyles } from '../theme/theme';
 import { safeHaptics } from '../utils/haptics';
+import { FeatureBreakdownCard } from './settings/FeatureBreakdownCard';
+import { QuotaStatusCard } from './settings/QuotaStatusCard';
+import { RecentApiActivityCard } from './settings/RecentApiActivityCard';
+import { UsageBentoGrid } from './settings/UsageBentoGrid';
 
 const GOOGLE_AI_STUDIO_PLAN_URL = 'https://aistudio.google.com/app/plan_information';
-
-function formatTokens(count: number): string {
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
-  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`;
-  return String(count);
-}
-
-function formatTimestamp(ms: number): string {
-  const date = new Date(ms);
-  const now = new Date();
-  const isToday = date.toDateString() === now.toDateString();
-  const hours = date.getHours();
-  const mins = String(date.getMinutes()).padStart(2, '0');
-  const ampm = hours >= 12 ? 'PM' : 'AM';
-  const hour12 = hours % 12 || 12;
-  const timeStr = `${hour12}:${mins} ${ampm}`;
-  if (isToday) return `Today, ${timeStr}`;
-  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${monthNames[date.getMonth()]} ${date.getDate()}, ${timeStr}`;
-}
 
 export function GeminiUsageSection() {
   const colors = useThemeColors();
@@ -210,8 +190,6 @@ export function GeminiUsageSection() {
     );
   };
 
-  const displayedRecords = showAllLogs ? records : records.slice(0, 5);
-
   return (
     <View style={styles.container}>
       {/* Section Header */}
@@ -231,199 +209,36 @@ export function GeminiUsageSection() {
       </View>
 
       {/* Main Quota & Status Card */}
-      <View style={styles.quotaCard}>
-        {/* Key Status Header */}
-        <View style={styles.quotaHeaderRow}>
-          <View style={styles.statusCol}>
-            <View style={styles.badgeRow}>
-              <View
-                style={[
-                  styles.statusDot,
-                  hasCustom ? styles.statusDotLive : styles.statusDotProxy,
-                ]}
-              />
-              <Text style={styles.statusText}>
-                {hasCustom ? 'BYOK Custom Key Active' : 'Managed Proxy (Default)'}
-              </Text>
-            </View>
-            <Text style={styles.keySnippetText}>{maskedKey}</Text>
-          </View>
-
-          <View style={styles.modelBadge}>
-            <Text style={styles.modelBadgeText} numberOfLines={1}>
-              {activeModelName}
-            </Text>
-          </View>
-        </View>
-
-        {/* Daily Free Tier Quota Progress */}
-        <View style={styles.quotaProgressSection}>
-          <View style={styles.quotaLabelRow}>
-            <Text style={styles.quotaLabel}>{"Today's API Quota"}</Text>
-            <Text style={styles.quotaValue}>
-              {todayScans.toLocaleString()} / {dailyQuotaLimit.toLocaleString()} scans ({quotaPercent}%)
-            </Text>
-          </View>
-
-          <View style={styles.progressBarTrack}>
-            <View
-              style={[
-                styles.progressBarFill,
-                { width: `${Math.max(4, quotaPercent)}%` },
-                quotaPercent > 80 && styles.progressBarFillWarning,
-              ]}
-            />
-          </View>
-
-          <View style={styles.rateLimitRow}>
-            <Text style={styles.rateLimitText}>
-              Limit: {estimations.rateLimitRPM} RPM • {dailyQuotaLimit} requests/day
-            </Text>
-            <Text style={styles.freeTierTag}>Google AI Studio Free Tier</Text>
-          </View>
-        </View>
-      </View>
+      <QuotaStatusCard
+        hasCustom={hasCustom}
+        maskedKey={maskedKey}
+        activeModelName={activeModelName}
+        todayScans={todayScans}
+        dailyQuotaLimit={dailyQuotaLimit}
+        quotaPercent={quotaPercent}
+        rateLimitRPM={estimations.rateLimitRPM}
+      />
 
       {/* Bento Grid: 4 Metric Cards */}
-      <View style={styles.bentoGrid}>
-        {/* Total Scans */}
-        <View style={styles.bentoCard}>
-          <View style={styles.bentoIconRow}>
-            <Ionicons name="scan-outline" size={18} color={colors.primary} />
-            <Text style={styles.bentoLabel}>TOTAL SCANS</Text>
-          </View>
-          <Text style={styles.bentoValue}>{totalCalls.toLocaleString()}</Text>
-          <Text style={styles.bentoSubtext}>
-            {successfulCalls} ok • {failedCalls} err
-          </Text>
-        </View>
-
-        {/* Tokens Used */}
-        <View style={styles.bentoCard}>
-          <View style={styles.bentoIconRow}>
-            <Ionicons name="speedometer-outline" size={18} color={colors.secondary} />
-            <Text style={styles.bentoLabel}>TOKENS CONSUMED</Text>
-          </View>
-          <Text style={styles.bentoValue}>{formatTokens(totalTokens)}</Text>
-          <Text style={styles.bentoSubtext}>
-            {formatTokens(totalPromptTokens)} in • {formatTokens(totalCandidateTokens)} out
-          </Text>
-        </View>
-
-        {/* Commercial Cost */}
-        <View style={styles.bentoCard}>
-          <View style={styles.bentoIconRow}>
-            <Ionicons name="cash-outline" size={18} color={colors.calories} />
-            <Text style={styles.bentoLabel}>BILLED COST</Text>
-          </View>
-          <Text style={[styles.bentoValue, { color: colors.primary }]}>$0.00</Text>
-          <Text style={styles.bentoSubtext}>
-            100% Free on AI Studio
-          </Text>
-        </View>
-
-        {/* Success Rate */}
-        <View style={styles.bentoCard}>
-          <View style={styles.bentoIconRow}>
-            <Ionicons name="shield-checkmark-outline" size={18} color={colors.protein} />
-            <Text style={styles.bentoLabel}>SUCCESS RATE</Text>
-          </View>
-          <Text style={styles.bentoValue}>{successRate}%</Text>
-          <Text style={styles.bentoSubtext}>
-            {failedCalls === 0 ? 'Optimal (0 errors)' : `${successfulCalls} succeeded`}
-          </Text>
-        </View>
-      </View>
+      <UsageBentoGrid
+        totalCalls={totalCalls}
+        successfulCalls={successfulCalls}
+        failedCalls={failedCalls}
+        totalTokens={totalTokens}
+        totalPromptTokens={totalPromptTokens}
+        totalCandidateTokens={totalCandidateTokens}
+        successRate={successRate}
+      />
 
       {/* Feature Breakdown Chips */}
-      <View style={styles.featureBreakdownCard}>
-        <Text style={styles.cardSectionTitle}>USAGE BY FEATURE</Text>
-        <View style={styles.featureChipsWrap}>
-          <View style={styles.featureChip}>
-            <Ionicons name="restaurant-outline" size={14} color={colors.primary} />
-            <Text style={styles.featureChipLabel}>Meal Vision:</Text>
-            <Text style={styles.featureChipCount}>
-              {usageSummary.featureBreakdown['meal-vision']}
-            </Text>
-          </View>
-
-          <View style={styles.featureChip}>
-            <Ionicons name="mic-outline" size={14} color={colors.calories} />
-            <Text style={styles.featureChipLabel}>Meal Voice:</Text>
-            <Text style={styles.featureChipCount}>
-              {usageSummary.featureBreakdown['meal-voice']}
-            </Text>
-          </View>
-
-          <View style={styles.featureChip}>
-            <Ionicons name="document-text-outline" size={14} color={colors.protein} />
-            <Text style={styles.featureChipLabel}>Ingredient OCR:</Text>
-            <Text style={styles.featureChipCount}>
-              {usageSummary.featureBreakdown['toxicity-scan']}
-            </Text>
-          </View>
-
-          <View style={styles.featureChip}>
-            <Ionicons name="chatbubble-ellipses-outline" size={14} color={colors.secondary} />
-            <Text style={styles.featureChipLabel}>Product Voice:</Text>
-            <Text style={styles.featureChipCount}>
-              {usageSummary.featureBreakdown['toxicity-voice']}
-            </Text>
-          </View>
-        </View>
-      </View>
+      <FeatureBreakdownCard featureBreakdown={usageSummary.featureBreakdown} />
 
       {/* Recent API Activity Logs */}
-      {records.length > 0 && (
-        <View style={styles.activityCard}>
-          <View style={styles.activityHeaderRow}>
-            <Text style={styles.cardSectionTitle}>RECENT API ACTIVITY</Text>
-            <Text style={styles.activityCountTag}>{records.length} logged</Text>
-          </View>
-
-          <View style={styles.logsList}>
-            {displayedRecords.map((item: GeminiApiRecord) => (
-              <View key={item.id} style={styles.logItem}>
-                <View style={styles.logLeftCol}>
-                  <View style={styles.logTitleRow}>
-                    <View
-                      style={[
-                        styles.logStatusDot,
-                        item.status === 'success' ? styles.logDotOk : styles.logDotErr,
-                      ]}
-                    />
-                    <Text style={styles.logFeatureName}>{item.featureLabel}</Text>
-                  </View>
-                  <Text style={styles.logTimestamp}>{formatTimestamp(item.timestamp)}</Text>
-                </View>
-
-                <View style={styles.logRightCol}>
-                  <Text style={styles.logTokens}>
-                    {item.totalTokens > 0 ? `~${formatTokens(item.totalTokens)} tok` : '0 tok'}
-                  </Text>
-                  <Text style={styles.logDuration}>{item.durationMs}ms</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-
-          {records.length > 5 && (
-            <Pressable
-              style={({ pressed }) => [styles.toggleLogsBtn, pressed && styles.pressed]}
-              onPress={() => setShowAllLogs(!showAllLogs)}
-            >
-              <Text style={styles.toggleLogsBtnText}>
-                {showAllLogs ? 'Show Less' : `Show All (${records.length})`}
-              </Text>
-              <Ionicons
-                name={showAllLogs ? 'chevron-up' : 'chevron-down'}
-                size={14}
-                color={colors.primary}
-              />
-            </Pressable>
-          )}
-        </View>
-      )}
+      <RecentApiActivityCard
+        records={records}
+        showAllLogs={showAllLogs}
+        setShowAllLogs={setShowAllLogs}
+      />
 
       {/* Action Buttons Row */}
       <View style={styles.actionRow}>
@@ -478,350 +293,82 @@ export function GeminiUsageSection() {
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: {
-    marginTop: 8,
-    marginBottom: 16,
-  },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-    paddingHorizontal: 4,
-  },
-  sectionHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  sectionHeaderText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.textSecondary,
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-  },
-  configureLink: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  quotaCard: {
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    marginBottom: 12,
-  },
-  quotaHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 14,
-  },
-  statusCol: {
-    flex: 1,
-    marginRight: 8,
-  },
-  badgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 4,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  statusDotLive: {
-    backgroundColor: colors.primary,
-  },
-  statusDotProxy: {
-    backgroundColor: colors.calories,
-  },
-  statusText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  keySnippetText: {
-    fontSize: 11,
-    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
-    color: colors.textSecondary,
-  },
-  modelBadge: {
-    backgroundColor: colors.primaryMuted,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.primary,
-  },
-  modelBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-  quotaProgressSection: {
-    marginTop: 4,
-  },
-  quotaLabelRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    marginBottom: 6,
-  },
-  quotaLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textSecondary,
-  },
-  quotaValue: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.text,
-    fontVariant: ['tabular-nums'],
-  },
-  progressBarTrack: {
-    height: 8,
-    backgroundColor: colors.surfaceSubtle,
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  progressBarFill: {
-    height: '100%',
-    backgroundColor: colors.primary,
-    borderRadius: 4,
-  },
-  progressBarFillWarning: {
-    backgroundColor: colors.calories,
-  },
-  rateLimitRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  rateLimitText: {
-    fontSize: 11,
-    color: colors.textMuted,
-  },
-  freeTierTag: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-  bentoGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginBottom: 14,
-  },
-  bentoCard: {
-    flex: 1,
-    minWidth: '47%',
-    backgroundColor: colors.card,
-    borderRadius: 18,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  bentoIconRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 8,
-  },
-  bentoLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.textSecondary,
-    letterSpacing: 0.5,
-  },
-  bentoValue: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: colors.text,
-    marginBottom: 2,
-    fontVariant: ['tabular-nums'],
-  },
-  bentoSubtext: {
-    fontSize: 11,
-    color: colors.textMuted,
-  },
-  featureBreakdownCard: {
-    backgroundColor: colors.card,
-    borderRadius: 18,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    marginBottom: 14,
-  },
-  cardSectionTitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.textSecondary,
-    letterSpacing: 0.8,
-    marginBottom: 12,
-  },
-  featureChipsWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  featureChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: colors.surfaceSubtle,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  featureChipLabel: {
-    fontSize: 11,
-    color: colors.textSecondary,
-  },
-  featureChipCount: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  activityCard: {
-    backgroundColor: colors.card,
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    marginBottom: 12,
-  },
-  activityHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  activityCountTag: {
-    fontSize: 10,
-    color: colors.textMuted,
-  },
-  logsList: {
-    gap: 8,
-  },
-  logItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 6,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.cardBorder,
-  },
-  logLeftCol: {
-    flex: 1,
-  },
-  logTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 2,
-  },
-  logStatusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  logDotOk: {
-    backgroundColor: colors.primary,
-  },
-  logDotErr: {
-    backgroundColor: colors.danger,
-  },
-  logFeatureName: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  logTimestamp: {
-    fontSize: 10,
-    color: colors.textMuted,
-  },
-  logRightCol: {
-    alignItems: 'flex-end',
-  },
-  logTokens: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  logDuration: {
-    fontSize: 9,
-    color: colors.textMuted,
-  },
-  toggleLogsBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    paddingTop: 10,
-  },
-  toggleLogsBtnText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 10,
-    alignItems: 'center',
-  },
-  actionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    borderRadius: 12,
-    paddingVertical: 12,
-  },
-  actionBtnPrimary: {
-    flex: 1,
-    backgroundColor: colors.primary,
-  },
-  actionBtnSecondary: {
-    flex: 1,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  actionBtnReset: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionBtnTextPrimary: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.textInverse,
-  },
-  actionBtnTextSecondary: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  btnDisabled: {
-    opacity: 0.6,
-  },
-  pressed: {
-    opacity: 0.75,
-  },
-});
+    container: {
+      marginTop: 8,
+      marginBottom: 16,
+    },
+    sectionHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 10,
+      paddingHorizontal: 4,
+    },
+    sectionHeaderLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    sectionHeaderText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.textSecondary,
+      letterSpacing: 0.8,
+      textTransform: 'uppercase',
+    },
+    configureLink: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.primary,
+    },
+    actionRow: {
+      flexDirection: 'row',
+      gap: 10,
+      alignItems: 'center',
+    },
+    actionBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      paddingVertical: 12,
+      borderRadius: 12,
+    },
+    actionBtnPrimary: {
+      flex: 1,
+      backgroundColor: colors.primary,
+    },
+    actionBtnSecondary: {
+      flex: 1,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+    },
+    actionBtnReset: {
+      width: 44,
+      height: 44,
+      borderRadius: 12,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    actionBtnTextPrimary: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.textInverse,
+    },
+    actionBtnTextSecondary: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.text,
+    },
+    btnDisabled: {
+      opacity: 0.6,
+    },
+    pressed: {
+      opacity: 0.7,
+    },
+  });
 }
-
