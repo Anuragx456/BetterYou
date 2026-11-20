@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import { createRateLimiter, RateLimiter } from './rateLimiter';
-import { createDeviceStore, DeviceStore } from './deviceStore';
+import { createDeviceStore, DeviceStore, parseEncryptionKey } from './deviceStore';
 import { createAttestationVerifier } from './attestation';
 
 const REPLAY_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
@@ -16,8 +16,13 @@ export const attestationVerifier = createAttestationVerifier();
 // Replay cache: signature -> timestamp
 export const seenSignatures = new Map<string, number>();
 
-// Registration rate limiter: IP/device -> count
+// Registration rate limiters:
+// 1. Per-client (IP or untrusted pool) -> max 5/min
 const registrationRateLimits = new Map<string, { count: number; windowStart: number }>();
+// 2. Per-device ID -> max 5/hr
+const deviceRegistrationLimits = new Map<string, { count: number; windowStart: number }>();
+// 3. Global registrations -> max 100/hr
+let globalRegistrationWindow = { count: 0, windowStart: Date.now() };
 
 function isGeminiModelMissingMessage(message: string): boolean {
   return /not found|not supported|unknown model|invalid model|does not exist|is not available/i.test(message);
@@ -36,6 +41,8 @@ export function resetRateLimits() {
   deviceStore.reset();
   seenSignatures.clear();
   registrationRateLimits.clear();
+  deviceRegistrationLimits.clear();
+  globalRegistrationWindow = { count: 0, windowStart: Date.now() };
 }
 
 /**
@@ -48,6 +55,21 @@ export function verifySignatureConstantTime(expectedHex: string, actualHex: stri
     const actualBuf = Buffer.from(actualHex, 'hex');
     if (expectedBuf.length !== actualBuf.length) return false;
     return timingSafeEqual(expectedBuf, actualBuf);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Constant-time bootstrap secret verification using SHA-256 pre-hashing
+ * to avoid leaking string length differences.
+ */
+export function verifyBootstrapSecretConstantTime(configured: string, incoming: string): boolean {
+  if (!configured || !incoming) return false;
+  try {
+    const h1 = createHash('sha256').update(configured).digest();
+    const h2 = createHash('sha256').update(incoming).digest();
+    return timingSafeEqual(h1, h2);
   } catch {
     return false;
   }
@@ -87,9 +109,38 @@ app.get('/health', (c) => {
 // Issues a random cryptographically secure per-device secret (≥32 bytes)
 app.post('/v1/devices/register', async (c) => {
   const now = Date.now();
-
-  // 1. Configurable shared bootstrap check
+  const isProduction =
+    process.env.NODE_ENV === 'production' || process.env.PROXY_ENV === 'production';
   const configuredBootstrapSecret = process.env.BOOTSTRAP_SECRET?.trim();
+
+  // 1. Fail Closed in Production:
+  // If in production, BOOTSTRAP_SECRET must be configured and >= 32 chars.
+  if (isProduction) {
+    if (!configuredBootstrapSecret || configuredBootstrapSecret.length < 32) {
+      return c.json(
+        {
+          error:
+            'Service Unavailable: Device registration is disabled because BOOTSTRAP_SECRET is not configured or shorter than 32 characters in production.',
+        },
+        503
+      );
+    }
+
+    if (process.env.UPSTASH_REDIS_REST_URL) {
+      const encKey = parseEncryptionKey(process.env.DEVICE_STORE_ENCRYPTION_KEY);
+      if (!encKey) {
+        return c.json(
+          {
+            error:
+              'Service Unavailable: Device registration is disabled because DEVICE_STORE_ENCRYPTION_KEY is not configured or invalid in production.',
+          },
+          503
+        );
+      }
+    }
+  }
+
+  // 2. Constant-time bootstrap check (when configured in dev, or mandatory in prod)
   if (configuredBootstrapSecret) {
     const incomingBootstrap =
       c.req.header('x-bootstrap-secret') ||
@@ -99,7 +150,7 @@ app.post('/v1/devices/register', async (c) => {
         .then((b) => b?.bootstrapSecret)
         .catch(() => ''));
 
-    if (incomingBootstrap !== configuredBootstrapSecret) {
+    if (!verifyBootstrapSecretConstantTime(configuredBootstrapSecret, incomingBootstrap || '')) {
       return c.json(
         { error: 'Unauthorized: Invalid or missing registration bootstrap secret.' },
         401
@@ -107,28 +158,20 @@ app.post('/v1/devices/register', async (c) => {
     }
   }
 
-  // 2. Strict Rate Limiting for Device Registration (max 5 per minute per client)
-  const clientIdentifier =
-    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
-    c.req.header('cf-connecting-ip') ||
-    'local_client';
-
-  let regEntry = registrationRateLimits.get(clientIdentifier);
-  if (!regEntry || now - regEntry.windowStart > 60000) {
-    regEntry = { count: 0, windowStart: now };
-    registrationRateLimits.set(clientIdentifier, regEntry);
+  // 3. Global Registration Cap (max 100 registrations per hour across all clients)
+  if (now - globalRegistrationWindow.windowStart > 3600000) {
+    globalRegistrationWindow = { count: 0, windowStart: now };
   }
-
-  if (regEntry.count >= 5) {
-    c.header('Retry-After', '60');
+  if (globalRegistrationWindow.count >= 100) {
+    const retryAfter = Math.ceil((3600000 - (now - globalRegistrationWindow.windowStart)) / 1000);
+    c.header('Retry-After', String(Math.max(1, retryAfter)));
     return c.json(
-      { error: 'Too many device registration requests. Please wait 1 minute.' },
+      { error: 'Global registration limit reached (100 per hour across all clients). Please try again later.' },
       429
     );
   }
-  regEntry.count += 1;
 
-  // 3. Platform Attestation verification (if enabled)
+  // 4. Parse body for deviceId and attestation
   let body: {
     deviceId?: string;
     platform?: 'android' | 'ios' | 'web';
@@ -142,6 +185,56 @@ app.post('/v1/devices/register', async (c) => {
     // Body is optional
   }
 
+  // 5. Per-deviceId registration cap (max 5 per hour per deviceId)
+  if (body.deviceId) {
+    let devEntry = deviceRegistrationLimits.get(body.deviceId);
+    if (!devEntry || now - devEntry.windowStart > 3600000) {
+      devEntry = { count: 0, windowStart: now };
+      deviceRegistrationLimits.set(body.deviceId, devEntry);
+    }
+    if (devEntry.count >= 5) {
+      const retryAfter = Math.ceil((3600000 - (now - devEntry.windowStart)) / 1000);
+      c.header('Retry-After', String(Math.max(1, retryAfter)));
+      return c.json(
+        { error: `Registration limit reached for device ID (${body.deviceId}). Please wait before re-registering.` },
+        429
+      );
+    }
+  }
+
+  // 6. Honest Rate Limiting for Device Registration
+  // Only trust proxy headers (Fly-Client-IP, x-forwarded-for) when TRUST_PROXY_HEADERS === 'true'.
+  const trustProxy = process.env.TRUST_PROXY_HEADERS === 'true';
+  const clientIdentifier = trustProxy
+    ? c.req.header('fly-client-ip') ||
+      c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+      c.req.header('cf-connecting-ip') ||
+      'trusted_proxy_client'
+    : 'untrusted_client_pool';
+
+  let regEntry = registrationRateLimits.get(clientIdentifier);
+  if (!regEntry || now - regEntry.windowStart > 60000) {
+    regEntry = { count: 0, windowStart: now };
+    registrationRateLimits.set(clientIdentifier, regEntry);
+  }
+
+  if (regEntry.count >= 5) {
+    const retryAfter = Math.ceil((60000 - (now - regEntry.windowStart)) / 1000);
+    c.header('Retry-After', String(Math.max(1, retryAfter)));
+    return c.json(
+      { error: 'Too many device registration requests. Please wait 1 minute.' },
+      429
+    );
+  }
+
+  // Increment per-deviceId count on successful rate check
+  if (body.deviceId) {
+    const devEntry = deviceRegistrationLimits.get(body.deviceId);
+    if (devEntry) {
+      devEntry.count += 1;
+    }
+  }
+
   const attestationResult = await attestationVerifier.verify(
     body.attestationToken,
     body.deviceId || 'register'
@@ -153,7 +246,7 @@ app.post('/v1/devices/register', async (c) => {
     );
   }
 
-  // 4. Generate device ID and cryptographically secure secret (32 bytes = 64 hex chars)
+  // 7. Generate device ID and cryptographically secure secret (32 bytes = 64 hex chars)
   const deviceId =
     body.deviceId && /^[a-zA-Z0-9_-]{8,64}$/.test(body.deviceId)
       ? body.deviceId
@@ -162,9 +255,12 @@ app.post('/v1/devices/register', async (c) => {
   const secretBytes = randomBytes(32);
   const deviceSecret = secretBytes.toString('hex');
 
-  // Register in device store (stores secret and secret hash)
+  // Register in device store (never stores plaintext secret in Redis)
   // Crucially: never echoes or returns another device's existing secret
   await deviceStore.registerDevice(deviceId, deviceSecret);
+
+  globalRegistrationWindow.count += 1;
+  regEntry.count += 1;
 
   return c.json(
     {
@@ -173,6 +269,31 @@ app.post('/v1/devices/register', async (c) => {
       issuedAt: new Date(now).toISOString(),
     },
     201
+  );
+});
+
+// Device Secret Rotation Endpoint
+// Authenticated with the CURRENT device secret via HMAC middleware on /v1/*
+app.post('/v1/devices/rotate', async (c) => {
+  const deviceId = c.req.header('x-device-id');
+  if (!deviceId) {
+    return c.json({ error: 'Missing x-device-id header.' }, 400);
+  }
+
+  const now = Date.now();
+  const secretBytes = randomBytes(32);
+  const newSecret = secretBytes.toString('hex');
+
+  // Replace existing secret in store
+  await deviceStore.registerDevice(deviceId, newSecret);
+
+  return c.json(
+    {
+      deviceId,
+      deviceSecret: newSecret,
+      rotatedAt: new Date(now).toISOString(),
+    },
+    200
   );
 });
 

@@ -79,4 +79,50 @@ describe('Secure Storage & Device Signing Utilities', () => {
     expect(Math.abs(Date.now() - timestampNum)).toBeLessThan(5000); // within 5 seconds of now
     expect(headers['x-signature'].length).toBe(64); // 64 hex characters (32 bytes HMAC-SHA256)
   });
+
+  it('rotates device secret only after server confirms with 200', async () => {
+    const { rotateDeviceSecretWithProxy } = await import('../secureStorage');
+    const oldSecret = '1111222233334444555566667777888811112222333344445555666677778888';
+    const newSecret = '9999888877776666555544443333222299998888777766665555444433332222';
+    await setSecureItem(SECURE_KEYS.DEVICE_SECRET, oldSecret);
+
+    const originalFetch = globalThis.fetch;
+
+    // 1. Failure case: server returns 500 error
+    globalThis.fetch = (async () => {
+      return new Response('Internal Server Error', { status: 500 });
+    }) as unknown as typeof fetch;
+
+    try {
+      await expect(rotateDeviceSecretWithProxy('http://mock-proxy:8787')).rejects.toThrow();
+      // Old secret must NOT be changed
+      const currentSecret = await getSecureItem(SECURE_KEYS.DEVICE_SECRET);
+      expect(currentSecret).toBe(oldSecret);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    // 2. Success case: server returns 200 with new secret
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const urlStr = String(url);
+      if (urlStr.includes('/v1/devices/rotate')) {
+        return new Response(
+          JSON.stringify({ deviceId: 'test_dev', deviceSecret: newSecret }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      return originalFetch(url);
+    }) as unknown as typeof fetch;
+
+    try {
+      const result = await rotateDeviceSecretWithProxy('http://mock-proxy:8787');
+      expect(result.deviceSecret).toBe(newSecret);
+
+      // Now SecureStore has been updated to newSecret
+      const updatedSecret = await getSecureItem(SECURE_KEYS.DEVICE_SECRET);
+      expect(updatedSecret).toBe(newSecret);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

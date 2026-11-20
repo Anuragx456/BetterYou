@@ -275,3 +275,37 @@ export async function getSignedDeviceHeaders(
     'x-signature': signature,
   };
 }
+
+/**
+ * Rotates the device secret with the proxy server via authenticated POST /v1/devices/rotate.
+ * Crucially: SecureStore is updated with the new secret ONLY AFTER the proxy server confirms with 200.
+ */
+export async function rotateDeviceSecretWithProxy(
+  proxyUrl?: string
+): Promise<{ deviceId: string; deviceSecret: string }> {
+  const baseUrl = proxyUrl || process.env.EXPO_PUBLIC_PROXY_URL?.trim() || 'http://localhost:8787';
+  const path = '/v1/devices/rotate';
+  const signedHeaders = await getSignedDeviceHeaders('POST', path, '', proxyUrl);
+
+  const res = await fetch(`${baseUrl}${path}`, {
+    method: 'POST',
+    headers: {
+      ...signedHeaders,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Device secret rotation failed (${res.status}): ${errText}`);
+  }
+
+  const data = (await res.json()) as { deviceId: string; deviceSecret: string };
+  if (!data.deviceSecret || data.deviceSecret.length < 32) {
+    throw new Error('Device secret rotation returned invalid secret.');
+  }
+
+  // Store new secret in hardware-backed SecureStore only after server confirms
+  await setSecureItem(SECURE_KEYS.DEVICE_SECRET, data.deviceSecret);
+  return data;
+}
