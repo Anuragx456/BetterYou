@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -47,11 +47,13 @@ const CustomizerStepperRow: React.FC<CustomizerStepperRowProps> = ({
 }) => {
   const colors = useThemeColors();
   const styles = createStyles(colors);
+  const [prevValue, setPrevValue] = useState<number>(value);
   const [textValue, setTextValue] = useState<string>(String(value));
 
-  useEffect(() => {
+  if (value !== prevValue) {
+    setPrevValue(value);
     setTextValue(String(value));
-  }, [value]);
+  }
 
   const handleBlur = () => {
     const parsed = parseInt(textValue, 10);

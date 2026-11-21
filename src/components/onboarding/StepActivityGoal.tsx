@@ -171,7 +171,7 @@ export const StepActivityGoal: React.FC<StepActivityGoalProps> = ({
         <View style={styles.underweightWarning}>
           <Ionicons name="warning-outline" size={18} color={colors.warning} />
           <Text style={styles.underweightWarningText}>
-            Your BMI is in the underweight range — a calorie deficit isn't recommended. Consider Maintain or Bulk, and talk to a doctor for personal advice.
+            {"Your BMI is in the underweight range — a calorie deficit isn't recommended. Consider Maintain or Bulk, and talk to a doctor for personal advice."}
           </Text>
         </View>
       )}
