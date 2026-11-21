@@ -1,13 +1,14 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { UserSex } from '../../utils/nutritionTargets';
 import type { ThemeColors } from '../../theme/colors';
 import { useThemeColors } from '../../theme/theme';
 import { safeHaptics } from '../../utils/haptics';
+import { cmToFtIn, ftInToCm } from '../../utils/onboardingValidation';
 
 interface StepBasicsProps {
-  sex: UserSex;
+  sex: UserSex | null;
   setSex: (sex: UserSex) => void;
   ageStr: string;
   setAgeStr: (age: string) => void;
@@ -15,6 +16,13 @@ interface StepBasicsProps {
   setHeightStr: (height: string) => void;
   weightStr: string;
   setWeightStr: (weight: string) => void;
+  errors?: {
+    sex?: string;
+    age?: string;
+    height?: string;
+    weight?: string;
+  };
+  isValid?: boolean;
   onNext: () => void;
 }
 
@@ -27,10 +35,56 @@ export const StepBasics: React.FC<StepBasicsProps> = ({
   setHeightStr,
   weightStr,
   setWeightStr,
+  errors,
+  isValid = true,
   onNext,
 }) => {
   const colors = useThemeColors();
   const styles = createStyles(colors);
+
+  // Height unit toggle (Task 7)
+  const [heightUnit, setHeightUnit] = useState<'cm' | 'ft'>('cm');
+  const [ftStr, setFtStr] = useState<string>('');
+  const [inStr, setInStr] = useState<string>('');
+
+  const handleToggleUnit = (unit: 'cm' | 'ft') => {
+    if (unit === heightUnit) return;
+    safeHaptics.selection();
+    if (unit === 'ft') {
+      const cm = parseFloat(heightStr) || 0;
+      if (cm > 0) {
+        const converted = cmToFtIn(cm);
+        setFtStr(String(converted.ft));
+        setInStr(String(converted.in));
+      } else {
+        setFtStr('');
+        setInStr('');
+      }
+    }
+    setHeightUnit(unit);
+  };
+
+  const handleFtChange = (newFt: string) => {
+    setFtStr(newFt);
+    const f = parseInt(newFt, 10);
+    const i = parseInt(inStr, 10) || 0;
+    if (!newFt && !inStr) {
+      setHeightStr('');
+    } else {
+      setHeightStr(String(ftInToCm(isNaN(f) ? 0 : f, i)));
+    }
+  };
+
+  const handleInChange = (newIn: string) => {
+    setInStr(newIn);
+    const f = parseInt(ftStr, 10) || 0;
+    const i = parseInt(newIn, 10);
+    if (!ftStr && !newIn) {
+      setHeightStr('');
+    } else {
+      setHeightStr(String(ftInToCm(f, isNaN(i) ? 0 : i)));
+    }
+  };
 
   // Live BMI calculation for responsive physical feedback
   const bmiInfo = useMemo(() => {
@@ -141,6 +195,7 @@ export const StepBasics: React.FC<StepBasicsProps> = ({
           </View>
         </Pressable>
       </View>
+      {errors?.sex ? <Text style={styles.fieldError}>{errors.sex}</Text> : null}
 
       {/* Biometric Metric Cards */}
       <View style={styles.metricsGroup}>
@@ -169,32 +224,98 @@ export const StepBasics: React.FC<StepBasicsProps> = ({
             <Text style={styles.metricUnit}>yrs</Text>
           </View>
         </View>
+        {errors?.age ? <Text style={styles.fieldError}>{errors.age}</Text> : null}
 
-        {/* Height */}
+        {/* Height with cm | ft toggle */}
         <View style={styles.metricCard}>
           <View style={styles.metricLeft}>
             <View style={styles.metricIconBox}>
               <Ionicons name="resize-outline" size={18} color={colors.primary} />
             </View>
             <View>
-              <Text style={styles.metricLabel}>Height</Text>
+              <View style={styles.labelWithToggle}>
+                <Text style={styles.metricLabel}>Height</Text>
+                <View style={styles.unitToggle}>
+                  <Pressable
+                    style={[
+                      styles.unitToggleBtn,
+                      heightUnit === 'cm' && styles.unitToggleBtnActive,
+                    ]}
+                    onPress={() => handleToggleUnit('cm')}
+                  >
+                    <Text
+                      style={[
+                        styles.unitToggleText,
+                        heightUnit === 'cm' && styles.unitToggleTextActive,
+                      ]}
+                    >
+                      cm
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[
+                      styles.unitToggleBtn,
+                      heightUnit === 'ft' && styles.unitToggleBtnActive,
+                    ]}
+                    onPress={() => handleToggleUnit('ft')}
+                  >
+                    <Text
+                      style={[
+                        styles.unitToggleText,
+                        heightUnit === 'ft' && styles.unitToggleTextActive,
+                      ]}
+                    >
+                      ft
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
               <Text style={styles.metricHint}>Standing height</Text>
             </View>
           </View>
-          <View style={styles.inputContainer}>
-            <TextInput
-              style={styles.metricInput}
-              keyboardType="numeric"
-              value={heightStr}
-              onChangeText={setHeightStr}
-              placeholder="175"
-              placeholderTextColor={colors.textMuted}
-              maxLength={3}
-              testID="onboarding-input-height"
-            />
-            <Text style={styles.metricUnit}>cm</Text>
-          </View>
+
+          {heightUnit === 'cm' ? (
+            <View style={styles.inputContainer}>
+              <TextInput
+                style={styles.metricInput}
+                keyboardType="numeric"
+                value={heightStr}
+                onChangeText={setHeightStr}
+                placeholder="175"
+                placeholderTextColor={colors.textMuted}
+                maxLength={3}
+                testID="onboarding-input-height"
+              />
+              <Text style={styles.metricUnit}>cm</Text>
+            </View>
+          ) : (
+            <View style={styles.inputContainerFt}>
+              <TextInput
+                style={styles.metricInputFt}
+                keyboardType="numeric"
+                value={ftStr}
+                onChangeText={handleFtChange}
+                placeholder="5"
+                placeholderTextColor={colors.textMuted}
+                maxLength={1}
+                testID="onboarding-input-height-ft"
+              />
+              <Text style={styles.metricUnit}>ft</Text>
+              <TextInput
+                style={[styles.metricInputFt, { marginLeft: 6 }]}
+                keyboardType="numeric"
+                value={inStr}
+                onChangeText={handleInChange}
+                placeholder="9"
+                placeholderTextColor={colors.textMuted}
+                maxLength={2}
+                testID="onboarding-input-height-in"
+              />
+              <Text style={styles.metricUnit}>in</Text>
+            </View>
+          )}
         </View>
+        {errors?.height ? <Text style={styles.fieldError}>{errors.height}</Text> : null}
 
         {/* Weight */}
         <View style={styles.metricCard}>
@@ -221,7 +342,11 @@ export const StepBasics: React.FC<StepBasicsProps> = ({
             <Text style={styles.metricUnit}>kg</Text>
           </View>
         </View>
+        {errors?.weight ? <Text style={styles.fieldError}>{errors.weight}</Text> : null}
       </View>
+
+      {/* Privacy note under inputs */}
+      <Text style={styles.privacyNote}>Stored only on your device — never uploaded.</Text>
 
       {/* Live BMI indicator */}
       {bmiInfo && (
@@ -243,8 +368,13 @@ export const StepBasics: React.FC<StepBasicsProps> = ({
 
       {/* Continue CTA */}
       <Pressable
-        style={({ pressed }) => [styles.primaryBtn, pressed && styles.btnPressed]}
+        style={({ pressed }) => [
+          styles.primaryBtn,
+          !isValid && styles.primaryBtnDisabled,
+          pressed && isValid && styles.btnPressed,
+        ]}
         onPress={onNext}
+        disabled={!isValid}
         accessibilityRole="button"
         accessibilityLabel="Continue to energy and goals"
         testID="onboarding-step1-next"
@@ -314,7 +444,7 @@ function createStyles(colors: ThemeColors) {
     sexRow: {
       flexDirection: 'row',
       gap: 12,
-      marginBottom: 20,
+      marginBottom: 12,
     },
     sexCard: {
       flex: 1,
@@ -377,9 +507,17 @@ function createStyles(colors: ThemeColors) {
       borderRadius: 5,
       backgroundColor: colors.primary,
     },
+    fieldError: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.danger,
+      marginTop: 2,
+      marginBottom: 8,
+      marginLeft: 4,
+    },
     metricsGroup: {
       gap: 10,
-      marginBottom: 16,
+      marginBottom: 12,
     },
     metricCard: {
       flexDirection: 'row',
@@ -397,6 +535,35 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center',
       gap: 12,
       flex: 1,
+    },
+    labelWithToggle: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    unitToggle: {
+      flexDirection: 'row',
+      backgroundColor: colors.surfaceSubtle,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      padding: 1,
+    },
+    unitToggleBtn: {
+      paddingHorizontal: 6,
+      paddingVertical: 1,
+      borderRadius: 4,
+    },
+    unitToggleBtnActive: {
+      backgroundColor: colors.primary,
+    },
+    unitToggleText: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: colors.textMuted,
+    },
+    unitToggleTextActive: {
+      color: '#FFFFFF',
     },
     metricIconBox: {
       width: 36,
@@ -428,6 +595,18 @@ function createStyles(colors: ThemeColors) {
       minWidth: 88,
       justifyContent: 'flex-end',
     },
+    inputContainerFt: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.surfaceSubtle,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      borderRadius: 10,
+      paddingHorizontal: 8,
+      paddingVertical: 6,
+      minWidth: 110,
+      justifyContent: 'flex-end',
+    },
     metricInput: {
       fontSize: 18,
       fontWeight: '800',
@@ -436,11 +615,25 @@ function createStyles(colors: ThemeColors) {
       paddingVertical: 2,
       minWidth: 42,
     },
+    metricInputFt: {
+      fontSize: 17,
+      fontWeight: '800',
+      color: colors.text,
+      textAlign: 'right',
+      paddingVertical: 2,
+      minWidth: 24,
+    },
     metricUnit: {
       fontSize: 12,
       fontWeight: '600',
       color: colors.textSecondary,
       marginLeft: 4,
+    },
+    privacyNote: {
+      fontSize: 12,
+      color: colors.textMuted,
+      textAlign: 'center',
+      marginBottom: 16,
     },
     bmiCard: {
       backgroundColor: colors.card,
@@ -495,6 +688,9 @@ function createStyles(colors: ThemeColors) {
       paddingVertical: 16,
       gap: 8,
       marginTop: 8,
+    },
+    primaryBtnDisabled: {
+      opacity: 0.45,
     },
     btnPressed: {
       opacity: 0.88,

@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
-import React from 'react';
+import React, { useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -15,6 +15,7 @@ import { StepActivityGoal } from '../components/onboarding/StepActivityGoal';
 import { StepBasics } from '../components/onboarding/StepBasics';
 import { StepSummaryCompletion } from '../components/onboarding/StepSummaryCompletion';
 import { StepTargetCustomizer } from '../components/onboarding/StepTargetCustomizer';
+import { StepWelcome } from '../components/onboarding/StepWelcome';
 import { useOnboarding } from '../hooks/useOnboarding';
 import type { ThemeColors } from '../theme/colors';
 import { useThemeColors, useThemedStyles } from '../theme/theme';
@@ -59,11 +60,30 @@ export default function OnboardingScreen() {
     setCustomFat,
     setIsTargetsTouched,
     computedTargets,
+    basicsValidation,
+    bmi,
     handleNextFromStep1,
     handleNextFromStep2,
     handleNextFromStep3,
     handleFinishAndSave,
+    handleSkip,
   } = useOnboarding();
+
+  // Task 5: Welcome step shown only on true first run
+  const [showWelcome, setShowWelcome] = useState(
+    !isRecalculating && !hasCompletedOnboarding
+  );
+
+  if (showWelcome) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StepWelcome
+          onGetStarted={() => setShowWelcome(false)}
+          onSkip={handleSkip}
+        />
+      </SafeAreaView>
+    );
+  }
 
   const canGoBack = currentStep > 0 || isRecalculating || hasCompletedOnboarding;
 
@@ -107,10 +127,7 @@ export default function OnboardingScreen() {
             {/* Skip or Placeholder */}
             {!isRecalculating && !hasCompletedOnboarding ? (
               <Pressable
-                onPress={() => {
-                  safeHaptics.impactLight();
-                  handleFinishAndSave();
-                }}
+                onPress={handleSkip}
                 style={styles.skipBtn}
                 accessibilityRole="button"
                 accessibilityLabel="Skip"
@@ -160,6 +177,8 @@ export default function OnboardingScreen() {
               setHeightStr={setHeightStr}
               weightStr={weightStr}
               setWeightStr={setWeightStr}
+              errors={basicsValidation.errors}
+              isValid={basicsValidation.valid}
               onNext={handleNextFromStep1}
             />
           )}
@@ -170,6 +189,7 @@ export default function OnboardingScreen() {
               setActivityLevel={setActivityLevel}
               goalType={goalType}
               setGoalType={setGoalType}
+              bmi={bmi}
               onNext={handleNextFromStep2}
             />
           )}

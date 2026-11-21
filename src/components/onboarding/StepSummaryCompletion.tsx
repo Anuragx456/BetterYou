@@ -4,10 +4,10 @@ import { Ionicons } from '@expo/vector-icons';
 import type { ThemeColors } from '../../theme/colors';
 import { useThemeColors } from '../../theme/theme';
 import { ACTIVITY_OPTIONS, GOAL_OPTIONS } from './constants';
-import type { ActivityLevel, GoalType } from '../../utils/nutritionTargets';
+import type { ActivityLevel, GoalType, UserSex } from '../../utils/nutritionTargets';
 
 interface StepSummaryCompletionProps {
-  sex: 'male' | 'female';
+  sex: UserSex | null;
   ageStr: string;
   heightStr: string;
   weightStr: string;
@@ -81,7 +81,7 @@ export function StepSummaryCompletion({
           <View style={styles.profileItem}>
             <Text style={styles.profileItemLabel}>BIOLOGICAL PROFILE</Text>
             <Text style={styles.profileItemValue}>
-              {sex === 'male' ? 'Male' : 'Female'} • {ageStr} yrs
+              {sex === 'female' ? 'Female' : 'Male'} • {ageStr} yrs
             </Text>
           </View>
 
@@ -168,6 +168,11 @@ export function StepSummaryCompletion({
           </Text>
         </View>
       </View>
+
+      {/* Medical Disclaimer */}
+      <Text style={styles.disclaimerText}>
+        Targets are estimates from the Mifflin-St Jeor formula, not medical advice.
+      </Text>
 
       {/* CTA Button */}
       <Pressable
@@ -368,7 +373,7 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.cardBorder,
       padding: 14,
       borderRadius: 14,
-      marginBottom: 20,
+      marginBottom: 16,
     },
     privacyIconWrapper: {
       width: 32,
@@ -392,6 +397,13 @@ function createStyles(colors: ThemeColors) {
       fontSize: 11,
       lineHeight: 16,
       color: colors.textSecondary,
+    },
+    disclaimerText: {
+      fontSize: 11,
+      color: colors.textMuted,
+      textAlign: 'center',
+      marginBottom: 16,
+      lineHeight: 16,
     },
     primaryBtn: {
       flexDirection: 'row',

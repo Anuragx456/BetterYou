@@ -1,15 +1,133 @@
-import React, { useMemo } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import type { GoalType, UserSex, NutritionTargetsResult } from '../../utils/nutritionTargets';
+import {
+  GoalType,
+  MIN_CALORIE_FLOOR,
+  NutritionTargetsResult,
+  UserSex,
+} from '../../utils/nutritionTargets';
 import type { ThemeColors } from '../../theme/colors';
 import { useThemeColors } from '../../theme/theme';
 import { safeHaptics } from '../../utils/haptics';
-import { TargetStepperRow } from './TargetStepperRow';
+import { validateTargets } from '../../utils/onboardingValidation';
+
+interface CustomizerStepperRowProps {
+  title: string;
+  desc: string;
+  iconName: keyof typeof Ionicons.glyphMap;
+  iconColor: string;
+  iconBg: string;
+  value: number;
+  unit: string;
+  step: number;
+  min: number;
+  max: number;
+  onValueChange: (val: number) => void;
+  testIdMinus?: string;
+  testIdPlus?: string;
+  testIdInput?: string;
+}
+
+const CustomizerStepperRow: React.FC<CustomizerStepperRowProps> = ({
+  title,
+  desc,
+  iconName,
+  iconColor,
+  iconBg,
+  value,
+  unit,
+  step,
+  min,
+  max,
+  onValueChange,
+  testIdMinus,
+  testIdPlus,
+  testIdInput,
+}) => {
+  const colors = useThemeColors();
+  const styles = createStyles(colors);
+  const [textValue, setTextValue] = useState<string>(String(value));
+
+  useEffect(() => {
+    setTextValue(String(value));
+  }, [value]);
+
+  const handleBlur = () => {
+    const parsed = parseInt(textValue, 10);
+    const clamped = isNaN(parsed) || parsed < min ? min : parsed > max ? max : parsed;
+    setTextValue(String(clamped));
+    onValueChange(clamped);
+  };
+
+  return (
+    <View style={styles.adjustCard}>
+      <View style={styles.adjustLeft}>
+        <View style={[styles.macroIconBox, { backgroundColor: iconBg }]}>
+          <Ionicons name={iconName} size={18} color={iconColor} />
+        </View>
+        <View style={styles.adjustTextWrapper}>
+          <Text style={styles.adjustTitle}>{title}</Text>
+          <Text style={styles.adjustDesc}>{desc}</Text>
+        </View>
+      </View>
+
+      <View style={styles.stepperControl}>
+        <Pressable
+          style={styles.stepperBtn}
+          onPress={() => {
+            safeHaptics.selection();
+            const nextVal = Math.max(min, value - step);
+            setTextValue(String(nextVal));
+            onValueChange(nextVal);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={`Decrease ${title.toLowerCase()}`}
+          testID={testIdMinus}
+        >
+          <Ionicons name="remove" size={16} color={colors.text} />
+        </Pressable>
+
+        <View style={styles.stepperValueBox}>
+          <TextInput
+            style={styles.stepperInput}
+            keyboardType="numeric"
+            value={textValue}
+            onChangeText={(txt) => {
+              setTextValue(txt);
+              const parsed = parseInt(txt, 10);
+              if (!isNaN(parsed)) {
+                onValueChange(parsed);
+              }
+            }}
+            onBlur={handleBlur}
+            testID={testIdInput}
+          />
+          <Text style={styles.stepperUnit}>{unit}</Text>
+        </View>
+
+        <Pressable
+          style={styles.stepperBtn}
+          onPress={() => {
+            safeHaptics.selection();
+            const nextVal = Math.min(max, value + step);
+            setTextValue(String(nextVal));
+            onValueChange(nextVal);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={`Increase ${title.toLowerCase()}`}
+          testID={testIdPlus}
+        >
+          <Ionicons name="add" size={16} color={colors.text} />
+        </Pressable>
+      </View>
+    </View>
+  );
+};
 
 interface StepTargetCustomizerProps {
   goalType: GoalType;
-  sex: UserSex;
+  sex: UserSex | null;
   computedTargets: NutritionTargetsResult;
   customCalories: number;
   setCustomCalories: React.Dispatch<React.SetStateAction<number>>;
@@ -40,6 +158,17 @@ export const StepTargetCustomizer: React.FC<StepTargetCustomizerProps> = ({
 }) => {
   const colors = useThemeColors();
   const styles = createStyles(colors);
+
+  // Live targets validation
+  const targetError = useMemo(() => {
+    return validateTargets({
+      calories: customCalories,
+      protein: customProtein,
+      carbs: customCarbs,
+      fat: customFat,
+      sex,
+    });
+  }, [customCalories, customProtein, customCarbs, customFat, sex]);
 
   // Calculate live macro caloric split and percentages
   const macroBreakdown = useMemo(() => {
@@ -80,6 +209,8 @@ export const StepTargetCustomizer: React.FC<StepTargetCustomizerProps> = ({
     setCustomFat(computedTargets.fatGrams);
     setIsTargetsTouched(false);
   };
+
+  const calorieMin = Math.max(1000, sex ? MIN_CALORIE_FLOOR[sex] : 1200);
 
   return (
     <View style={styles.stepWrapper}>
@@ -204,7 +335,7 @@ export const StepTargetCustomizer: React.FC<StepTargetCustomizerProps> = ({
 
       {/* Stepper Adjusters List */}
       <View style={styles.steppersList}>
-        <TargetStepperRow
+        <CustomizerStepperRow
           title="Calories"
           desc="Overall energy target"
           iconName="flame-outline"
@@ -213,7 +344,8 @@ export const StepTargetCustomizer: React.FC<StepTargetCustomizerProps> = ({
           value={customCalories}
           unit="kcal"
           step={50}
-          min={1000}
+          min={calorieMin}
+          max={6000}
           onValueChange={(val) => {
             setIsTargetsTouched(true);
             setCustomCalories(val);
@@ -223,7 +355,7 @@ export const StepTargetCustomizer: React.FC<StepTargetCustomizerProps> = ({
           testIdInput="onboarding-stepper-cal-input"
         />
 
-        <TargetStepperRow
+        <CustomizerStepperRow
           title="Protein"
           desc={`${goalType === 'cut' ? '2.0 g/kg' : '1.8 g/kg'} lean mass protection`}
           iconName="fitness-outline"
@@ -233,6 +365,7 @@ export const StepTargetCustomizer: React.FC<StepTargetCustomizerProps> = ({
           unit="g"
           step={5}
           min={30}
+          max={400}
           onValueChange={(val) => {
             setIsTargetsTouched(true);
             setCustomProtein(val);
@@ -242,7 +375,7 @@ export const StepTargetCustomizer: React.FC<StepTargetCustomizerProps> = ({
           testIdInput="onboarding-stepper-pro-input"
         />
 
-        <TargetStepperRow
+        <CustomizerStepperRow
           title="Carbohydrates"
           desc="Glycolytic energy & performance"
           iconName="nutrition-outline"
@@ -251,7 +384,8 @@ export const StepTargetCustomizer: React.FC<StepTargetCustomizerProps> = ({
           value={customCarbs}
           unit="g"
           step={5}
-          min={20}
+          min={0}
+          max={800}
           onValueChange={(val) => {
             setIsTargetsTouched(true);
             setCustomCarbs(val);
@@ -261,7 +395,7 @@ export const StepTargetCustomizer: React.FC<StepTargetCustomizerProps> = ({
           testIdInput="onboarding-stepper-carb-input"
         />
 
-        <TargetStepperRow
+        <CustomizerStepperRow
           title="Fats"
           desc="Hormonal synthesis & joints"
           iconName="water-outline"
@@ -271,6 +405,7 @@ export const StepTargetCustomizer: React.FC<StepTargetCustomizerProps> = ({
           unit="g"
           step={5}
           min={20}
+          max={300}
           onValueChange={(val) => {
             setIsTargetsTouched(true);
             setCustomFat(val);
@@ -281,10 +416,23 @@ export const StepTargetCustomizer: React.FC<StepTargetCustomizerProps> = ({
         />
       </View>
 
+      {/* Inline warning above button */}
+      {targetError ? (
+        <View style={styles.errorBanner}>
+          <Ionicons name="warning-outline" size={16} color={colors.warning} />
+          <Text style={styles.errorText}>{targetError}</Text>
+        </View>
+      ) : null}
+
       {/* Review CTA */}
       <Pressable
-        style={({ pressed }) => [styles.primaryBtn, pressed && styles.btnPressed]}
+        style={({ pressed }) => [
+          styles.primaryBtn,
+          Boolean(targetError) && styles.primaryBtnDisabled,
+          pressed && !targetError && styles.btnPressed,
+        ]}
         onPress={onNext}
+        disabled={Boolean(targetError)}
         accessibilityRole="button"
         accessibilityLabel="Review and confirm nutrition plan"
         testID="onboarding-step3-next"
@@ -501,7 +649,98 @@ function createStyles(colors: ThemeColors) {
     },
     steppersList: {
       gap: 10,
-      marginBottom: 20,
+      marginBottom: 16,
+    },
+    adjustCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      borderRadius: 14,
+      padding: 12,
+    },
+    adjustLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      flex: 1,
+    },
+    macroIconBox: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    adjustTextWrapper: {
+      flex: 1,
+    },
+    adjustTitle: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.text,
+    },
+    adjustDesc: {
+      fontSize: 11,
+      color: colors.textSecondary,
+      marginTop: 1,
+    },
+    stepperControl: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.surfaceSubtle,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      borderRadius: 10,
+      overflow: 'hidden',
+    },
+    stepperBtn: {
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      minHeight: 44,
+      minWidth: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    stepperValueBox: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      minWidth: 54,
+      justifyContent: 'center',
+      paddingHorizontal: 4,
+    },
+    stepperInput: {
+      fontSize: 15,
+      fontWeight: '800',
+      color: colors.text,
+      textAlign: 'center',
+      paddingVertical: 2,
+    },
+    stepperUnit: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.textSecondary,
+      marginLeft: 2,
+    },
+    errorBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: 'rgba(245, 158, 11, 0.1)',
+      borderWidth: 1,
+      borderColor: 'rgba(245, 158, 11, 0.3)',
+      borderRadius: 10,
+      padding: 10,
+      marginBottom: 12,
+    },
+    errorText: {
+      flex: 1,
+      fontSize: 12,
+      lineHeight: 16,
+      color: colors.warning,
+      fontWeight: '600',
     },
     primaryBtn: {
       flexDirection: 'row',
@@ -512,6 +751,9 @@ function createStyles(colors: ThemeColors) {
       paddingVertical: 16,
       gap: 8,
       marginTop: 6,
+    },
+    primaryBtnDisabled: {
+      opacity: 0.45,
     },
     btnPressed: {
       opacity: 0.88,

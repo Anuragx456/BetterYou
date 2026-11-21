@@ -12,6 +12,7 @@ interface StepActivityGoalProps {
   setActivityLevel: (level: ActivityLevel) => void;
   goalType: GoalType;
   setGoalType: (goal: GoalType) => void;
+  bmi?: number;
   onNext: () => void;
 }
 
@@ -20,10 +21,13 @@ export const StepActivityGoal: React.FC<StepActivityGoalProps> = ({
   setActivityLevel,
   goalType,
   setGoalType,
+  bmi,
   onNext,
 }) => {
   const colors = useThemeColors();
   const styles = createStyles(colors);
+
+  const isUnderweightCut = Boolean(bmi && bmi > 0 && bmi < 18.5 && goalType === 'cut');
 
   return (
     <View style={styles.stepWrapper}>
@@ -70,16 +74,6 @@ export const StepActivityGoal: React.FC<StepActivityGoalProps> = ({
                   <Text style={[styles.cardTitle, isSelected && styles.cardTitleSelected]}>
                     {opt.label}
                   </Text>
-                  <View style={[styles.multiplierPill, isSelected && styles.multiplierPillSelected]}>
-                    <Text
-                      style={[
-                        styles.multiplierText,
-                        isSelected && styles.multiplierTextSelected,
-                      ]}
-                    >
-                      {opt.multiplier}
-                    </Text>
-                  </View>
                 </View>
 
                 <Text style={styles.cardDesc}>{opt.desc}</Text>
@@ -172,10 +166,25 @@ export const StepActivityGoal: React.FC<StepActivityGoalProps> = ({
         })}
       </View>
 
+      {/* Underweight + Cut warning box */}
+      {isUnderweightCut && (
+        <View style={styles.underweightWarning}>
+          <Ionicons name="warning-outline" size={18} color={colors.warning} />
+          <Text style={styles.underweightWarningText}>
+            Your BMI is in the underweight range — a calorie deficit isn't recommended. Consider Maintain or Bulk, and talk to a doctor for personal advice.
+          </Text>
+        </View>
+      )}
+
       {/* CTA Button */}
       <Pressable
-        style={({ pressed }) => [styles.primaryBtn, pressed && styles.btnPressed]}
+        style={({ pressed }) => [
+          styles.primaryBtn,
+          isUnderweightCut && styles.primaryBtnDisabled,
+          pressed && !isUnderweightCut && styles.btnPressed,
+        ]}
         onPress={onNext}
+        disabled={isUnderweightCut}
         accessibilityRole="button"
         accessibilityLabel="Calculate nutrition targets"
         testID="onboarding-step2-next"
@@ -300,23 +309,6 @@ function createStyles(colors: ThemeColors) {
       color: colors.textMuted,
       marginTop: 4,
     },
-    multiplierPill: {
-      backgroundColor: colors.surfaceSubtle,
-      paddingHorizontal: 8,
-      paddingVertical: 2,
-      borderRadius: 6,
-    },
-    multiplierPillSelected: {
-      backgroundColor: colors.primaryMuted,
-    },
-    multiplierText: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: colors.textSecondary,
-    },
-    multiplierTextSelected: {
-      color: colors.primary,
-    },
     goalBadge: {
       backgroundColor: colors.surfaceSubtle,
       paddingHorizontal: 8,
@@ -386,6 +378,24 @@ function createStyles(colors: ThemeColors) {
       borderRadius: 5,
       backgroundColor: colors.primary,
     },
+    underweightWarning: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      backgroundColor: 'rgba(245, 158, 11, 0.1)',
+      borderWidth: 1,
+      borderColor: 'rgba(245, 158, 11, 0.3)',
+      borderRadius: 12,
+      padding: 12,
+      marginTop: 16,
+    },
+    underweightWarningText: {
+      flex: 1,
+      fontSize: 12,
+      lineHeight: 18,
+      color: colors.warning,
+      fontWeight: '600',
+    },
     primaryBtn: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -395,6 +405,9 @@ function createStyles(colors: ThemeColors) {
       paddingVertical: 16,
       gap: 8,
       marginTop: 22,
+    },
+    primaryBtnDisabled: {
+      opacity: 0.45,
     },
     btnPressed: {
       opacity: 0.88,
