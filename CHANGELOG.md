@@ -37,6 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Audited all 50 dishes in `src/data/indianFoodDb.json` with `"confidence": "verified" | "estimate"` and honest source attribution.
   - Updated `src/utils/indianFoodMatcher.ts` and `MealVerificationCard.tsx` to distinguish between `"from local database (IFCT 2017)"` and `"from local database (estimate)"`.
   - Added `src/data/__tests__/indianFoodDb.test.ts` verifying Atwater factors ($\le 20\%$), thermodynamic macro sums ($\le 105$g), and alias uniqueness.
+- **Stageshow Onboarding Revamp & Enhanced User Experience**:
+  - Revamped the 4-step onboarding flow (`src/app/onboarding.tsx`, `StepBasics.tsx`, `StepActivityGoal.tsx`, `StepTargetCustomizer.tsx`, `StepSummaryCompletion.tsx`) using `stageshow` craft, restraint, and framing principles.
+  - Implemented segmented stage navigator with tactile back control, step pills, and responsive skip navigation.
+  - Added live BMI calculation feedback, interactive activity meters, visual macro proportion energy bars, and a celebratory on-device SQLite Metabolic Blueprint card.
+  - Extracted modular `TargetStepperRow` component keeping all source files strictly $\le 600$ lines.
+  - Added unit test suite in `src/components/onboarding/__tests__/onboarding.test.ts` (suite total: 261 passing tests).
 
 ---
 

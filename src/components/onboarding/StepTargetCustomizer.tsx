@@ -1,10 +1,11 @@
-import React from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
+import React, { useMemo } from 'react';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { GoalType, UserSex, NutritionTargetsResult } from '../../utils/nutritionTargets';
 import type { ThemeColors } from '../../theme/colors';
 import { useThemeColors } from '../../theme/theme';
 import { safeHaptics } from '../../utils/haptics';
+import { TargetStepperRow } from './TargetStepperRow';
 
 interface StepTargetCustomizerProps {
   goalType: GoalType;
@@ -40,44 +41,106 @@ export const StepTargetCustomizer: React.FC<StepTargetCustomizerProps> = ({
   const colors = useThemeColors();
   const styles = createStyles(colors);
 
+  // Calculate live macro caloric split and percentages
+  const macroBreakdown = useMemo(() => {
+    const proteinKcal = Math.max(0, customProtein * 4);
+    const carbsKcal = Math.max(0, customCarbs * 4);
+    const fatKcal = Math.max(0, customFat * 9);
+    const totalMacroKcal = proteinKcal + carbsKcal + fatKcal || 1;
+
+    const proteinPct = Math.round((proteinKcal / totalMacroKcal) * 100);
+    const carbsPct = Math.round((carbsKcal / totalMacroKcal) * 100);
+    const fatPct = Math.max(0, 100 - proteinPct - carbsPct);
+
+    const netDelta = customCalories - computedTargets.tdee;
+    let deltaText = 'Maintenance (0 kcal)';
+    if (netDelta < -10) {
+      deltaText = `${netDelta} kcal deficit`;
+    } else if (netDelta > 10) {
+      deltaText = `+${netDelta} kcal surplus`;
+    }
+
+    return {
+      proteinKcal,
+      carbsKcal,
+      fatKcal,
+      proteinPct,
+      carbsPct,
+      fatPct,
+      deltaText,
+      netDelta,
+    };
+  }, [customCalories, customProtein, customCarbs, customFat, computedTargets.tdee]);
+
+  const handleResetToComputed = () => {
+    safeHaptics.impactLight();
+    setCustomCalories(computedTargets.calories);
+    setCustomProtein(computedTargets.proteinGrams);
+    setCustomCarbs(computedTargets.carbsGrams);
+    setCustomFat(computedTargets.fatGrams);
+    setIsTargetsTouched(false);
+  };
+
   return (
     <View style={styles.stepWrapper}>
+      {/* Category Tag */}
       <View style={styles.badgeRow}>
-        <Ionicons name="calculator" size={14} color={colors.primary} />
+        <View style={styles.badgeIconWrapper}>
+          <Ionicons name="calculator" size={13} color={colors.primary} />
+        </View>
         <Text style={styles.badgeText}>METABOLIC SCIENCE</Text>
       </View>
+
       <Text style={styles.stepTitle}>Your Daily Nutrition Targets</Text>
       <Text style={styles.stepDesc}>
-        Based on your physiological stats and {goalType} objective. You can adjust the numbers below to match your preferences.
+        Computed from your physiological stats and {goalType} objective. Adjust the numbers below to align with your personal nutrition preferences.
       </Text>
 
-      {/* Science Breakdown Card */}
-      <View style={styles.scienceCard}>
-        <View style={styles.scienceRow}>
-          <View style={styles.scienceStat}>
-            <Text style={styles.scienceStatLabel}>BMR</Text>
-            <Text style={styles.scienceStatValue}>{computedTargets.bmr} kcal</Text>
-            <Text style={styles.scienceStatHint}>Basal metabolic burn</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.scienceStat}>
-            <Text style={styles.scienceStatLabel}>TDEE</Text>
-            <Text style={styles.scienceStatValue}>{computedTargets.tdee} kcal</Text>
-            <Text style={styles.scienceStatHint}>Daily energy burn</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.scienceStat}>
-            <Text style={styles.scienceStatLabel}>Target</Text>
-            <Text style={[styles.scienceStatValue, { color: colors.primary }]}>
-              {customCalories} kcal
+      {/* Hero Metabolic Card */}
+      <View style={styles.heroCard}>
+        <View style={styles.heroHeader}>
+          <Text style={styles.heroSubheader}>DAILY CALORIC ENVELOPE</Text>
+          <View style={styles.goalTag}>
+            <Text style={styles.goalTagText}>
+              {goalType === 'cut' ? 'DEFICIT' : goalType === 'bulk' ? 'SURPLUS' : 'MAINTAIN'}
             </Text>
-            <Text style={styles.scienceStatHint}>{goalType.toUpperCase()}</Text>
           </View>
         </View>
 
+        {/* Big Number */}
+        <View style={styles.heroNumberRow}>
+          <Text style={styles.heroBigNumber}>{customCalories.toLocaleString()}</Text>
+          <Text style={styles.heroUnit}>kcal / day</Text>
+        </View>
+
+        <Text style={styles.heroDeltaText}>{macroBreakdown.deltaText}</Text>
+
+        {/* Science Triad: BMR, TDEE, Target */}
+        <View style={styles.triadDivider} />
+        <View style={styles.triadRow}>
+          <View style={styles.triadItem}>
+            <Text style={styles.triadLabel}>BMR</Text>
+            <Text style={styles.triadValue}>{computedTargets.bmr}</Text>
+            <Text style={styles.triadHint}>Basal burn</Text>
+          </View>
+          <View style={styles.triadLine} />
+          <View style={styles.triadItem}>
+            <Text style={styles.triadLabel}>TDEE</Text>
+            <Text style={styles.triadValue}>{computedTargets.tdee}</Text>
+            <Text style={styles.triadHint}>Daily expenditure</Text>
+          </View>
+          <View style={styles.triadLine} />
+          <View style={styles.triadItem}>
+            <Text style={styles.triadLabel}>TARGET</Text>
+            <Text style={[styles.triadValue, { color: colors.primary }]}>{customCalories}</Text>
+            <Text style={styles.triadHint}>Daily intake</Text>
+          </View>
+        </View>
+
+        {/* Safety Floor Notice */}
         {computedTargets.isClampedForSafety && (
           <View style={styles.safetyClampNotice}>
-            <Ionicons name="shield-checkmark" size={14} color="#F59E0B" />
+            <Ionicons name="shield-checkmark" size={15} color={colors.warning} />
             <Text style={styles.safetyClampText}>
               Protected by safety floor ({sex === 'female' ? '≥1200' : '≥1500'} kcal/day minimum for health preservation).
             </Text>
@@ -85,192 +148,146 @@ export const StepTargetCustomizer: React.FC<StepTargetCustomizerProps> = ({
         )}
       </View>
 
-      {/* Interactive Target Adjusters */}
-      <Text style={[styles.inputLabel, { marginTop: 16 }]}>Adjust Targets</Text>
-
-      {/* Calories */}
-      <View style={styles.adjustRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.adjustLabel}>Calories</Text>
-          <Text style={styles.adjustHint}>Total daily intake</Text>
+      {/* Visual Macro Proportion Bar */}
+      <View style={styles.macroRatioSection}>
+        <View style={styles.macroRatioHeader}>
+          <Text style={styles.inputLabel}>Macronutrient Energy Ratio</Text>
+          <Pressable onPress={handleResetToComputed} accessibilityRole="button">
+            <Text style={styles.resetLink}>Reset to formula</Text>
+          </Pressable>
         </View>
-        <View style={styles.stepperContainer}>
-          <Pressable
-            style={styles.stepperBtn}
-            onPress={() => {
-              safeHaptics.selection();
-              setIsTargetsTouched(true);
-              setCustomCalories((prev) => Math.max(1000, prev - 50));
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Decrease calories"
-          >
-            <Ionicons name="remove" size={18} color={colors.text} />
-          </Pressable>
-          <TextInput
-            style={styles.stepperInput}
-            keyboardType="numeric"
-            value={String(customCalories)}
-            onChangeText={(txt) => {
-              setIsTargetsTouched(true);
-              setCustomCalories(parseInt(txt, 10) || 0);
-            }}
+
+        {/* Segmented Macro Bar */}
+        <View style={styles.ratioBarContainer}>
+          <View
+            style={[
+              styles.ratioBarSegment,
+              { flex: macroBreakdown.proteinPct, backgroundColor: colors.protein },
+            ]}
           />
-          <Text style={styles.unitText}>kcal</Text>
-          <Pressable
-            style={styles.stepperBtn}
-            onPress={() => {
-              safeHaptics.selection();
-              setIsTargetsTouched(true);
-              setCustomCalories((prev) => prev + 50);
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Increase calories"
-          >
-            <Ionicons name="add" size={18} color={colors.text} />
-          </Pressable>
+          <View
+            style={[
+              styles.ratioBarSegment,
+              { flex: macroBreakdown.carbsPct, backgroundColor: colors.carbs },
+            ]}
+          />
+          <View
+            style={[
+              styles.ratioBarSegment,
+              { flex: macroBreakdown.fatPct, backgroundColor: colors.fat },
+            ]}
+          />
+        </View>
+
+        {/* Macro Ratio Labels */}
+        <View style={styles.ratioLabelsRow}>
+          <View style={styles.ratioLabelItem}>
+            <View style={[styles.ratioDot, { backgroundColor: colors.protein }]} />
+            <Text style={styles.ratioItemText}>
+              Protein {macroBreakdown.proteinPct}% ({customProtein}g)
+            </Text>
+          </View>
+          <View style={styles.ratioLabelItem}>
+            <View style={[styles.ratioDot, { backgroundColor: colors.carbs }]} />
+            <Text style={styles.ratioItemText}>
+              Carbs {macroBreakdown.carbsPct}% ({customCarbs}g)
+            </Text>
+          </View>
+          <View style={styles.ratioLabelItem}>
+            <View style={[styles.ratioDot, { backgroundColor: colors.fat }]} />
+            <Text style={styles.ratioItemText}>
+              Fat {macroBreakdown.fatPct}% ({customFat}g)
+            </Text>
+          </View>
         </View>
       </View>
 
-      {/* Protein */}
-      <View style={styles.adjustRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.adjustLabel}>Protein</Text>
-          <Text style={styles.adjustHint}>
-            {goalType === 'cut' ? '2.0' : '1.8'} g/kg bodyweight
-          </Text>
-        </View>
-        <View style={styles.stepperContainer}>
-          <Pressable
-            style={styles.stepperBtn}
-            onPress={() => {
-              safeHaptics.selection();
-              setIsTargetsTouched(true);
-              setCustomProtein((prev) => Math.max(30, prev - 5));
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Decrease protein"
-          >
-            <Ionicons name="remove" size={18} color={colors.text} />
-          </Pressable>
-          <TextInput
-            style={styles.stepperInput}
-            keyboardType="numeric"
-            value={String(customProtein)}
-            onChangeText={(txt) => {
-              setIsTargetsTouched(true);
-              setCustomProtein(parseInt(txt, 10) || 0);
-            }}
-          />
-          <Text style={styles.unitText}>g</Text>
-          <Pressable
-            style={styles.stepperBtn}
-            onPress={() => {
-              safeHaptics.selection();
-              setIsTargetsTouched(true);
-              setCustomProtein((prev) => prev + 5);
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Increase protein"
-          >
-            <Ionicons name="add" size={18} color={colors.text} />
-          </Pressable>
-        </View>
+      {/* Stepper Adjusters List */}
+      <View style={styles.steppersList}>
+        <TargetStepperRow
+          title="Calories"
+          desc="Overall energy target"
+          iconName="flame-outline"
+          iconColor={colors.primary}
+          iconBg={colors.primaryMuted}
+          value={customCalories}
+          unit="kcal"
+          step={50}
+          min={1000}
+          onValueChange={(val) => {
+            setIsTargetsTouched(true);
+            setCustomCalories(val);
+          }}
+          testIdMinus="onboarding-stepper-cal-minus"
+          testIdPlus="onboarding-stepper-cal-plus"
+          testIdInput="onboarding-stepper-cal-input"
+        />
+
+        <TargetStepperRow
+          title="Protein"
+          desc={`${goalType === 'cut' ? '2.0 g/kg' : '1.8 g/kg'} lean mass protection`}
+          iconName="fitness-outline"
+          iconColor={colors.protein}
+          iconBg={colors.softBlue}
+          value={customProtein}
+          unit="g"
+          step={5}
+          min={30}
+          onValueChange={(val) => {
+            setIsTargetsTouched(true);
+            setCustomProtein(val);
+          }}
+          testIdMinus="onboarding-stepper-pro-minus"
+          testIdPlus="onboarding-stepper-pro-plus"
+          testIdInput="onboarding-stepper-pro-input"
+        />
+
+        <TargetStepperRow
+          title="Carbohydrates"
+          desc="Glycolytic energy & performance"
+          iconName="nutrition-outline"
+          iconColor={colors.carbs}
+          iconBg={colors.softGreen}
+          value={customCarbs}
+          unit="g"
+          step={5}
+          min={20}
+          onValueChange={(val) => {
+            setIsTargetsTouched(true);
+            setCustomCarbs(val);
+          }}
+          testIdMinus="onboarding-stepper-carb-minus"
+          testIdPlus="onboarding-stepper-carb-plus"
+          testIdInput="onboarding-stepper-carb-input"
+        />
+
+        <TargetStepperRow
+          title="Fats"
+          desc="Hormonal synthesis & joints"
+          iconName="water-outline"
+          iconColor={colors.fat}
+          iconBg={colors.softOrange}
+          value={customFat}
+          unit="g"
+          step={5}
+          min={20}
+          onValueChange={(val) => {
+            setIsTargetsTouched(true);
+            setCustomFat(val);
+          }}
+          testIdMinus="onboarding-stepper-fat-minus"
+          testIdPlus="onboarding-stepper-fat-plus"
+          testIdInput="onboarding-stepper-fat-input"
+        />
       </View>
 
-      {/* Carbs */}
-      <View style={styles.adjustRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.adjustLabel}>Carbohydrates</Text>
-          <Text style={styles.adjustHint}>Primary training fuel</Text>
-        </View>
-        <View style={styles.stepperContainer}>
-          <Pressable
-            style={styles.stepperBtn}
-            onPress={() => {
-              safeHaptics.selection();
-              setIsTargetsTouched(true);
-              setCustomCarbs((prev) => Math.max(20, prev - 5));
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Decrease carbohydrates"
-          >
-            <Ionicons name="remove" size={18} color={colors.text} />
-          </Pressable>
-          <TextInput
-            style={styles.stepperInput}
-            keyboardType="numeric"
-            value={String(customCarbs)}
-            onChangeText={(txt) => {
-              setIsTargetsTouched(true);
-              setCustomCarbs(parseInt(txt, 10) || 0);
-            }}
-          />
-          <Text style={styles.unitText}>g</Text>
-          <Pressable
-            style={styles.stepperBtn}
-            onPress={() => {
-              safeHaptics.selection();
-              setIsTargetsTouched(true);
-              setCustomCarbs((prev) => prev + 5);
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Increase carbohydrates"
-          >
-            <Ionicons name="add" size={18} color={colors.text} />
-          </Pressable>
-        </View>
-      </View>
-
-      {/* Fat */}
-      <View style={styles.adjustRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.adjustLabel}>Fats</Text>
-          <Text style={styles.adjustHint}>25% energy for hormonal health</Text>
-        </View>
-        <View style={styles.stepperContainer}>
-          <Pressable
-            style={styles.stepperBtn}
-            onPress={() => {
-              safeHaptics.selection();
-              setIsTargetsTouched(true);
-              setCustomFat((prev) => Math.max(20, prev - 5));
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Decrease fats"
-          >
-            <Ionicons name="remove" size={18} color={colors.text} />
-          </Pressable>
-          <TextInput
-            style={styles.stepperInput}
-            keyboardType="numeric"
-            value={String(customFat)}
-            onChangeText={(txt) => {
-              setIsTargetsTouched(true);
-              setCustomFat(parseInt(txt, 10) || 0);
-            }}
-          />
-          <Text style={styles.unitText}>g</Text>
-          <Pressable
-            style={styles.stepperBtn}
-            onPress={() => {
-              safeHaptics.selection();
-              setIsTargetsTouched(true);
-              setCustomFat((prev) => prev + 5);
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Increase fats"
-          >
-            <Ionicons name="add" size={18} color={colors.text} />
-          </Pressable>
-        </View>
-      </View>
-
+      {/* Review CTA */}
       <Pressable
         style={({ pressed }) => [styles.primaryBtn, pressed && styles.btnPressed]}
         onPress={onNext}
         accessibilityRole="button"
-        accessibilityLabel="Review and confirm"
+        accessibilityLabel="Review and confirm nutrition plan"
+        testID="onboarding-step3-next"
       >
         <Text style={styles.primaryBtnText}>Review & Confirm</Text>
         <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
@@ -282,154 +299,223 @@ export const StepTargetCustomizer: React.FC<StepTargetCustomizerProps> = ({
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     stepWrapper: {
-      paddingBottom: 24,
+      paddingBottom: 28,
     },
     badgeRow: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-      marginBottom: 8,
+      marginBottom: 10,
+    },
+    badgeIconWrapper: {
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      backgroundColor: colors.primaryMuted,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     badgeText: {
       fontSize: 11,
-      fontWeight: '700',
-      letterSpacing: 0.8,
+      fontWeight: '800',
+      letterSpacing: 0.9,
       color: colors.primary,
     },
     stepTitle: {
-      fontSize: 24,
+      fontSize: 26,
       fontWeight: '800',
       color: colors.text,
+      letterSpacing: -0.4,
       marginBottom: 8,
     },
     stepDesc: {
       fontSize: 14,
       lineHeight: 20,
-      color: colors.textMuted,
+      color: colors.textSecondary,
       marginBottom: 20,
     },
-    inputLabel: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: colors.text,
-      marginBottom: 8,
-      textTransform: 'uppercase',
-      letterSpacing: 0.5,
-    },
-    scienceCard: {
+    heroCard: {
       backgroundColor: colors.card,
-      borderRadius: 14,
+      borderRadius: 16,
       borderWidth: 1,
       borderColor: colors.cardBorder,
-      padding: 16,
-      marginBottom: 16,
+      padding: 18,
+      marginBottom: 20,
     },
-    scienceRow: {
+    heroHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    heroSubheader: {
+      fontSize: 11,
+      fontWeight: '800',
+      color: colors.textMuted,
+      letterSpacing: 0.8,
+    },
+    goalTag: {
+      backgroundColor: colors.primaryMuted,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 6,
+    },
+    goalTagText: {
+      fontSize: 10,
+      fontWeight: '800',
+      color: colors.primary,
+      letterSpacing: 0.6,
+    },
+    heroNumberRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: 8,
+      marginTop: 2,
+    },
+    heroBigNumber: {
+      fontSize: 40,
+      fontWeight: '800',
+      color: colors.text,
+      letterSpacing: -1,
+    },
+    heroUnit: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.textSecondary,
+    },
+    heroDeltaText: {
+      fontSize: 13,
+      color: colors.primary,
+      fontWeight: '600',
+      marginTop: 2,
+      marginBottom: 12,
+    },
+    triadDivider: {
+      height: 1,
+      backgroundColor: colors.cardBorder,
+      marginVertical: 12,
+    },
+    triadRow: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-around',
     },
-    scienceStat: {
+    triadItem: {
       alignItems: 'center',
       flex: 1,
     },
-    statDivider: {
+    triadLine: {
       width: 1,
-      height: 36,
+      height: 32,
       backgroundColor: colors.cardBorder,
     },
-    scienceStatLabel: {
-      fontSize: 11,
-      fontWeight: '700',
+    triadLabel: {
+      fontSize: 10,
+      fontWeight: '800',
       color: colors.textMuted,
-      letterSpacing: 0.5,
+      letterSpacing: 0.6,
       marginBottom: 2,
     },
-    scienceStatValue: {
-      fontSize: 18,
+    triadValue: {
+      fontSize: 17,
       fontWeight: '800',
       color: colors.text,
-      marginBottom: 2,
     },
-    scienceStatHint: {
+    triadHint: {
       fontSize: 10,
-      color: colors.textMuted,
-      textAlign: 'center',
+      color: colors.textSecondary,
+      marginTop: 1,
     },
     safetyClampNotice: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 6,
+      gap: 8,
       backgroundColor: 'rgba(245, 158, 11, 0.1)',
+      borderWidth: 1,
+      borderColor: 'rgba(245, 158, 11, 0.25)',
       padding: 10,
-      borderRadius: 8,
-      marginTop: 12,
+      borderRadius: 10,
+      marginTop: 14,
     },
     safetyClampText: {
       flex: 1,
       fontSize: 12,
       lineHeight: 16,
-      color: '#F59E0B',
+      color: colors.warning,
       fontWeight: '600',
     },
-    adjustRow: {
+    macroRatioSection: {
+      marginBottom: 18,
+    },
+    macroRatioHeader: {
       flexDirection: 'row',
-      alignItems: 'center',
       justifyContent: 'space-between',
-      paddingVertical: 12,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.cardBorder,
-    },
-    adjustLabel: {
-      fontSize: 15,
-      fontWeight: '700',
-      color: colors.text,
-    },
-    adjustHint: {
-      fontSize: 12,
-      color: colors.textMuted,
-      marginTop: 2,
-    },
-    stepperContainer: {
-      flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: colors.card,
-      borderWidth: 1,
-      borderColor: colors.cardBorder,
-      borderRadius: 10,
-      overflow: 'hidden',
+      marginBottom: 8,
     },
-    stepperBtn: {
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      backgroundColor: colors.surfaceSubtle,
-    },
-    stepperInput: {
-      fontSize: 15,
+    inputLabel: {
+      fontSize: 12,
       fontWeight: '700',
       color: colors.text,
-      textAlign: 'center',
-      minWidth: 48,
-      paddingHorizontal: 4,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
     },
-    unitText: {
+    resetLink: {
       fontSize: 12,
       fontWeight: '600',
-      color: colors.textMuted,
-      marginRight: 6,
+      color: colors.primary,
+    },
+    ratioBarContainer: {
+      flexDirection: 'row',
+      height: 8,
+      borderRadius: 4,
+      overflow: 'hidden',
+      gap: 2,
+      marginBottom: 8,
+    },
+    ratioBarSegment: {
+      height: '100%',
+      borderRadius: 2,
+    },
+    ratioLabelsRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    ratioLabelItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+    },
+    ratioDot: {
+      width: 7,
+      height: 7,
+      borderRadius: 3.5,
+    },
+    ratioItemText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.textSecondary,
+    },
+    steppersList: {
+      gap: 10,
+      marginBottom: 20,
     },
     primaryBtn: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: colors.primary,
-      borderRadius: 12,
+      borderRadius: 14,
       paddingVertical: 16,
       gap: 8,
-      marginTop: 20,
+      marginTop: 6,
     },
     btnPressed: {
       opacity: 0.88,
+      transform: [{ scale: 0.99 }],
     },
     primaryBtnText: {
       fontSize: 16,

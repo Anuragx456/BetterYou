@@ -20,6 +20,13 @@ import type { ThemeColors } from '../theme/colors';
 import { useThemeColors, useThemedStyles } from '../theme/theme';
 import { safeHaptics } from '../utils/haptics';
 
+const STEP_TITLES = [
+  'Physiological Profile',
+  'Energy & Goal',
+  'Nutrition Targets',
+  'Metabolic Blueprint',
+];
+
 export default function OnboardingScreen() {
   const colors = useThemeColors();
   const styles = useThemedStyles(createStyles);
@@ -58,53 +65,90 @@ export default function OnboardingScreen() {
     handleFinishAndSave,
   } = useOnboarding();
 
+  const canGoBack = currentStep > 0 || isRecalculating || hasCompletedOnboarding;
+
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
-        style={{ flex: 1 }}
+        style={styles.keyboardAvoid}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {/* Header with step progress indicator */}
+        {/* Navigation & Stage Progress Header */}
         <View style={styles.header}>
-          {isRecalculating || hasCompletedOnboarding || currentStep > 0 ? (
-            <Pressable
-              onPress={() => {
-                if (currentStep > 0) {
-                  safeHaptics.selection();
-                  setCurrentStep((prev) => prev - 1);
-                } else {
-                  router.back();
-                }
-              }}
-              style={styles.backBtn}
-              accessibilityRole="button"
-              accessibilityLabel="Go back"
-            >
-              <Ionicons name="arrow-back" size={22} color={colors.text} />
-            </Pressable>
-          ) : (
-            <View style={{ width: 40 }} />
-          )}
+          <View style={styles.navRow}>
+            {canGoBack ? (
+              <Pressable
+                onPress={() => {
+                  if (currentStep > 0) {
+                    safeHaptics.selection();
+                    setCurrentStep((prev) => prev - 1);
+                  } else {
+                    router.back();
+                  }
+                }}
+                style={styles.navBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
+                testID="onboarding-back-btn"
+              >
+                <Ionicons name="arrow-back" size={20} color={colors.text} />
+              </Pressable>
+            ) : (
+              <View style={styles.navBtnPlaceholder} />
+            )}
 
-          <View style={styles.stepIndicatorContainer}>
-            {[0, 1, 2, 3].map((stepIdx) => (
-              <View
-                key={stepIdx}
-                style={[
-                  styles.stepBar,
-                  stepIdx <= currentStep ? styles.stepBarActive : styles.stepBarInactive,
-                ]}
-              />
-            ))}
+            {/* Stage Pill Indicator */}
+            <View style={styles.stagePill}>
+              <Text style={styles.stagePillText}>
+                STEP {currentStep + 1} OF 4 • {STEP_TITLES[currentStep].toUpperCase()}
+              </Text>
+            </View>
+
+            {/* Skip or Placeholder */}
+            {!isRecalculating && !hasCompletedOnboarding ? (
+              <Pressable
+                onPress={() => {
+                  safeHaptics.impactLight();
+                  handleFinishAndSave();
+                }}
+                style={styles.skipBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Skip"
+                testID="onboarding-skip-btn"
+              >
+                <Text style={styles.skipBtnText}>Skip</Text>
+              </Pressable>
+            ) : (
+              <View style={styles.navBtnPlaceholder} />
+            )}
           </View>
 
-          <Text style={styles.stepLabel}>Step {currentStep + 1} of 4</Text>
+          {/* Segmented Step Progress Bar */}
+          <View style={styles.stepTrack}>
+            {[0, 1, 2, 3].map((stepIdx) => {
+              const isPast = stepIdx < currentStep;
+              const isCurrent = stepIdx === currentStep;
+
+              return (
+                <View
+                  key={stepIdx}
+                  style={[
+                    styles.stepSegment,
+                    isPast && styles.stepSegmentPast,
+                    isCurrent && styles.stepSegmentCurrent,
+                  ]}
+                />
+              );
+            })}
+          </View>
         </View>
 
+        {/* Step Body */}
         <ScrollView
           style={styles.scrollContent}
           contentContainerStyle={styles.scrollContainer}
           keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
           {currentStep === 0 && (
             <StepBasics
@@ -176,50 +220,82 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
       backgroundColor: colors.background,
     },
+    keyboardAvoid: {
+      flex: 1,
+    },
     header: {
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      paddingBottom: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.cardBorder,
+      backgroundColor: colors.background,
+    },
+    navRow: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingHorizontal: 16,
-      paddingVertical: 12,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.cardBorder,
+      marginBottom: 12,
     },
-    backBtn: {
-      width: 40,
-      height: 40,
+    navBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: colors.surfaceSubtle,
       alignItems: 'center',
       justifyContent: 'center',
-      borderRadius: 20,
     },
-    stepIndicatorContainer: {
-      flex: 1,
+    navBtnPlaceholder: {
+      width: 36,
+      height: 36,
+    },
+    stagePill: {
+      backgroundColor: colors.surfaceSubtle,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 8,
+    },
+    stagePillText: {
+      fontSize: 10,
+      fontWeight: '800',
+      color: colors.textSecondary,
+      letterSpacing: 0.8,
+    },
+    skipBtn: {
+      paddingHorizontal: 8,
+      paddingVertical: 6,
+    },
+    skipBtnText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.textMuted,
+    },
+    stepTrack: {
       flexDirection: 'row',
       gap: 6,
-      paddingHorizontal: 12,
+      paddingHorizontal: 2,
     },
-    stepBar: {
+    stepSegment: {
       flex: 1,
       height: 4,
       borderRadius: 2,
-    },
-    stepBarActive: {
-      backgroundColor: colors.primary,
-    },
-    stepBarInactive: {
       backgroundColor: colors.cardBorder,
     },
-    stepLabel: {
-      color: colors.textMuted,
-      fontSize: 12,
-      fontWeight: '600',
+    stepSegmentPast: {
+      backgroundColor: colors.primary,
+      opacity: 0.6,
+    },
+    stepSegmentCurrent: {
+      backgroundColor: colors.primary,
+      opacity: 1,
     },
     scrollContent: {
       flex: 1,
     },
     scrollContainer: {
-      padding: 20,
-      paddingBottom: 40,
+      paddingHorizontal: 20,
+      paddingTop: 20,
+      paddingBottom: 48,
     },
   });
 }
